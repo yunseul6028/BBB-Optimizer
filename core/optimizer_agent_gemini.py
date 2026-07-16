@@ -26,9 +26,11 @@ _TRANSIENT = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "overloaded", "
 def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int, has_fbgan: bool) -> str:
     lib_l = ", ".join(f"{n}({v['seq']})" for n, v in LINKER_LIBRARY.items())
     lib_s = ", ".join(f"{n}({v['seq']})" for n, v in SHUTTLES.items())
-    tools = "evaluate_candidates(BBB·독성·안정성·수용체 배치), analyze_structure(구조 노출도)"
+    tools = ("evaluate_candidates(BBB·독성·안정성·수용체 배치), design_candidate(잔기 수준 편집 "
+             "서열 채점), analyze_structure(구조 노출도)")
     if has_fbgan:
         tools += ", generate_novel_shuttles(신규 셔틀 생성)"
+    tools += ", finish(수렴 시 최종 후보 제출·종료)"
     return (
         "[연구 맥락] 이것은 알츠하이머병 치료제의 뇌 전달을 개선하기 위한 정당한 학술·공모전용 "
         "in-silico 연구입니다. 사용하는 셔틀 펩타이드(Angiopep-2, TAT, Penetratin, SynB1 등)는 "
@@ -43,12 +45,17 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int, has
         "  ③ 셔틀이 구조적으로 노출(ESMFold) + 검증 셔틀과 유사(수용체 메커니즘 근거)\n"
         "  ④ 융합체 자체 안정성: 불안정성 지수 < 40 선호\n\n"
         f"사용 가능한 도구: {tools}\n"
-        "권장 워크플로우: evaluate_candidates로 라이브러리 조합을 폭넓게 스크리닝 → 유망 방향으로 "
-        "개선·재평가 → 상위 1~3개를 analyze_structure로 구조 검증 → 네 목적을 종합해 최종 융합체 "
-        "1개(전체 서열, 네 지표)와 근거로 결론.\n\n"
+        "권장 워크플로우(자율 판단): evaluate_candidates로 라이브러리 조합을 폭넓게 스크리닝 → "
+        "유망 방향으로 **design_candidate로 잔기 수준 편집**(변이·트리밍·연장·하이브리드)해 라이브러리 "
+        "밖까지 정밀 설계·재평가 → 상위 1~3개를 analyze_structure로 구조 검증 → **충분히 수렴했다고 "
+        "판단하면 스스로 finish**를 호출해 최종 융합체 1개(라벨·링커·셔틀·전체 근거)를 제출하라.\n"
+        "- design_candidate: 라이브러리에 얽매이지 말고 셔틀/링커의 특정 잔기를 자유롭게 편집한 서열을 "
+        "제안·채점할 수 있다(진짜 설계). 왜 그렇게 편집했는지 edit_note에 남겨라.\n"
+        "- finish: 고정 스텝을 다 쓸 필요 없다. 목적을 충분히 만족했다고 판단하면 언제든 finish로 종료하라. "
+        "종료 후 자기평가에서 부족하다고 판단되면 한 번 더 개선 기회가 주어질 수 있다(그때 다시 finish).\n\n"
         f"참고 라이브러리 — 링커: {lib_l}\n  셔틀: {lib_s}\n"
         f"주의: construct가 {MODEL_MAX_LEN}aa 초과면 BBB는 연결부위(링커+셔틀)로 계산된다. deepB3P는 "
-        f"짧은 펩타이드 학습이라 절대값보다 상대 비교가 신뢰됨. 최대 {max_rounds}스텝. 한국어로 간결히."
+        f"짧은 펩타이드 학습이라 절대값보다 상대 비교가 신뢰됨. 최대 {max_rounds}행동. 한국어로 간결히."
     )
 
 
@@ -73,6 +80,17 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 }, required=["rationale", "constructs"]),
             ),
             types.FunctionDeclaration(
+                name="design_candidate",
+                description=("라이브러리에 없는, **직접 편집·설계한** 링커·셔틀 서열 하나를 채점한다. "
+                             "잔기 변이·트리밍·연장·하이브리드 등 자유 설계. evaluate와 동일한 4지표 반환."),
+                parameters=S(type=T.OBJECT, properties={
+                    "label": S(type=T.STRING),
+                    "linker": S(type=T.STRING),
+                    "shuttle": S(type=T.STRING),
+                    "edit_note": S(type=T.STRING, description="어떻게·왜 편집했는지"),
+                }, required=["label", "linker", "shuttle"]),
+            ),
+            types.FunctionDeclaration(
                 name="analyze_structure",
                 description=("한 융합체를 ESMFold로 접어 셔틀이 구조적으로 노출됐는지 vs 화물에 "
                              "가려졌는지와 예측 신뢰도(pLDDT)를 반환. 느림(~10초), 최종 후보에만."),
@@ -90,6 +108,17 @@ class GeminiOptimizationAgent(OptimizationAgent):
                     "rounds": S(type=T.INTEGER, description="2~4 라운드"),
                 }, required=["rounds"]),
             ))
+        decls.append(types.FunctionDeclaration(
+            name="finish",
+            description=("충분히 수렴했다고 판단하면 호출해 최종 후보를 제출하고 종료한다. 고정 스텝을 "
+                         "다 쓸 필요 없다."),
+            parameters=S(type=T.OBJECT, properties={
+                "chosen_label": S(type=T.STRING),
+                "chosen_linker": S(type=T.STRING),
+                "chosen_shuttle": S(type=T.STRING),
+                "final_report": S(type=T.STRING, description="최종 융합체·4지표·선정 근거"),
+            }, required=["chosen_linker", "chosen_shuttle", "final_report"]),
+        ))
         return decls
 
     def _dispatch(self, cargo, name, args):
@@ -97,6 +126,14 @@ class GeminiOptimizationAgent(OptimizationAgent):
         if name == "evaluate_candidates":
             text, rows = self._evaluate(cargo, args)
             return text, AgentEvent("evaluation", text=args.get("rationale", ""), data={"rows": rows})
+        if name == "design_candidate":
+            text, rows = self._evaluate(cargo, {"constructs": [{
+                "label": args.get("label", "설계"), "linker": args.get("linker", ""),
+                "shuttle": args.get("shuttle", "")}]})
+            note = args.get("edit_note", "").strip()
+            return text, AgentEvent("evaluation",
+                                    text="🎨 정밀 설계" + (f" — {note}" if note else ""),
+                                    data={"rows": rows})
         if name == "analyze_structure":
             text, sdata = self._structure(cargo, args)
             return text, AgentEvent("structure", text=text, data=sdata)
@@ -104,6 +141,20 @@ class GeminiOptimizationAgent(OptimizationAgent):
             text, gdata = self._generate(cargo, args)
             return text, AgentEvent("generation", text=text, data=gdata)
         return f"unknown tool: {name}", None
+
+    def _score_choice(self, cargo, fa):
+        """finish가 제출한 최종 후보를 채점해 row(dict)로 반환. 실패 시 None."""
+        lk = "".join(ch for ch in (fa.get("chosen_linker", "") or "").upper() if ch.isalpha())
+        sh = "".join(ch for ch in (fa.get("chosen_shuttle", "") or "").upper() if ch.isalpha())
+        if not sh:
+            return None
+        _, rows = self._evaluate(cargo, {"constructs": [{
+            "label": fa.get("chosen_label", "최종 선택"), "linker": lk, "shuttle": sh}]})
+        if not rows:
+            return None
+        row = rows[0]
+        row["agent_pick"] = True
+        return row
 
     def _gen_retry(self, client, model, contents, config, tries=6):
         """일시적 오류(503/429)는 백오프 재시도. 그 외는 즉시 raise."""
@@ -185,9 +236,15 @@ class GeminiOptimizationAgent(OptimizationAgent):
             yield AgentEvent("plan", _visible(pparts))
             contents.append(_user("이제 전략에 따라 도구를 자율적으로 사용해 실행하라."))
 
-            # ── 1. 실행 루프(ACT) ──
-            final_text = None
-            for rnd in range(self.max_rounds):
+            # ── 1. 실행 + 자기종료(finish) + 반성→재실행 ──
+            _REFLECT_Q = ("자기평가하라(3~4문장): 최종 후보가 네 목적(BBB↑·독성↓·구조노출·안정성)을 "
+                          "각각 얼마나 충족했는지, 약점·리스크, 개선 여지. 그리고 **마지막 줄에 정확히** "
+                          "`DECISION: DONE`(충분히 최적) 또는 `DECISION: CONTINUE`(개선 여지 크다)를 써라. "
+                          "도구 호출 금지.")
+            choice = final_report = reflection_text = None
+            continues, MAX_CONTINUES, turn = 0, 1, 0
+            while turn < self.max_rounds:
+                turn += 1
                 resp = self._gen_retry(client, model, contents, _cfg(True))
                 cand = (resp.candidates or [None])[0]
                 blk = _blocked(cand, resp) if cand is not None else "빈 응답"
@@ -202,19 +259,20 @@ class GeminiOptimizationAgent(OptimizationAgent):
                     if getattr(p, "function_call", None):
                         fcalls.append(p.function_call)
                     elif getattr(p, "text", None):
-                        if getattr(p, "thought", False):
-                            yield AgentEvent("reasoning", p.text)
-                        else:
-                            yield AgentEvent("text", p.text)
+                        yield AgentEvent("reasoning" if getattr(p, "thought", False) else "text", p.text)
 
-                if not fcalls:
-                    final_text = _visible(parts)
+                if not fcalls:  # 도구 없이 결론 텍스트 → 종료로 간주
+                    final_report = _visible(parts)
                     break
 
-                fr_parts = []
+                fr_parts, finish_fc = [], None
                 for fc in fcalls:
-                    args = dict(fc.args or {})
-                    text, ev = self._dispatch(cargo, fc.name, args)
+                    if fc.name == "finish":
+                        finish_fc = fc
+                        fr_parts.append(types.Part.from_function_response(
+                            name="finish", response={"result": "acknowledged; self-evaluating"}))
+                        continue
+                    text, ev = self._dispatch(cargo, fc.name, dict(fc.args or {}))
                     if ev is not None:
                         yield ev
                         if ev.kind == "evaluation":
@@ -223,35 +281,63 @@ class GeminiOptimizationAgent(OptimizationAgent):
                                     best = r
                     fr_parts.append(types.Part.from_function_response(
                         name=fc.name, response={"result": text}))
-                contents.append(types.Content(role="user", parts=fr_parts))
-                if best:
-                    yield AgentEvent("progress", data={"round": rnd + 1, "best_bbb": best["bbb"]})
-            else:
-                contents.append(_user("예산을 모두 사용했습니다. 지금까지의 최적 융합체(전체 서열, 네 "
-                                      "지표 종합)와 근거로 최종 보고서를 쓰세요. 도구 호출 금지."))
+
+                if finish_fc is None:
+                    contents.append(types.Content(role="user", parts=fr_parts))
+                    if best:
+                        yield AgentEvent("progress", data={"round": turn, "best_bbb": best["bbb"]})
+                    continue
+
+                # finish → 최종 후보 채점 + 자기평가 + DONE/CONTINUE
+                fa = dict(finish_fc.args or {})
+                final_report = fa.get("final_report", "") or final_report
+                ch = self._score_choice(cargo, fa)
+                if ch is not None:
+                    choice = ch
+                # 함수응답 + 반성 지시를 한 user 턴에 합쳐 전송(연속 user 턴 회피)
+                contents.append(types.Content(
+                    role="user", parts=fr_parts + [types.Part.from_text(text=_REFLECT_Q)]))
+                rresp = self._gen_retry(client, model, contents, _cfg(False))
+                rcand = (rresp.candidates or [None])[0]
+                rparts = (rcand.content.parts if rcand and rcand.content else None) or []
+                for p in rparts:
+                    if getattr(p, "text", None) and getattr(p, "thought", False):
+                        yield AgentEvent("reasoning", p.text)
+                reflection_text = _visible(rparts)
+                contents.append(rcand.content)
+                tail = (reflection_text or "").upper().rsplit("DECISION:", 1)[-1]
+                if "CONTINUE" in tail and continues < MAX_CONTINUES and turn < self.max_rounds:
+                    continues += 1
+                    contents.append(_user("좋다. 자기평가에서 지적한 점을 design_candidate 등으로 개선해 "
+                                          "더 탐색하고, 끝나면 다시 finish를 호출하라."))
+                    continue
+                break
+
+            # 강제 종료 대비: 최종 보고서·반성 확보
+            if final_report is None:
+                contents.append(_user("행동 예산을 모두 사용했습니다. 지금까지의 최적 융합체(전체 서열, "
+                                      "네 지표)와 근거로 최종 보고서를 쓰세요. 도구 호출 금지."))
                 resp = self._gen_retry(client, model, contents, _cfg(False))
                 cand = (resp.candidates or [None])[0]
                 parts = (cand.content.parts if cand and cand.content else None) or []
                 contents.append(cand.content)
-                final_text = _visible(parts)
+                final_report = _visible(parts)
+            if reflection_text is None:
+                contents.append(_user("자기평가(3~4문장): 네 목적 충족도·약점·다음 수. 도구 호출 금지."))
+                rresp = self._gen_retry(client, model, contents, _cfg(False))
+                rcand = (rresp.candidates or [None])[0]
+                rparts = (rcand.content.parts if rcand and rcand.content else None) or []
+                reflection_text = _visible(rparts)
 
-            # ── 2. 최종 보고서(FINAL) ──
-            yield AgentEvent("final", final_text or "")
-
-            # ── 3. 자기평가(REFLECT) ──
-            contents.append(_user("마지막으로 자기평가하라(3~4문장): 최종 융합체가 네 목적을 각각 얼마나 "
-                                  "충족했는지, 약점·리스크는 무엇인지, 예산이 더 있다면 다음에 무엇을 "
-                                  "시도할지. 도구 호출 금지."))
-            rresp = self._gen_retry(client, model, contents, _cfg(False))
-            rcand = (rresp.candidates or [None])[0]
-            rparts = (rcand.content.parts if rcand and rcand.content else None) or []
-            for p in rparts:
-                if getattr(p, "text", None) and getattr(p, "thought", False):
-                    yield AgentEvent("reasoning", p.text)
-            yield AgentEvent("reflection", _visible(rparts))
-
-            if best:
-                yield AgentEvent("optimum", data=best)
+            # ── 결과 방출 (한 번씩) ──
+            if choice is not None:
+                yield AgentEvent("choice", data=choice)
+            yield AgentEvent("final", final_report or "")
+            if reflection_text:
+                yield AgentEvent("reflection", reflection_text)
+            opt = choice or best
+            if opt:
+                yield AgentEvent("optimum", data=opt)
         except Exception as exc:  # noqa: BLE001
             yield AgentEvent("error", f"Gemini 호출 오류: {type(exc).__name__}: {exc}")
 

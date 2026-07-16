@@ -233,7 +233,8 @@ def _emit_agent_event(ev):
 
 
 def _extract_podium(events, n=3):
-    """평가 이벤트 전체에서 비독성 후보를 모아 BBB 순 상위 n개(중복 제거)."""
+    """상위 후보 n개. 에이전트가 finish로 고른 최종 선택(choice)이 있으면 1위로,
+    나머지는 비독성 후보 BBB 순으로 채운다(중복 제거)."""
     seen = {}
     for e in events:
         if e.kind == "evaluation":
@@ -243,7 +244,13 @@ def _extract_podium(events, n=3):
                 seq = r["sequence"]
                 if seq not in seen or r["bbb"] > seen[seq]["bbb"]:
                     seen[seq] = r
-    return sorted(seen.values(), key=lambda r: r["bbb"], reverse=True)[:n]
+    ranked = sorted(seen.values(), key=lambda r: r["bbb"], reverse=True)
+    choice = next((e.data for e in events if e.kind == "choice"), None)
+    if choice:
+        cseq = choice.get("sequence")
+        rest = [r for r in ranked if r.get("sequence") != cseq]
+        return [choice] + rest[:n - 1]
+    return ranked[:n]
 
 
 def _render_candidate_analysis(cargo, cand, idx):
@@ -290,15 +297,18 @@ def _render_agent_summary(events, cargo):
         st.line_chart({"best BBB": [p["best_bbb"] for p in progress]},
                       x_label="라운드", y_label="BBB 투과 점수")
     if podium:
-        st.markdown("##### 🏆 상위 후보 (비독성 · BBB 투과 점수 순)")
-        st.caption("에이전트가 선정한 최적 후보와 차순위입니다. 각 카드에서 **구조 분석**을 "
-                   "원할 때만 실행할 수 있어요.")
+        st.markdown("##### 🏆 상위 후보")
+        st.caption("**🎯 에이전트가 스스로 finish로 고른 최종 선택**이 1위이고, 나머지는 BBB 순 "
+                   "차순위입니다. 각 카드에서 **구조 분석**을 원할 때만 실행할 수 있어요.")
         cols = st.columns(len(podium))
         medals = ["🥇", "🥈", "🥉"]
         for i, cand in enumerate(podium):
             with cols[i]:
                 with st.container(border=True, key=f"best-card-{i}"):
-                    st.markdown(f"### {medals[i]}  {i + 1}위")
+                    if cand.get("agent_pick"):
+                        st.markdown("### 🎯 에이전트 최종 선택")
+                    else:
+                        st.markdown(f"### {medals[i]}  {i + 1}위")
                     st.code(cand["sequence"], language="text")
                     m1, m2 = st.columns(2)
                     m1.metric("🟢 BBB 투과 점수", f"{cand['bbb']*100:.0f}")
