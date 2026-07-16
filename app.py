@@ -71,9 +71,10 @@ st.caption(
     f"{'' if (settings.use_gemini_agent or settings.use_llm_agent) else ' (API 키 필요)'}"
 )
 st.caption(
-    "**🤖 자율 설계 에이전트**가 메인입니다 — LLM(**기본 Gemini**, Claude 선택 가능)이 "
-    "**평가(BBB·독성·수용체·안정성) · 구조(ESMFold) · 생성(FBGAN)** 도구를 스스로 골라 써가며 "
-    "최종 융합체를 설계합니다. 각 도구는 '개별 도구' 패널에서 수동으로도 실행할 수 있어요."
+    "**🤖 멀티 에이전트 자율 설계**가 메인입니다 — **설계(Designer) 에이전트**가 "
+    "**평가(BBB·독성·수용체·안정성) · 구조(ESMFold) · 생성(FBGAN) · 정밀 설계** 도구를 스스로 골라 "
+    "써가며 후보를 만들고, **심사(Critic) 에이전트**가 이를 적대적으로 검증(승인/개선요구)합니다. "
+    "(기본 Gemini / Claude 선택 가능 · 각 도구는 '개별 도구' 패널에서 수동 실행도 가능)"
 )
 st.caption(
     "※ **BBB 투과 점수**는 deepB3P 예측 확률(0~100)로 **실제 물리적 투과율이 아닙니다** — "
@@ -191,6 +192,11 @@ def _emit_agent_event(ev):
         with st.container(border=True):
             st.markdown("🔎 **[자기평가] 에이전트 반성**")
             st.markdown(ev.text)
+    elif ev.kind == "critique":
+        badge = "✅ 승인(APPROVE)" if ev.data.get("approve") else "🔴 개선 요구(REVISE)"
+        with st.container(border=True):
+            st.markdown(f"🧑‍⚖️ **[심사 에이전트] 적대적 검증 — {badge}**")
+            st.markdown(ev.text)
     elif ev.kind == "reasoning":
         with st.container(border=True):
             st.caption("🧠 " + ev.text)
@@ -288,6 +294,7 @@ def _render_agent_summary(events, cargo):
     plan = next((e.text for e in events if e.kind == "plan"), None)
     final = next((e.text for e in events if e.kind == "final"), None)
     reflection = next((e.text for e in events if e.kind == "reflection"), None)
+    critique = next((e for e in events if e.kind == "critique"), None)
     if plan:
         with st.container(border=True):
             st.markdown("### 🗺️ 에이전트 전략 (계획)")
@@ -323,8 +330,13 @@ def _render_agent_summary(events, cargo):
         st.warning("독성 임계값을 통과한 후보가 없습니다. 스텝 수를 늘리거나 화물을 바꿔 다시 시도해 보세요.")
     if final:
         with st.container(border=True):
-            st.markdown("### 🏁 최적화 보고서")
+            st.markdown("### 🏁 설계 에이전트 — 최종 보고서")
             st.markdown(final)
+    if critique is not None:
+        badge = "✅ 승인 (APPROVE)" if critique.data.get("approve") else "🔴 개선 요구 (REVISE)"
+        with st.container(border=True):
+            st.markdown(f"### 🧑‍⚖️ 심사 에이전트 — 적대적 검증  ·  {badge}")
+            st.markdown(critique.text)
     if reflection:
         with st.container(border=True):
             st.markdown("### 🔎 에이전트 자기평가 (반성)")
@@ -624,7 +636,7 @@ else:
         _render_agent_summary(_agent["events"], _agent["cargo"])
         with st.expander("🔍 중간 과정 기록 — 스텝별 추론·평가·검증 다시 보기"):
             for ev in _agent["events"]:
-                if ev.kind not in ("plan", "reflection"):  # 계획·자기평가는 위 요약에 이미 표시
+                if ev.kind not in ("plan", "reflection", "critique"):  # 위 요약에 이미 표시
                     _emit_agent_event(ev)
         st.caption("⚗️ 최적화 판단은 deepB3P·ToxinPred3 예측 기반입니다. 실제 합성·검증 필요.")
     elif fb:

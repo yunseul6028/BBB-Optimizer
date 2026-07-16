@@ -36,8 +36,9 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int, has
         "in-silico 연구입니다. 사용하는 셔틀 펩타이드(Angiopep-2, TAT, Penetratin, SynB1 등)는 "
         "학계·임상에서 공개 발표된 뇌 전달 도구이며, 독성 예측은 안전한 후보만 남기기 위한 안전성 "
         "스크리닝입니다.\n\n"
-        "당신은 **도구를 자율적으로 오케스트레이션하는 in-silico 신약설계 에이전트**입니다. "
-        "뇌혈관장벽(BBB)을 통과하는 항체-셔틀 융합 단백질을 설계합니다.\n\n"
+        "당신은 멀티 에이전트 신약설계 시스템의 **설계(Designer) 에이전트**입니다 — 도구를 자율적으로 "
+        "오케스트레이션해 뇌혈관장벽(BBB)을 통과하는 항체-셔틀 융합 단백질을 설계하고, 그 결과는 "
+        "독립 **심사(Critic) 에이전트**의 적대적 검증을 거칩니다.\n\n"
         f"고정 화물(cargo): {cargo}\n융합체 = cargo + linker + shuttle.\n\n"
         "다중 목적 (모두 만족하는 최종 융합체 하나로 수렴):\n"
         "  ① BBB 투과 점수(deepB3P 예측확률 0~1, 실제 투과율 아님·상대비교용) 최대화\n"
@@ -51,8 +52,9 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int, has
         "판단하면 스스로 finish**를 호출해 최종 융합체 1개(라벨·링커·셔틀·전체 근거)를 제출하라.\n"
         "- design_candidate: 라이브러리에 얽매이지 말고 셔틀/링커의 특정 잔기를 자유롭게 편집한 서열을 "
         "제안·채점할 수 있다(진짜 설계). 왜 그렇게 편집했는지 edit_note에 남겨라.\n"
-        "- finish: 고정 스텝을 다 쓸 필요 없다. 목적을 충분히 만족했다고 판단하면 언제든 finish로 종료하라. "
-        "종료 후 자기평가에서 부족하다고 판단되면 한 번 더 개선 기회가 주어질 수 있다(그때 다시 finish).\n\n"
+        "- finish: 고정 스텝을 다 쓸 필요 없다. 목적을 충분히 만족했다고 판단하면 언제든 finish로 최종 "
+        "후보를 제출하라. 제출하면 **독립 심사(비평) 에이전트가 적대적으로 검증**한다 — 심사가 REVISE(개선 "
+        "요구)를 내면 그 지적을 반영해 개선하고 다시 finish하라. APPROVE(승인)가 나오면 확정된다.\n\n"
         f"참고 라이브러리 — 링커: {lib_l}\n  셔틀: {lib_s}\n"
         f"주의: construct가 {MODEL_MAX_LEN}aa 초과면 BBB는 연결부위(링커+셔틀)로 계산된다. deepB3P는 "
         f"짧은 펩타이드 학습이라 절대값보다 상대 비교가 신뢰됨. 최대 {max_rounds}행동. 한국어로 간결히."
@@ -156,6 +158,45 @@ class GeminiOptimizationAgent(OptimizationAgent):
         row["agent_pick"] = True
         return row
 
+    # ---- 심사(비평) 에이전트 — 독립 페르소나·독립 컨텍스트 ----------------
+    def _critic_prompt(self):
+        thr = self.settings.toxicity_threshold
+        return (
+            "당신은 신약 후보를 **적대적으로 검증하는 안전·엄밀성 심사 에이전트**입니다. 설계 에이전트가 "
+            "제안한 최종 BBB 융합체 후보를 의심하고 반박하세요. 관대하지 마세요.\n"
+            "날카롭게 따질 것:\n"
+            f"① 독성 마진 — 임계값 {thr:.2f} 대비 실제로 안전한가, 아슬아슬한가.\n"
+            "② 안정성 — 불안정성 지수가 40 미만이 이상적. 높으면 응집·분해 위험을 지적.\n"
+            "③ BBB 점수 신뢰도 — deepB3P는 짧은 펩타이드로 학습 → 긴 융합체의 절대값은 신뢰도가 낮다. "
+            "상대 비교로만 해석했는지.\n"
+            "④ 구조 근거 — 셔틀이 표면 노출됐다는 ESMFold 검증을 실제로 거쳤는가.\n"
+            "⑤ 개발성 리스크 — 과도한 Arg/Lys(양이온)는 비특이 결합·독성·응집 위험. 서열 liability.\n"
+            "⑥ 설계의 실질 — 라이브러리의 뻔한 선택인가, 근거 있는 정밀 설계인가.\n"
+            "3~5문장으로 핵심 반박을 쓰고, **마지막 줄에 정확히** `VERDICT: APPROVE`(승인) 또는 "
+            "`VERDICT: REVISE`(개선 요구)를 써라. 애매하면 REVISE."
+        )
+
+    def _critic_review(self, client, model, types, cargo, choice):
+        """최종 후보를 별도 컨텍스트로 적대적 검증. 반환 (approve: bool, critique_text: str)."""
+        m = (f"화물={cargo}, 링커={choice.get('linker') or '—'}, 셔틀={choice.get('shuttle')}, "
+             f"전체서열={choice.get('sequence')}\n"
+             f"지표 — BBB점수={choice['bbb']:.3f}(0~1), 독성={choice['tox']:.3f}, "
+             f"불안정성지수={choice['instability']}, "
+             f"수용체유사도({choice.get('bind_ref')})={choice.get('bind_score', 0):.2f}, "
+             f"독성판정={'탈락' if choice['toxic'] else '통과'}")
+        cfg = types.GenerateContentConfig(
+            system_instruction=self._critic_prompt(), temperature=1.0,
+            thinking_config=types.ThinkingConfig(include_thoughts=False))
+        contents = [types.Content(role="user", parts=[types.Part.from_text(
+            text="설계 에이전트가 제출한 최종 후보다. 적대적으로 검증하고 VERDICT를 내려라.\n" + m)])]
+        resp = self._gen_retry(client, model, contents, cfg)
+        cand = (resp.candidates or [None])[0]
+        parts = (cand.content.parts if cand and cand.content else None) or []
+        text = "\n\n".join(p.text for p in parts
+                           if getattr(p, "text", None) and not getattr(p, "thought", False))
+        approve = "APPROVE" in (text or "").upper().rsplit("VERDICT:", 1)[-1]
+        return approve, text
+
     def _gen_retry(self, client, model, contents, config, tries=6):
         """일시적 오류(503/429)는 백오프 재시도. 그 외는 즉시 raise."""
         last = None
@@ -236,13 +277,10 @@ class GeminiOptimizationAgent(OptimizationAgent):
             yield AgentEvent("plan", _visible(pparts))
             contents.append(_user("이제 전략에 따라 도구를 자율적으로 사용해 실행하라."))
 
-            # ── 1. 실행 + 자기종료(finish) + 반성→재실행 ──
-            _REFLECT_Q = ("자기평가하라(3~4문장): 최종 후보가 네 목적(BBB↑·독성↓·구조노출·안정성)을 "
-                          "각각 얼마나 충족했는지, 약점·리스크, 개선 여지. 그리고 **마지막 줄에 정확히** "
-                          "`DECISION: DONE`(충분히 최적) 또는 `DECISION: CONTINUE`(개선 여지 크다)를 써라. "
-                          "도구 호출 금지.")
-            choice = final_report = reflection_text = None
-            continues, MAX_CONTINUES, turn = 0, 1, 0
+            # ── 1. 설계자 실행 + 자기종료(finish) → 심사(Critic) → REVISE 시 재설계 ──
+            choice = final_report = critique_text = None
+            approve = True
+            critiques, MAX_CRITIQUES, turn = 0, 1, 0
             while turn < self.max_rounds:
                 turn += 1
                 resp = self._gen_retry(client, model, contents, _cfg(True))
@@ -288,32 +326,29 @@ class GeminiOptimizationAgent(OptimizationAgent):
                         yield AgentEvent("progress", data={"round": turn, "best_bbb": best["bbb"]})
                     continue
 
-                # finish → 최종 후보 채점 + 자기평가 + DONE/CONTINUE
+                # finish → 최종 후보 채점 → 독립 심사(Critic) → APPROVE/REVISE
                 fa = dict(finish_fc.args or {})
                 final_report = fa.get("final_report", "") or final_report
                 ch = self._score_choice(cargo, fa)
                 if ch is not None:
                     choice = ch
-                # 함수응답 + 반성 지시를 한 user 턴에 합쳐 전송(연속 user 턴 회피)
-                contents.append(types.Content(
-                    role="user", parts=fr_parts + [types.Part.from_text(text=_REFLECT_Q)]))
-                rresp = self._gen_retry(client, model, contents, _cfg(False))
-                rcand = (rresp.candidates or [None])[0]
-                rparts = (rcand.content.parts if rcand and rcand.content else None) or []
-                for p in rparts:
-                    if getattr(p, "text", None) and getattr(p, "thought", False):
-                        yield AgentEvent("reasoning", p.text)
-                reflection_text = _visible(rparts)
-                contents.append(rcand.content)
-                tail = (reflection_text or "").upper().rsplit("DECISION:", 1)[-1]
-                if "CONTINUE" in tail and continues < MAX_CONTINUES and turn < self.max_rounds:
-                    continues += 1
-                    contents.append(_user("좋다. 자기평가에서 지적한 점을 design_candidate 등으로 개선해 "
-                                          "더 탐색하고, 끝나면 다시 finish를 호출하라."))
+                if choice is not None:
+                    approve, critique_text = self._critic_review(client, model, types, cargo, choice)
+                else:
+                    approve, critique_text = True, "후보 채점 실패로 심사를 생략합니다."
+                yield AgentEvent("progress", data={"round": turn,
+                                                   "best_bbb": (choice or best or {}).get("bbb", 0)})
+                if (not approve) and critiques < MAX_CRITIQUES and turn < self.max_rounds:
+                    critiques += 1
+                    contents.append(types.Content(role="user", parts=fr_parts + [types.Part.from_text(
+                        text="독립 **심사 에이전트가 REVISE(개선 요구)**를 냈다. 심사 반박:\n"
+                             f"{critique_text}\n이 지적을 반영해 design_candidate 등으로 후보를 개선하고, "
+                             "끝나면 다시 finish를 호출하라.")]))
                     continue
+                contents.append(types.Content(role="user", parts=fr_parts))  # 함수응답 기록 후 종료
                 break
 
-            # 강제 종료 대비: 최종 보고서·반성 확보
+            # 강제 종료 대비: 최종 보고서·심사 확보
             if final_report is None:
                 contents.append(_user("행동 예산을 모두 사용했습니다. 지금까지의 최적 융합체(전체 서열, "
                                       "네 지표)와 근거로 최종 보고서를 쓰세요. 도구 호출 금지."))
@@ -322,22 +357,18 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 parts = (cand.content.parts if cand and cand.content else None) or []
                 contents.append(cand.content)
                 final_report = _visible(parts)
-            if reflection_text is None:
-                contents.append(_user("자기평가(3~4문장): 네 목적 충족도·약점·다음 수. 도구 호출 금지."))
-                rresp = self._gen_retry(client, model, contents, _cfg(False))
-                rcand = (rresp.candidates or [None])[0]
-                rparts = (rcand.content.parts if rcand and rcand.content else None) or []
-                reflection_text = _visible(rparts)
+            final_pick = choice or best
+            if critique_text is None and final_pick is not None:
+                approve, critique_text = self._critic_review(client, model, types, cargo, final_pick)
 
-            # ── 결과 방출 (한 번씩) ──
+            # ── 결과 방출 (한 번씩): 설계자 결론 + 심사 판정 ──
             if choice is not None:
                 yield AgentEvent("choice", data=choice)
             yield AgentEvent("final", final_report or "")
-            if reflection_text:
-                yield AgentEvent("reflection", reflection_text)
-            opt = choice or best
-            if opt:
-                yield AgentEvent("optimum", data=opt)
+            if critique_text:
+                yield AgentEvent("critique", critique_text, data={"approve": approve})
+            if final_pick:
+                yield AgentEvent("optimum", data=final_pick)
         except Exception as exc:  # noqa: BLE001
             yield AgentEvent("error", f"Gemini 호출 오류: {type(exc).__name__}: {exc}")
 
