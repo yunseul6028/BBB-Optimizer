@@ -13,6 +13,33 @@ from pathlib import Path
 # 프로젝트 루트 (core/config.py → core → 루트)
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+def _load_dotenv(path: Path) -> None:
+    """의존성 없이 .env를 os.environ에 로드한다.
+
+    - 이미 설정된 실제 환경변수는 유지(setdefault).
+    - 중복 키는 **먼저 나온 non-empty 값**이 이긴다(빈 줄이 실제 값을 덮지 않도록).
+    - 인라인 주석(#)·양쪽 따옴표 제거.
+    """
+    if not path.exists():
+        return
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        key, val = key.strip(), val.strip()
+        if val and val[0] not in "\"'" and "#" in val:  # 인라인 주석 제거
+            val = val.split("#", 1)[0].strip()
+        if len(val) >= 2 and val[0] in "\"'" and val[-1] == val[0]:  # 따옴표 제거
+            val = val[1:-1]
+        if not val:  # 빈 값은 무시 → 중복 빈 줄이 실제 키를 덮어쓰지 않음
+            continue
+        os.environ.setdefault(key, val)
+
+
+_load_dotenv(BASE_DIR / ".env")
+
 # 로컬 deepB3P (펩타이드 BBB 예측) 자원 경로
 DEEPB3P_REPO = BASE_DIR / "vendor" / "deepB3P"
 DEEPB3P_PYTHON = BASE_DIR / "vendor" / ".venv-deepb3p" / "bin" / "python"
