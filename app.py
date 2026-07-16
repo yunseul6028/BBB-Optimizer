@@ -182,8 +182,16 @@ _MEDAL = ["🥇", "🥈", "🥉"]
 
 
 def _emit_agent_event(ev):
-    """최적화 에이전트 이벤트 한 개 렌더 (final/optimum/progress는 호출측에서 처리)."""
-    if ev.kind == "reasoning":
+    """최적화 에이전트 이벤트 한 개 렌더 (plan/reflection/final/optimum/progress는 요약에서도 처리)."""
+    if ev.kind == "plan":
+        with st.container(border=True):
+            st.markdown("🗺️ **[계획] 에이전트 전략**")
+            st.markdown(ev.text)
+    elif ev.kind == "reflection":
+        with st.container(border=True):
+            st.markdown("🔎 **[자기평가] 에이전트 반성**")
+            st.markdown(ev.text)
+    elif ev.kind == "reasoning":
         with st.container(border=True):
             st.caption("🧠 " + ev.text)
     elif ev.kind == "text":
@@ -270,7 +278,13 @@ def _render_agent_summary(events, cargo):
     """최적화 궤적 + 상위 3 후보 카드(+온디맨드 분석) + 보고서."""
     progress = [e.data for e in events if e.kind == "progress"]
     podium = _extract_podium(events)
+    plan = next((e.text for e in events if e.kind == "plan"), None)
     final = next((e.text for e in events if e.kind == "final"), None)
+    reflection = next((e.text for e in events if e.kind == "reflection"), None)
+    if plan:
+        with st.container(border=True):
+            st.markdown("### 🗺️ 에이전트 전략 (계획)")
+            st.markdown(plan)
     if len(progress) >= 2:
         st.markdown("##### 📈 최적화 궤적 (best-so-far BBB)")
         st.line_chart({"best BBB": [p["best_bbb"] for p in progress]},
@@ -301,6 +315,10 @@ def _render_agent_summary(events, cargo):
         with st.container(border=True):
             st.markdown("### 🏁 최적화 보고서")
             st.markdown(final)
+    if reflection:
+        with st.container(border=True):
+            st.markdown("### 🔎 에이전트 자기평가 (반성)")
+            st.markdown(reflection)
 
 
 def _structure_html(pdb, cargo_len, linker_len, height=420):
@@ -596,7 +614,8 @@ else:
         _render_agent_summary(_agent["events"], _agent["cargo"])
         with st.expander("🔍 중간 과정 기록 — 스텝별 추론·평가·검증 다시 보기"):
             for ev in _agent["events"]:
-                _emit_agent_event(ev)
+                if ev.kind not in ("plan", "reflection"):  # 계획·자기평가는 위 요약에 이미 표시
+                    _emit_agent_event(ev)
         st.caption("⚗️ 최적화 판단은 deepB3P·ToxinPred3 예측 기반입니다. 실제 합성·검증 필요.")
     elif fb:
         st.divider()

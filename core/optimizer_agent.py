@@ -283,7 +283,28 @@ class OptimizationAgent:
                 kw["tools"] = tools
             return client.messages.create(**kw)
 
+        def _emit_thinking(content):
+            for b in content:
+                if b.type == "thinking" and getattr(b, "thinking", ""):
+                    yield AgentEvent("reasoning", _humanize(b.thinking))
+
         try:
+            # ── 0. 계획(PLAN): 도구를 쓰기 전에 전략을 선언 ──
+            messages.append({"role": "user",
+                             "content": "Before calling any tool, state your optimization strategy "
+                                        "in 2-3 sentences: which prefix/suffix directions you will "
+                                        "prioritize and why. Do not call any tool yet."})
+            presp = _call(tools_on=False)
+            yield from _emit_thinking(presp.content)
+            yield AgentEvent("plan", _humanize(
+                "\n\n".join(b.text for b in presp.content if b.type == "text")))
+            messages.append({"role": "assistant", "content": presp.content})
+            messages.append({"role": "user",
+                             "content": "Now execute your strategy: use the tools autonomously to "
+                                        "satisfy all four objectives and converge on one final assembly."})
+
+            # ── 1. 실행 루프(ACT) ──
+            final_text = None
             for rnd in range(self.max_rounds):
                 resp = _call(tools_on=True)
                 for b in resp.content:
@@ -296,11 +317,9 @@ class OptimizationAgent:
                                               "불구하고 거부된 경우 — 다시 시도하거나 화물 서열을 바꿔보세요.)")
                     return
                 if resp.stop_reason == "end_turn":
-                    yield AgentEvent("final", _humanize(
-                        "\n\n".join(b.text for b in resp.content if b.type == "text")))
-                    if best:
-                        yield AgentEvent("optimum", data=best)
-                    return
+                    messages.append({"role": "assistant", "content": resp.content})
+                    final_text = "\n\n".join(b.text for b in resp.content if b.type == "text")
+                    break
 
                 tool_uses = [b for b in resp.content if b.type == "tool_use"]
                 messages.append({"role": "assistant", "content": resp.content})
@@ -325,17 +344,31 @@ class OptimizationAgent:
                 messages.append({"role": "user", "content": results})
                 if best:
                     yield AgentEvent("progress", data={"round": rnd + 1, "best_bbb": best["bbb"]})
+            else:
+                # 예산 소진 → 최종 보고서 요청
+                messages.append({"role": "user",
+                                 "content": "Budget exhausted. Write the final report: the best "
+                                            "assembly so far (full string + its primary/penalty/"
+                                            "index/match + exposure) and the rationale. No tool calls."})
+                resp = _call(tools_on=False)
+                yield from _emit_thinking(resp.content)
+                final_text = "\n\n".join(b.text for b in resp.content if b.type == "text")
+                messages.append({"role": "assistant", "content": resp.content})
 
+            # ── 2. 최종 보고서(FINAL) ──
+            yield AgentEvent("final", _humanize(final_text or ""))
+
+            # ── 3. 자기평가(REFLECT): 목적 충족도·약점·다음 수 ──
             messages.append({"role": "user",
-                             "content": "Budget exhausted. Write the final report: the best "
-                                        "assembly so far (full string + its primary/penalty/index/"
-                                        "match + exposure) and the rationale. No tool calls."})
-            resp = _call(tools_on=False)
-            for b in resp.content:
-                if b.type == "thinking" and getattr(b, "thinking", ""):
-                    yield AgentEvent("reasoning", _humanize(b.thinking))
-            yield AgentEvent("final", _humanize(
-                "\n\n".join(b.text for b in resp.content if b.type == "text")))
+                             "content": "Self-evaluate in 3-4 sentences: how well does the final "
+                                        "assembly meet each of the four objectives, what are its "
+                                        "weaknesses/risks, and what would you try next given more "
+                                        "budget? No tool calls."})
+            rresp = _call(tools_on=False)
+            yield from _emit_thinking(rresp.content)
+            yield AgentEvent("reflection", _humanize(
+                "\n\n".join(b.text for b in rresp.content if b.type == "text")))
+
             if best:
                 yield AgentEvent("optimum", data=best)
         except Exception as exc:  # noqa: BLE001

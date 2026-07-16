@@ -105,7 +105,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
             return text, AgentEvent("generation", text=text, data=gdata)
         return f"unknown tool: {name}", None
 
-    def _gen_retry(self, client, model, contents, config, tries=4):
+    def _gen_retry(self, client, model, contents, config, tries=6):
         """일시적 오류(503/429)는 백오프 재시도. 그 외는 즉시 raise."""
         last = None
         for attempt in range(tries):
@@ -160,7 +160,33 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 return f"prompt blocked: {fb.block_reason}"
             return None
 
+        def _visible(parts):
+            return "\n\n".join(p.text for p in parts
+                               if getattr(p, "text", None) and not getattr(p, "thought", False))
+
+        def _user(text):
+            return types.Content(role="user", parts=[types.Part.from_text(text=text)])
+
         try:
+            # ── 0. 계획(PLAN): 도구를 쓰기 전에 전략 선언 ──
+            contents.append(_user("도구를 호출하기 전에, 최적화 전략을 2~3문장으로 밝혀라 — 어떤 "
+                                  "링커·셔틀 방향을 우선 탐색하고 왜인지. 아직 도구는 호출하지 마라."))
+            presp = self._gen_retry(client, model, contents, _cfg(False))
+            pcand = (presp.candidates or [None])[0]
+            blk = _blocked(pcand, presp) if pcand is not None else "빈 응답"
+            if blk:
+                yield AgentEvent("error", f"Gemini 차단/거부: {blk}")
+                return
+            pparts = (pcand.content.parts if pcand and pcand.content else None) or []
+            for p in pparts:
+                if getattr(p, "text", None) and getattr(p, "thought", False):
+                    yield AgentEvent("reasoning", p.text)
+            contents.append(pcand.content)
+            yield AgentEvent("plan", _visible(pparts))
+            contents.append(_user("이제 전략에 따라 도구를 자율적으로 사용해 실행하라."))
+
+            # ── 1. 실행 루프(ACT) ──
+            final_text = None
             for rnd in range(self.max_rounds):
                 resp = self._gen_retry(client, model, contents, _cfg(True))
                 cand = (resp.candidates or [None])[0]
@@ -182,11 +208,8 @@ class GeminiOptimizationAgent(OptimizationAgent):
                             yield AgentEvent("text", p.text)
 
                 if not fcalls:
-                    yield AgentEvent("final", "\n\n".join(
-                        p.text for p in parts if getattr(p, "text", None) and not getattr(p, "thought", False)))
-                    if best:
-                        yield AgentEvent("optimum", data=best)
-                    return
+                    final_text = _visible(parts)
+                    break
 
                 fr_parts = []
                 for fc in fcalls:
@@ -203,15 +226,30 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 contents.append(types.Content(role="user", parts=fr_parts))
                 if best:
                     yield AgentEvent("progress", data={"round": rnd + 1, "best_bbb": best["bbb"]})
+            else:
+                contents.append(_user("예산을 모두 사용했습니다. 지금까지의 최적 융합체(전체 서열, 네 "
+                                      "지표 종합)와 근거로 최종 보고서를 쓰세요. 도구 호출 금지."))
+                resp = self._gen_retry(client, model, contents, _cfg(False))
+                cand = (resp.candidates or [None])[0]
+                parts = (cand.content.parts if cand and cand.content else None) or []
+                contents.append(cand.content)
+                final_text = _visible(parts)
 
-            contents.append(types.Content(role="user", parts=[types.Part.from_text(
-                text="예산을 모두 사용했습니다. 지금까지의 최적 융합체(전체 서열, 네 지표 종합)와 "
-                     "근거로 최종 보고서를 쓰세요. 도구 호출 금지.")]))
-            resp = self._gen_retry(client, model, contents, _cfg(False))
-            cand = (resp.candidates or [None])[0]
-            parts = (cand.content.parts if cand and cand.content else None) or []
-            yield AgentEvent("final", "\n\n".join(
-                p.text for p in parts if getattr(p, "text", None) and not getattr(p, "thought", False)))
+            # ── 2. 최종 보고서(FINAL) ──
+            yield AgentEvent("final", final_text or "")
+
+            # ── 3. 자기평가(REFLECT) ──
+            contents.append(_user("마지막으로 자기평가하라(3~4문장): 최종 융합체가 네 목적을 각각 얼마나 "
+                                  "충족했는지, 약점·리스크는 무엇인지, 예산이 더 있다면 다음에 무엇을 "
+                                  "시도할지. 도구 호출 금지."))
+            rresp = self._gen_retry(client, model, contents, _cfg(False))
+            rcand = (rresp.candidates or [None])[0]
+            rparts = (rcand.content.parts if rcand and rcand.content else None) or []
+            for p in rparts:
+                if getattr(p, "text", None) and getattr(p, "thought", False):
+                    yield AgentEvent("reasoning", p.text)
+            yield AgentEvent("reflection", _visible(rparts))
+
             if best:
                 yield AgentEvent("optimum", data=best)
         except Exception as exc:  # noqa: BLE001
