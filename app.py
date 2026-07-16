@@ -112,7 +112,7 @@ with _hero:
             agent_provider = _providers[0][0]
             st.caption(f"브레인: **{_providers[0][1]}**")
         agent_run = st.button("🤖 자율 설계 에이전트 실행", type="primary",
-                              use_container_width=True)
+                              width='stretch')
         st.caption("에이전트가 **BBB·독성·구조·수용체·생성 도구를 스스로 오케스트레이션**해 "
                    "최종 융합체를 설계합니다.")
     else:
@@ -129,19 +129,19 @@ with _hero:
     struct_linker_name, struct_shuttle_name = STANDARD_LINKER_NAME, list(SHUTTLES)[0]
     with st.expander("🔧 개별 도구 직접 실행 (에이전트 없이 · 무료)"):
         st.caption("에이전트가 자율적으로 호출하는 도구들을 수동으로도 돌려볼 수 있습니다.")
-        run = st.button("🚀 라이브러리 전수 스윕 (모든 링커 × 셔틀)", use_container_width=True)
+        run = st.button("🚀 라이브러리 전수 스윕 (모든 링커 × 셔틀)", width='stretch')
 
         st.markdown("**🧬 이중 트랙 — 구조(ESMFold)+투과 점수+수용체**")
         _sc1, _sc2 = st.columns(2)
         struct_linker_name = _sc1.selectbox(
             "링커", list(LINKER_LIBRARY), index=list(LINKER_LIBRARY).index(STANDARD_LINKER_NAME))
         struct_shuttle_name = _sc2.selectbox("셔틀", list(SHUTTLES), index=0)
-        struct_run = st.button("🧬 구조 분석 실행 (~10초)", use_container_width=True)
+        struct_run = st.button("🧬 구조 분석 실행 (~10초)", width='stretch')
 
         if settings.use_fbgan_local:
             st.markdown("**🧫 신규 셔틀 생성 (FBGAN)**")
             fbgan_rounds = st.slider("생성 라운드 수", 2, 8, 4)
-            fbgan_run = st.button("🧫 생성 실행", use_container_width=True)
+            fbgan_run = st.button("🧫 생성 실행", width='stretch')
 
     with st.expander(f"📚 라이브러리 구성 보기 (링커 {len(LINKER_LIBRARY)} · 셔틀 {len(SHUTTLES)})"):
         st.markdown("**링커**")
@@ -149,14 +149,14 @@ with _hero:
             {"링커": list(LINKER_LIBRARY), "서열": [v["seq"] for v in LINKER_LIBRARY.values()],
              "종류": [v["kind"] for v in LINKER_LIBRARY.values()],
              "설명": [v["note"] for v in LINKER_LIBRARY.values()]},
-            use_container_width=True, hide_index=True,
+            width='stretch', hide_index=True,
         )
         st.markdown("**셔틀**")
         st.dataframe(
             {"셔틀": list(SHUTTLES), "서열": [v["seq"] for v in SHUTTLES.values()],
              "타겟": [v["target"] for v in SHUTTLES.values()],
              "설명": [v["note"] for v in SHUTTLES.values()]},
-            use_container_width=True, hide_index=True,
+            width='stretch', hide_index=True,
         )
 
     _cargo_preview = cargo_input.strip().upper()
@@ -212,7 +212,7 @@ def _emit_agent_event(ev):
                  "안정성(II)": [f"{r.get('instability','?')}·"
                                 f"{'안정' if r.get('stable') else '불안정'}" for r in rows],
                  "판정": ["❌독성" if r["toxic"] else "✅통과" for r in rows]},
-                use_container_width=True, hide_index=True,
+                width='stretch', hide_index=True,
             )
     elif ev.kind == "structure":
         d = ev.data
@@ -226,7 +226,7 @@ def _emit_agent_event(ev):
                 {"생성 셔틀": [b["shuttle"] for b in novel],
                  "BBB": [f"{b['bbb']*100:.0f}" for b in novel],
                  "독성": [f"{b['tox']*100:.0f}%" for b in novel]},
-                use_container_width=True, hide_index=True,
+                width='stretch', hide_index=True,
             )
     elif ev.kind == "error":
         st.error(ev.text)
@@ -259,7 +259,7 @@ def _render_candidate_analysis(cargo, cand, idx):
     seq = cand["sequence"]
     if seq not in analyses:
         if st.button("🔬 구조 분석 (ESMFold, ~10초)", key=f"agent-analyze-{idx}",
-                     use_container_width=True):
+                     width='stretch'):
             with st.spinner("ESMFold로 접는 중..."):
                 sr = analyze_construct(cargo, cand["linker"], cand["shuttle"])
             analyses[seq] = ({"error": sr.error} if sr.error else
@@ -511,7 +511,7 @@ if run:
                         for e in rows],
                 "판정": [_VERDICT_LABEL.get(e.verdict, "-") for e in rows],
             },
-            use_container_width=True, hide_index=True,
+            width='stretch', hide_index=True,
         )
 
     _tox_note = "ToxinPred3 실측" if settings.use_toxinpred3_local else "placeholder"
