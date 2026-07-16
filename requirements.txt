@@ -1,0 +1,6 @@
+streamlit>=1.31
+
+# --- 실제 API 연동 시 주석 해제 ---
+# requests>=2.31        # Deep-B3 예측 서버 호출용
+# python-dotenv>=1.0    # .env 자동 로딩
+# anthropic>=0.40       # LLM 변이 전략용

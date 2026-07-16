@@ -1,0 +1,15 @@
+# deepB3P 로컬 추론 전용 venv 의존성 (streamlit 앱 환경과 분리)
+#
+# 재설치:
+#   /usr/bin/python3 -m venv vendor/.venv-deepb3p
+#   vendor/.venv-deepb3p/bin/pip install -r vendor/requirements-deepb3p.txt
+#
+# 원본 리포의 requirements.txt(텐서플로1.14·dgl·blast 등)는 학습/생성용이라
+# 추론에는 불필요하다. 아래는 predict 경로가 실제로 import하는 최소 집합.
+
+numpy<2            # 1.26.x — 구코드 호환 위해 2.x 회피
+pandas
+scikit-learn       # utils.utils 가 sklearn.metrics import
+biopython          # Bio.SeqIO 로 FASTA 파싱
+tqdm
+torch              # CPU 빌드로 충분 (단일 서열 추론)

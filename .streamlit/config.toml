@@ -1,0 +1,9 @@
+# 냠냠픽업(YumYum) 디자인 시스템 팔레트 → Streamlit 네이티브 테마
+# 세부 컴포넌트 스타일은 assets/theme.css 에서 토큰으로 보강.
+[theme]
+base = "light"
+primaryColor = "#ffde36"              # main — YumYum Yellow (CTA/액센트)
+backgroundColor = "#ffffff"           # Neutral/0
+secondaryBackgroundColor = "#f7f7f7"  # Neutral/100 (카드/입력 베이스)
+textColor = "#222222"                 # Neutral/900
+linkColor = "#2763ff"                 # link blue

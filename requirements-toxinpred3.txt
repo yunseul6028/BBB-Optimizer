@@ -1,0 +1,13 @@
+# ToxinPred3 로컬 추론 전용 venv 의존성 (BBB/deepB3P 환경과 분리)
+#
+# 재설치:
+#   /usr/bin/python3 -m venv vendor/.venv-toxinpred3
+#   vendor/.venv-toxinpred3/bin/pip install -r vendor/requirements-toxinpred3.txt
+#   # 모델 압축 해제(최초 1회):
+#   (cd vendor/toxinpred3/model && unzip -o toxinpred3.0_model.pkl.zip)
+#
+# scikit-learn은 pkl 생성 버전(1.0.2)과 반드시 일치시켜야 로드된다.
+scikit-learn==1.0.2
+numpy<1.24
+pandas
+joblib
