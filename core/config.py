@@ -127,7 +127,7 @@ class Settings:
     llm_api_key: str | None = None
     llm_model: str = "claude-opus-4-8"
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3-flash-preview"
     toxicity_threshold: float = TOXICITY_THRESHOLD
     top_n: int = TOP_N
 
@@ -183,5 +183,5 @@ def get_settings() -> Settings:
         llm_api_key=os.getenv("LLM_API_KEY") or os.getenv("ANTHROPIC_API_KEY"),
         llm_model=os.getenv("LLM_MODEL", "claude-opus-4-8"),
         gemini_api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"),
-        gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-3-flash-preview"),
     )

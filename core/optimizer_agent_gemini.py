@@ -13,10 +13,14 @@ Claude 버전(`optimizer_agent.py`)과 **동일한 도구 백엔드**(_evaluate/
 
 from __future__ import annotations
 
+import time
 from typing import Generator
 
 from .config import LINKER_LIBRARY, MODEL_MAX_LEN, SHUTTLES, Settings
 from .optimizer_agent import AgentEvent, OptimizationAgent
+
+# 일시적 오류(모델 과부하·분당 레이트리밋) — 백오프 재시도 대상
+_TRANSIENT = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "overloaded", "high demand")
 
 
 def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int, has_fbgan: bool) -> str:
@@ -101,6 +105,20 @@ class GeminiOptimizationAgent(OptimizationAgent):
             return text, AgentEvent("generation", text=text, data=gdata)
         return f"unknown tool: {name}", None
 
+    def _gen_retry(self, client, model, contents, config, tries=4):
+        """일시적 오류(503/429)는 백오프 재시도. 그 외는 즉시 raise."""
+        last = None
+        for attempt in range(tries):
+            try:
+                return client.models.generate_content(model=model, contents=contents, config=config)
+            except Exception as exc:  # noqa: BLE001
+                last = exc
+                if attempt < tries - 1 and any(t in str(exc) for t in _TRANSIENT):
+                    time.sleep(2 * (attempt + 1))  # 2·4·6초
+                    continue
+                raise
+        raise last  # pragma: no cover
+
     def run(self, cargo: str) -> Generator[AgentEvent, None, None]:
         cargo = cargo.strip().upper()
         key = self.settings.gemini_api_key
@@ -144,7 +162,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
 
         try:
             for rnd in range(self.max_rounds):
-                resp = client.models.generate_content(model=model, contents=contents, config=_cfg(True))
+                resp = self._gen_retry(client, model, contents, _cfg(True))
                 cand = (resp.candidates or [None])[0]
                 blk = _blocked(cand, resp) if cand is not None else "빈 응답"
                 if blk:
@@ -189,7 +207,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
             contents.append(types.Content(role="user", parts=[types.Part.from_text(
                 text="예산을 모두 사용했습니다. 지금까지의 최적 융합체(전체 서열, 네 지표 종합)와 "
                      "근거로 최종 보고서를 쓰세요. 도구 호출 금지.")]))
-            resp = client.models.generate_content(model=model, contents=contents, config=_cfg(False))
+            resp = self._gen_retry(client, model, contents, _cfg(False))
             cand = (resp.candidates or [None])[0]
             parts = (cand.content.parts if cand and cand.content else None) or []
             yield AgentEvent("final", "\n\n".join(
