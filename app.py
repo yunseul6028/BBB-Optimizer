@@ -72,7 +72,7 @@ st.caption(
 )
 st.caption(
     "**🤖 멀티 에이전트 자율 설계**가 메인입니다 — **설계(Designer) 에이전트**가 "
-    "**평가(BBB·독성·수용체·안정성) · 구조(ESMFold) · 생성(FBGAN) · 정밀 설계** 도구를 스스로 골라 "
+    "**평가(BBB·독성·수용체·안정성·개발성) · 구조(ESMFold) · 생성(FBGAN) · 정밀 설계** 도구를 스스로 골라 "
     "써가며 후보를 만들고, **심사(Critic) 에이전트**가 이를 적대적으로 검증(승인/개선요구)합니다. "
     "(기본 Gemini / Claude 선택 가능 · 각 도구는 '개별 도구' 패널에서 수동 실행도 가능)"
 )
@@ -217,6 +217,8 @@ def _emit_agent_event(ev):
                  "수용체": [f"{r.get('bind_ref','?')}·{r.get('bind_score',0):.2f}" for r in rows],
                  "안정성(II)": [f"{r.get('instability','?')}·"
                                 f"{'안정' if r.get('stable') else '불안정'}" for r in rows],
+                 "개발성": [f"{r.get('dev_risk','?')}·L{r.get('dev_liab','?')}·q{r.get('dev_charge','?')}"
+                            for r in rows],
                  "판정": ["❌독성" if r["toxic"] else "✅통과" for r in rows]},
                 width='stretch', hide_index=True,
             )
@@ -324,6 +326,11 @@ def _render_agent_summary(events, cargo):
                         f"불안정성 {cand.get('instability', '?')}"
                         f"({'안정' if cand.get('stable') else '불안정'}) · "
                         f"수용체 {cand.get('bind_ref', '?')}·{cand.get('bind_score', 0):.2f}")
+                    _devs = cand.get("dev_liabilities") or []
+                    st.caption(
+                        f"개발성 위험 **{cand.get('dev_risk', '?')}** · 순전하 {cand.get('dev_charge', '?')} · "
+                        f"liability {cand.get('dev_liab', 0)}개"
+                        + (f" ({', '.join(_devs[:2])}…)" if _devs else ""))
                     st.caption(f"링커 `{cand['linker'] or '—'}` · 셔틀 `{cand['shuttle'] or '—'}`")
                     _render_candidate_analysis(cargo, cand, i)
     else:

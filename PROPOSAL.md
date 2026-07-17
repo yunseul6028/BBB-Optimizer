@@ -21,7 +21,7 @@
 ## 4. 도구 & 엔진
 | 도구(에이전트 액션) | 백엔드 엔진 | 산출 |
 |---|---|---|
-| `evaluate_candidates` | deepB3P · ToxinPred3 · ProtParam · BLOSUM62 | 후보 배치의 4지표 |
+| `evaluate_candidates` | deepB3P · ToxinPred3 · ProtParam · BLOSUM62 · 개발성 엔진 | 후보 배치의 5지표 |
 | `design_candidate` | 위 엔진 재사용 | 라이브러리 밖 **잔기 수준 편집** 서열 채점 |
 | `analyze_structure` | ESMFold(공개 API) · Biopython | 셔틀 표면 노출도 · pLDDT |
 | `generate_novel_shuttles` | FBGAN(사전학습 생성기 + 잠재공간 진화) | 신규 셔틀 서열 |
@@ -35,6 +35,7 @@
 | **안정성** | Biopython ProtParam **불안정성 지수(Guruprasad)**, **< 40 = 안정** 예측. 보조: 지방족 지수·GRAVY | 융합체 자체의 분해·응집 경향 |
 | **수용체 유사도** | 검증 셔틀(Angiopep-2=LRP1 RMT, TAT/Penetratin/SynB1=CPP)과 **BLOSUM62 정렬 유사도**(자기점수로 정규화, 0~1) | 수송 **메커니즘** 근거(친화도 아님) |
 | **구조 노출도** | ESMFold 폴딩 → Biopython Shrake-Rupley **SASA로 셔틀 영역 RSA**, pLDDT 신뢰도 동반 | 셔틀이 표면 노출(≥0.35)이면 수용체 접근 가능 |
+| **개발성(developability)** | 서열 규칙 기반 — **liability 모티프**(탈아마이드화 N[GST]·이성질화 D[GSTH]·N-당화 sequon·자유 Cys·산화 Met/Trp·프로테아제 절단부위 dibasic) + **응집 경향**(소수성/방향족 휴리스틱) + **pH 7.4 순전하·전하밀도**(양이온 과다=비특이 결합·독성·빠른 청소) → 위험 낮음/보통/높음 | "만들기 어렵다/불안정하다"를 실험 전 선별. TAP(항체 프로파일러)의 펩타이드판 |
 
 ## 6. 성능 평가 (요약 · 상세 `EVALUATION.md`)
 로컬 엔진만으로 재현(`python benchmark.py`):

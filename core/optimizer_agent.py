@@ -204,6 +204,7 @@ class OptimizationAgent:
                           "sequence": cargo + lk + sh})
         from .binding import shuttle_similarity
         from .stability import assess_stability
+        from .developability import assess_developability
         bbb = self.predictor.predict_many([bbb_scoring_seq(cargo, c["linker"], c["shuttle"]) for c in clean])
         tox = self.tox_predictor.predict_many([c["sequence"] for c in clean])
         thr = self.settings.toxicity_threshold
@@ -212,11 +213,15 @@ class OptimizationAgent:
             toxic = t.risk > thr
             bind = shuttle_similarity(c["shuttle"])
             stab = assess_stability(c["sequence"])
+            dev = assess_developability(c["sequence"])
             rows.append({"label": c["label"], "linker": c["linker"], "shuttle": c["shuttle"],
                          "sequence": c["sequence"], "bbb": round(p.bbb_permeability, 4),
                          "tox": round(t.risk, 4), "toxic": toxic,
                          "bind_ref": bind.best_ref, "bind_score": bind.score,
-                         "instability": stab.instability_index, "stable": stab.stable})
+                         "instability": stab.instability_index, "stable": stab.stable,
+                         "dev_risk": dev.risk_level, "dev_liab": dev.n_liabilities,
+                         "dev_charge": dev.net_charge, "dev_agg": dev.agg_score,
+                         "dev_liabilities": dev.liabilities})
             lines.append(f"{c['label']} | {p.bbb_permeability:.3f} | {t.risk:.3f} | "
                          f"{stab.instability_index} | {bind.score:.2f} | "
                          f"{'FAIL(penalty)' if toxic else 'ok'} | {c['sequence']}")

@@ -21,7 +21,7 @@
 
 | 에이전트 도구 | 하는 일 | 백엔드 엔진 |
 |---|---|---|
-| `evaluate_candidates` | 후보 융합체의 BBB·독성·안정성·수용체 유사도 배치 평가 | deepB3P + ToxinPred3 + ProtParam + BLOSUM62 |
+| `evaluate_candidates` | 후보 융합체의 BBB·독성·안정성·수용체 유사도·**개발성** 배치 평가 | deepB3P + ToxinPred3 + ProtParam + BLOSUM62 + 개발성 엔진 |
 | `design_candidate` | 라이브러리 밖 **잔기 수준 편집** 서열을 직접 설계·채점 | 위 엔진 재사용 |
 | `analyze_structure` | 후보를 접어 셔틀이 표면에 노출됐는지 검증 | ESMFold + Biopython |
 | `generate_novel_shuttles` | 라이브러리 밖 신규 셔틀 생성 | FBGAN |

@@ -178,12 +178,16 @@ class GeminiOptimizationAgent(OptimizationAgent):
 
     def _critic_review(self, client, model, types, cargo, choice):
         """최종 후보를 별도 컨텍스트로 적대적 검증. 반환 (approve: bool, critique_text: str)."""
+        dev_list = choice.get("dev_liabilities") or []
         m = (f"화물={cargo}, 링커={choice.get('linker') or '—'}, 셔틀={choice.get('shuttle')}, "
              f"전체서열={choice.get('sequence')}\n"
              f"지표 — BBB점수={choice['bbb']:.3f}(0~1), 독성={choice['tox']:.3f}, "
              f"불안정성지수={choice['instability']}, "
              f"수용체유사도({choice.get('bind_ref')})={choice.get('bind_score', 0):.2f}, "
-             f"독성판정={'탈락' if choice['toxic'] else '통과'}")
+             f"독성판정={'탈락' if choice['toxic'] else '통과'}\n"
+             f"개발성 — 위험={choice.get('dev_risk', '?')}, 순전하={choice.get('dev_charge', '?')}, "
+             f"응집={choice.get('dev_agg', '?')}, liability({len(dev_list)}): "
+             + ("; ".join(dev_list) if dev_list else "없음"))
         cfg = types.GenerateContentConfig(
             system_instruction=self._critic_prompt(), temperature=1.0,
             thinking_config=types.ThinkingConfig(include_thoughts=False))
