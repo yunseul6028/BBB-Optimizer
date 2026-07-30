@@ -1,5 +1,8 @@
 # 냠냠픽업(YumYum) 디자인 시스템 팔레트 → Streamlit 네이티브 테마
 # 세부 컴포넌트 스타일은 assets/theme.css 에서 토큰으로 보강.
+[server]
+enableStaticServing = true            # static/ 폴더의 Pretendard 폰트 self-host
+
 [theme]
 base = "light"
 primaryColor = "#ffde36"              # main — YumYum Yellow (CTA/액센트)

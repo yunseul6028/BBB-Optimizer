@@ -2,7 +2,16 @@
    냠냠픽업(YumYum) 디자인 시스템 — Streamlit 적용 레이어
    Figma: YumYum-v1 에서 추출한 토큰 기반
    ========================================================================== */
-@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.css');
+/* Pretendard self-host(앱 내장) → CDN·브라우저 무관하게 로드. @import는 주입 스타일에서
+   불안정해 @font-face 직접 선언으로 대체. static/는 Streamlit static serving으로 서빙. */
+@font-face {
+  font-family: 'Pretendard Variable';
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;
+  src: url('app/static/PretendardVariable.woff2') format('woff2-variations'),
+       url('https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/variable/woff2/PretendardVariable.woff2') format('woff2-variations');
+}
 
 :root {
   /* Brand */
