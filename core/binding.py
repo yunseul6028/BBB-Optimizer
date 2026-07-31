@@ -18,6 +18,7 @@ REFERENCE_SHUTTLES = {
     "Angiopep-2": {"seq": "TFFYGGSRGKRNNFKTEEY", "mech": "수용체매개 수송(RMT)", "target": "LRP1"},
     "Angiopep-1": {"seq": "TFFYGGCRGKRNNFKTEEY", "mech": "수용체매개 수송(RMT)", "target": "LRP1"},
     "ApoE(159-167)2": {"seq": "LAVYQAGARLAVYQAGAR", "mech": "수용체매개 수송(RMT)", "target": "LDLR/LRP1"},
+    "Leptin30": {"seq": "YQQILTSMPSRNVIQISNDLENLRDLLHVL", "mech": "수용체매개 수송(RMT)", "target": "렙틴수용체(LepR)"},
     "TAT":        {"seq": "GRKKRRQRRRPPQ",       "mech": "세포투과(CPP)",       "target": "막 직접투과"},
     "Penetratin": {"seq": "RQIKIWFQNRRMKWKK",    "mech": "세포투과(CPP)",       "target": "막 직접투과"},
     "SynB1":      {"seq": "RGGRLSYSRRRFSTSTGR",  "mech": "세포투과(CPP)",       "target": "막 직접투과"},

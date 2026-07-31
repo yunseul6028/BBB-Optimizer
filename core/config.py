@@ -87,6 +87,7 @@ LINKER_LIBRARY = {
 SHUTTLES = {
     "Angiopep-2":     {"seq": "TFFYGGSRGKRNNFKTEEY", "target": "LRP1",       "note": "LRP1 타겟 대표 BBB 셔틀(19aa, RMT)"},
     "ApoE(159-167)2": {"seq": "LAVYQAGARLAVYQAGAR",  "target": "LDLR/LRP1",  "note": "ApoE 유래 RMT 셔틀·탠덤 이량체(18aa)"},
+    "Leptin30":       {"seq": "YQQILTSMPSRNVIQISNDLENLRDLLHVL", "target": "렙틴수용체(LepR)", "note": "렙틴 61-90 유래 RMT 셔틀(30aa)"},
     "TAT":            {"seq": "GRKKRRQRRRPPQ",       "target": "세포투과",    "note": "HIV-1 TAT 세포투과 펩타이드(13aa, CPP)"},
     "Penetratin":     {"seq": "RQIKIWFQNRRMKWKK",    "target": "세포투과",    "note": "Antennapedia 세포투과 펩타이드(16aa, CPP)"},
     "SynB1":          {"seq": "RGGRLSYSRRRFSTSTGR",  "target": "세포투과",    "note": "SynB 벡터 계열(18aa, CPP)"},
