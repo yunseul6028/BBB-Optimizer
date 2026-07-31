@@ -36,6 +36,7 @@
 | **수용체 유사도** | 검증 셔틀(Angiopep-2=LRP1 RMT, TAT/Penetratin/SynB1=CPP)과 **BLOSUM62 정렬 유사도**(자기점수로 정규화, 0~1) | 수송 **메커니즘** 근거(친화도 아님) |
 | **구조 노출도** | ESMFold 폴딩 → Biopython Shrake-Rupley **SASA로 셔틀 영역 RSA**, pLDDT 신뢰도 동반 | 셔틀이 표면 노출(≥0.35)이면 수용체 접근 가능 |
 | **개발성(developability)** | 서열 규칙 기반 — **liability 모티프**(탈아마이드화 N[GST]·이성질화 D[GSTH]·N-당화 sequon·자유 Cys·산화 Met/Trp·프로테아제 절단부위 dibasic) + **응집 경향**(소수성/방향족 휴리스틱) + **pH 7.4 순전하·전하밀도**(양이온 과다=비특이 결합·독성·빠른 청소) → 위험 낮음/보통/높음 | "만들기 어렵다/불안정하다"를 실험 전 선별. TAP(항체 프로파일러)의 펩타이드판 |
+| **선택성 / off-target** | 셔틀의 **양전하 밀도 + 친유성(GRAVY) + 수송 메커니즘**(RMT vs CPP) 종합. 양전하·친유성↑(CPP형)=비특이 흡수 위험↑, **RMT 수용체 표적(Angiopep형)=선택적**이라 위험↓. off = (전하 OR 친유성)×(1−0.6·RMT유사) | CPP의 off-target 약점을 정량화. 검증: Angiopep-2 선택성 0.91, TAT 0.0 |
 
 ## 6. 성능 평가 (요약 · 상세 `EVALUATION.md`)
 로컬 엔진만으로 재현(`python benchmark.py`):

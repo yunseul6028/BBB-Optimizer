@@ -171,7 +171,9 @@ class GeminiOptimizationAgent(OptimizationAgent):
             "상대 비교로만 해석했는지.\n"
             "④ 구조 근거 — 셔틀이 표면 노출됐다는 ESMFold 검증을 실제로 거쳤는가.\n"
             "⑤ 개발성 리스크 — 과도한 Arg/Lys(양이온)는 비특이 결합·독성·응집 위험. 서열 liability.\n"
-            "⑥ 설계의 실질 — 라이브러리의 뻔한 선택인가, 근거 있는 정밀 설계인가.\n"
+            "⑥ off-target/선택성 — 양전하·친유성 주도(CPP형)면 여러 조직에 비특이 흡수돼 off-target "
+            "위험. RMT 수용체 표적(Angiopep형)이 선택적. off-target 위험 높으면 지적하라.\n"
+            "⑦ 설계의 실질 — 라이브러리의 뻔한 선택인가, 근거 있는 정밀 설계인가.\n"
             "3~5문장으로 핵심 반박을 쓰고, **마지막 줄에 정확히** `VERDICT: APPROVE`(승인) 또는 "
             "`VERDICT: REVISE`(개선 요구)를 써라. 애매하면 REVISE."
         )
@@ -187,7 +189,9 @@ class GeminiOptimizationAgent(OptimizationAgent):
              f"독성판정={'탈락' if choice['toxic'] else '통과'}\n"
              f"개발성 — 위험={choice.get('dev_risk', '?')}, 순전하={choice.get('dev_charge', '?')}, "
              f"응집={choice.get('dev_agg', '?')}, liability({len(dev_list)}): "
-             + ("; ".join(dev_list) if dev_list else "없음"))
+             + ("; ".join(dev_list) if dev_list else "없음") + "\n"
+             f"선택성/off-target — 위험={choice.get('sel_level', '?')}"
+             f"(선택성 {choice.get('selectivity', '?')}), {choice.get('sel_mech', '?')}")
         cfg = types.GenerateContentConfig(
             system_instruction=self._critic_prompt(), temperature=1.0,
             thinking_config=types.ThinkingConfig(include_thoughts=False))

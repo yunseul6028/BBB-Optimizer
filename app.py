@@ -331,6 +331,9 @@ def _render_agent_summary(events, cargo):
                         f"개발성 위험 **{cand.get('dev_risk', '?')}** · 순전하 {cand.get('dev_charge', '?')} · "
                         f"liability {cand.get('dev_liab', 0)}개"
                         + (f" ({', '.join(_devs[:2])}…)" if _devs else ""))
+                    st.caption(
+                        f"🎯 선택성 **{cand.get('selectivity', '?')}** · off-target 위험 "
+                        f"**{cand.get('sel_level', '?')}** · {cand.get('sel_mech', '?')}")
                     st.caption(f"링커 `{cand['linker'] or '—'}` · 셔틀 `{cand['shuttle'] or '—'}`")
                     _render_candidate_analysis(cargo, cand, i)
     else:

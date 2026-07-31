@@ -205,6 +205,7 @@ class OptimizationAgent:
         from .binding import shuttle_similarity
         from .stability import assess_stability
         from .developability import assess_developability
+        from .selectivity import assess_selectivity
         bbb = self.predictor.predict_many([bbb_scoring_seq(cargo, c["linker"], c["shuttle"]) for c in clean])
         tox = self.tox_predictor.predict_many([c["sequence"] for c in clean])
         thr = self.settings.toxicity_threshold
@@ -214,6 +215,7 @@ class OptimizationAgent:
             bind = shuttle_similarity(c["shuttle"])
             stab = assess_stability(c["sequence"])
             dev = assess_developability(c["sequence"])
+            selr = assess_selectivity(c["shuttle"])   # off-target은 셔틀이 주도
             rows.append({"label": c["label"], "linker": c["linker"], "shuttle": c["shuttle"],
                          "sequence": c["sequence"], "bbb": round(p.bbb_permeability, 4),
                          "tox": round(t.risk, 4), "toxic": toxic,
@@ -221,7 +223,10 @@ class OptimizationAgent:
                          "instability": stab.instability_index, "stable": stab.stable,
                          "dev_risk": dev.risk_level, "dev_liab": dev.n_liabilities,
                          "dev_charge": dev.net_charge, "dev_agg": dev.agg_score,
-                         "dev_liabilities": dev.liabilities})
+                         "dev_liabilities": dev.liabilities,
+                         "sel_off": selr.off_target_risk, "selectivity": selr.selectivity,
+                         "sel_level": selr.risk_level, "sel_mech": selr.mechanism,
+                         "sel_drivers": selr.drivers})
             lines.append(f"{c['label']} | {p.bbb_permeability:.3f} | {t.risk:.3f} | "
                          f"{stab.instability_index} | {bind.score:.2f} | "
                          f"{'FAIL(penalty)' if toxic else 'ok'} | {c['sequence']}")
