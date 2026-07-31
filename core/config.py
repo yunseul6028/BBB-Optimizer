@@ -68,6 +68,7 @@ TOP_N = 3                          # 상위 몇 개 조합을 최종 추천으�
 # --- 링커 라이브러리 (융합체의 링커 축, 전수 탐색) ---
 STANDARD_LINKER_NAME = "GGGGGS"
 LINKER_LIBRARY = {
+    "직접융합":    {"seq": "",               "kind": "none",        "note": "링커 없이 화물-셔틀 직접 연결(0aa, direct fusion)"},
     "GGS":        {"seq": "GGS",             "kind": "flexible",    "note": "짧은 유연 링커(3aa)"},
     "GGGGS":      {"seq": "GGGGS",           "kind": "flexible",    "note": "고전 GS 링커(5aa)"},
     "GGGGGS":     {"seq": "GGGGGS",          "kind": "flexible",    "note": "표준 유연 링커(6aa)"},

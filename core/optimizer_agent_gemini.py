@@ -24,7 +24,7 @@ _TRANSIENT = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "overloaded", "
 
 
 def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int, has_fbgan: bool) -> str:
-    lib_l = ", ".join(f"{n}({v['seq']})" for n, v in LINKER_LIBRARY.items())
+    lib_l = ", ".join(f"{n}({v['seq'] or '링커없음/직접융합'})" for n, v in LINKER_LIBRARY.items())
     lib_s = ", ".join(f"{n}({v['seq']})" for n, v in SHUTTLES.items())
     tools = ("evaluate_candidates(BBB·독성·안정성·수용체 배치), design_candidate(잔기 수준 편집 "
              "서열 채점), analyze_structure(구조 노출도)")
@@ -46,7 +46,8 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int, has
         "  ③ 셔틀이 구조적으로 노출(ESMFold) + 검증 셔틀과 유사(수용체 메커니즘 근거)\n"
         "  ④ 융합체 자체 안정성: 불안정성 지수 < 40 선호\n\n"
         f"사용 가능한 도구: {tools}\n"
-        "권장 워크플로우(자율 판단): evaluate_candidates로 라이브러리 조합을 폭넓게 스크리닝 → "
+        "권장 워크플로우(자율 판단): evaluate_candidates로 라이브러리 조합(**링커 유무 — 직접융합"
+        "(링커 빈칸)도 포함**)을 폭넓게 스크리닝 → "
         "유망 방향으로 **design_candidate로 잔기 수준 편집**(변이·트리밍·연장·하이브리드)해 라이브러리 "
         "밖까지 정밀 설계·재평가 → 상위 1~3개를 analyze_structure로 구조 검증 → **충분히 수렴했다고 "
         "판단하면 스스로 finish**를 호출해 최종 융합체 1개(라벨·링커·셔틀·전체 근거)를 제출하라.\n"
