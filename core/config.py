@@ -85,10 +85,11 @@ LINKER_LIBRARY = {
 
 # --- 셔틀 라이브러리 (BBB 투과 수송 펩타이드, 전수 탐색) ---
 SHUTTLES = {
-    "Angiopep-2": {"seq": "TFFYGGSRGKRNNFKTEEY", "target": "LRP1",       "note": "LRP1 타겟 대표 BBB 셔틀(19aa)"},
-    "TAT":        {"seq": "GRKKRRQRRRPPQ",       "target": "세포투과",    "note": "HIV-1 TAT 세포투과 펩타이드(13aa)"},
-    "Penetratin": {"seq": "RQIKIWFQNRRMKWKK",    "target": "세포투과",    "note": "Antennapedia 세포투과 펩타이드(16aa)"},
-    "SynB1":      {"seq": "RGGRLSYSRRRFSTSTGR",  "target": "세포투과",    "note": "SynB 벡터 계열(18aa)"},
+    "Angiopep-2":     {"seq": "TFFYGGSRGKRNNFKTEEY", "target": "LRP1",       "note": "LRP1 타겟 대표 BBB 셔틀(19aa, RMT)"},
+    "ApoE(159-167)2": {"seq": "LAVYQAGARLAVYQAGAR",  "target": "LDLR/LRP1",  "note": "ApoE 유래 RMT 셔틀·탠덤 이량체(18aa)"},
+    "TAT":            {"seq": "GRKKRRQRRRPPQ",       "target": "세포투과",    "note": "HIV-1 TAT 세포투과 펩타이드(13aa, CPP)"},
+    "Penetratin":     {"seq": "RQIKIWFQNRRMKWKK",    "target": "세포투과",    "note": "Antennapedia 세포투과 펩타이드(16aa, CPP)"},
+    "SynB1":          {"seq": "RGGRLSYSRRRFSTSTGR",  "target": "세포투과",    "note": "SynB 벡터 계열(18aa, CPP)"},
 }
 
 # 예시 화물(cargo) 펩타이드 — Aβ(25-35) 신경독성 단편(11aa, 알츠하이머 맥락). 데모용.
