@@ -137,16 +137,16 @@ h4 { font-weight: 600 !important; color: var(--yy-n900) !important; }
 
 /* ---- 베스트 3 랭크 액센트 (container key 기반) ------------------------ */
 .st-key-best-card-0, .st-key-gen-card-0 {
-  border: 2px solid var(--yy-accent) !important;
-  box-shadow: 0 6px 24px rgba(47,111,224,.22) !important;
-  background: linear-gradient(180deg, var(--yy-accent-soft) 0%, #fff 42%) !important;
+  border: 2px solid var(--sem-green) !important;                      /* 1위=채택 → 초록 */
+  box-shadow: 0 6px 24px rgba(18,161,80,.18) !important;
+  background: linear-gradient(180deg, var(--sem-green-bg) 0%, #fff 42%) !important;
 }
-.st-key-best-card-1, .st-key-gen-card-1 { border-left: 6px solid #b9c0cb !important; }  /* 실버(쿨 그레이) */
-.st-key-best-card-2, .st-key-gen-card-2 { border-left: 6px solid #5dcaa5 !important; }  /* 딥틸 라이트 */
+.st-key-best-card-1, .st-key-gen-card-1,
+.st-key-best-card-2, .st-key-gen-card-2 { border-left: 4px solid var(--yy-n200) !important; }  /* 차순위=중립 */
 .st-key-opt-card {
-  border: 2px solid var(--yy-accent) !important;
-  box-shadow: 0 6px 24px rgba(47,111,224,.22) !important;
-  background: linear-gradient(180deg, var(--yy-accent-soft) 0%, #fff 42%) !important;
+  border: 2px solid var(--sem-green) !important;
+  box-shadow: 0 6px 24px rgba(18,161,80,.18) !important;
+  background: linear-gradient(180deg, var(--sem-green-bg) 0%, #fff 42%) !important;
 }
 
 /* ---- 메트릭 ----------------------------------------------------------- */

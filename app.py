@@ -50,13 +50,7 @@ _inject_theme()
 settings = get_settings()
 
 st.title("BBB-Optimize AI Agent")
-st.markdown(
-    """
-    화물(cargo) 펩타이드를 입력하면 AI가 도구를 자율적으로 오케스트레이션해,
-    뇌혈관장벽(BBB)을 통과하는 항체–셔틀 융합 단백질을 설계합니다.
-    효능·독성·안정성·입체구조·신규 생성 도구를 조합합니다 — `융합체 = 화물 + 링커 + 셔틀`
-    """
-)
+st.markdown("화물 펩타이드를 입력하면 AI가 BBB를 통과하는 **항체–셔틀 융합 단백질**을 설계합니다.")
 
 
 def _dot(ok):
@@ -69,15 +63,12 @@ st.caption(
     f"Gemini {_dot(settings.use_gemini_agent)}"
     f"{'' if settings.use_gemini_agent else ' · 키 필요'}"
 )
-st.caption(
-    "설계(Designer) 에이전트가 평가·구조·생성·정밀설계 도구를 스스로 골라 후보를 만들고, "
-    "심사(Critic) 에이전트가 이를 적대적으로 검증합니다. "
-    "각 도구는 ‘개별 도구’ 패널에서 수동으로도 실행할 수 있습니다."
-)
-st.caption(
-    "BBB 투과 점수는 deepB3P 예측 확률(0–100)로, 실제 물리적 투과율이 아닌 후보 비교용 지표입니다. "
-    "실제 투과율은 실험(Papp/logBB)이 필요하며, 수용체 결합 가능성도 함께 확인하세요."
-)
+with st.expander("동작 방식 · 지표 안내"):
+    st.markdown(
+        "- **설계 에이전트**가 평가·구조·생성 도구로 후보를 만들고, **심사 에이전트**가 적대적으로 검증합니다.\n"
+        "- **BBB 점수**는 deepB3P 예측 확률(0–100)로 후보 비교용이며, 실제 투과율은 실험(Papp/logBB)이 필요합니다.\n"
+        "- `융합체 = 화물 + 링커 + 셔틀`"
+    )
 
 n_combos = len(LINKER_LIBRARY) * len(SHUTTLES)
 
@@ -397,8 +388,12 @@ def _render_agent_summary(events, cargo):
                 with st.container(border=True, key=f"best-card-{i}"):
                     if cand.get("agent_pick"):
                         st.markdown("### 에이전트 최종 선택")
+                        _v = Verdict.ACCEPTED
                     else:
                         st.markdown(f"### {i + 1}위")
+                        _v = (Verdict.REJECTED_TOXIC if cand.get("toxic")
+                              else Verdict.SUBOPTIMAL)
+                    st.markdown(_verdict_pill(_v), unsafe_allow_html=True)
                     st.code(cand["sequence"], language="text")
                     m1, m2 = st.columns(2)
                     m1.metric("BBB 투과 점수", f"{cand['bbb']*100:.0f}")
@@ -570,6 +565,7 @@ if run:
         with cols[i]:
             with st.container(border=True, key=f"best-card-{i}"):
                 st.markdown(f"### {i+1}위 · {c.label}")
+                st.markdown(_verdict_pill(e.verdict), unsafe_allow_html=True)
                 m1, m2 = st.columns(2)
                 m1.metric("BBB 투과 점수", f"{p.bbb_permeability*100:.0f}",
                           delta=f"{(p.bbb_permeability-base_bbb)*100:+.0f}점")
