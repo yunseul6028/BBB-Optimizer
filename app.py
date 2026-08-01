@@ -393,8 +393,7 @@ def _render_agent_summary(events, cargo):
         st.altair_chart(_chart, use_container_width=True)
     if podium:
         st.markdown("##### 상위 후보")
-        st.caption("에이전트가 finish로 고른 최종 선택이 1위이고, 나머지는 BBB 순 차순위입니다. "
-                   "각 카드에서 필요할 때만 구조 분석을 실행할 수 있습니다.")
+        st.caption("에이전트가 finish로 고른 최종 선택이 1위이고, 나머지는 BBB 순 차순위입니다.")
         cols = st.columns(len(podium))
         for i, cand in enumerate(podium):
             with cols[i]:
@@ -425,7 +424,6 @@ def _render_agent_summary(events, cargo):
                         f"선택성 **{cand.get('selectivity', '?')}** · off-target 위험 "
                         f"**{cand.get('sel_level', '?')}** · {cand.get('sel_mech', '?')}")
                     st.caption(f"링커 `{cand['linker'] or '—'}` · 셔틀 `{cand['shuttle'] or '—'}`")
-                    _render_candidate_analysis(cargo, cand, i)
     else:
         st.warning("독성 임계값을 통과한 후보가 없습니다. 스텝 수를 늘리거나 화물을 바꿔 다시 시도해 보세요.")
     if final:
