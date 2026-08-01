@@ -555,8 +555,16 @@ else:
                           expanded=False)
         _render_agent_summary(events, cargo)
         st.caption("⚗️ 최적화 판단은 deepB3P·ToxinPred3 예측 기반입니다. 실제 합성·검증 필요.")
-        st.session_state["agent"] = {"cargo": cargo, "events": events, "rounds": agent_rounds,
-                                     "brain": brain}
+        _rec = {"cargo": cargo, "events": events, "rounds": agent_rounds, "brain": brain}
+        _opt = (next((e.data for e in events if e.kind == "choice"), None)
+                or next((e.data for e in events if e.kind == "optimum"), None))
+        _sm = (f"{_opt.get('sequence', '')[:18]}… BBB {_opt.get('bbb', 0)*100:.0f}"
+               if _opt else "결과 없음")
+        _hist = st.session_state.setdefault("agent_runs", [])
+        _rec["label"] = f"#{len(_hist)+1} · 화물 {cargo[:9]} → {_sm}"
+        _hist.append(_rec)
+        del _hist[:-3]                       # 최근 3개만 유지
+        st.session_state["agent"] = _rec
         st.session_state["view"] = "agent"
         st.stop()
 
@@ -624,6 +632,12 @@ else:
         # 이전 최적화 실행 결과 다시 렌더 (rerun 유지)
         st.divider()
         st.subheader("🤖 자율 설계 에이전트")
+        _runs = st.session_state.get("agent_runs", [])
+        if len(_runs) > 1:                    # 실행 기록 선택 (최근 3개, 최신 먼저)
+            _rev = _runs[::-1]
+            _labels = [r.get("label", "실행") for r in _rev]
+            _pick = st.selectbox("🕓 실행 기록 (최근 3개)", _labels, index=0)
+            _agent = _rev[_labels.index(_pick)]
         st.caption(f"화물 `{_agent['cargo']}` · {_agent.get('brain', 'LLM')} 다중 도구 자율 설계 "
                    f"(최대 {_agent['rounds']}스텝)")
         _render_agent_summary(_agent["events"], _agent["cargo"])
