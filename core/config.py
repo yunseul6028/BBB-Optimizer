@@ -127,8 +127,6 @@ def bbb_scoring_seq(cargo: str, linker: str, shuttle: str,
 class Settings:
     deepb3_api_url: str | None = None
     deepb3_api_key: str | None = None
-    llm_api_key: str | None = None
-    llm_model: str = "claude-opus-4-8"
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3-flash-preview"
     toxicity_threshold: float = TOXICITY_THRESHOLD
@@ -165,17 +163,8 @@ class Settings:
         return bool(self.deepb3_api_url and self.deepb3_api_key)
 
     @property
-    def use_llm_strategy(self) -> bool:
-        return bool(self.llm_api_key)
-
-    @property
-    def use_llm_agent(self) -> bool:
-        """자율 가설 에이전트(LLM 뇌 + 로컬 엔진 검증) 사용 가능 여부."""
-        return bool(self.llm_api_key) and self.use_deepb3p_local and self.use_toxinpred3_local
-
-    @property
     def use_gemini_agent(self) -> bool:
-        """Gemini 브레인 자율 에이전트 사용 가능 여부 (experiment/gemini)."""
+        """Gemini 브레인 자율 에이전트 사용 가능 여부."""
         return bool(self.gemini_api_key) and self.use_deepb3p_local and self.use_toxinpred3_local
 
 
@@ -183,8 +172,6 @@ def get_settings() -> Settings:
     return Settings(
         deepb3_api_url=os.getenv("DEEPB3_API_URL"),
         deepb3_api_key=os.getenv("DEEPB3_API_KEY"),
-        llm_api_key=os.getenv("LLM_API_KEY") or os.getenv("ANTHROPIC_API_KEY"),
-        llm_model=os.getenv("LLM_MODEL", "claude-opus-4-8"),
         gemini_api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"),
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-3-flash-preview"),
     )

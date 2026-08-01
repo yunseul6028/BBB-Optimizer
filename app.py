@@ -28,7 +28,6 @@ from core.config import (
     bbb_scoring_seq,
 )
 from core.generative import get_fbgan
-from core.optimizer_agent import get_optimization_agent
 from core.optimizer_agent_gemini import get_gemini_agent
 from core.predictors import get_predictor
 from core.structure import analyze_construct
@@ -67,14 +66,14 @@ def _dot(ok):
 st.caption(
     f"엔진 상태 — 효능 deepB3P {_dot(settings.use_deepb3p_local)} · "
     f"독성 ToxinPred3 {_dot(settings.use_toxinpred3_local)} · 구조 ESMFold 🟢(API) · "
-    f"브레인 Gemini {_dot(settings.use_gemini_agent)} · Claude {_dot(settings.use_llm_agent)}"
-    f"{'' if (settings.use_gemini_agent or settings.use_llm_agent) else ' (API 키 필요)'}"
+    f"브레인 Gemini {_dot(settings.use_gemini_agent)}"
+    f"{'' if settings.use_gemini_agent else ' (API 키 필요)'}"
 )
 st.caption(
     "**🤖 멀티 에이전트 자율 설계**가 메인입니다 — **설계(Designer) 에이전트**가 "
-    "**평가(BBB·독성·수용체·안정성·개발성) · 구조(ESMFold) · 생성(FBGAN) · 정밀 설계** 도구를 스스로 골라 "
-    "써가며 후보를 만들고, **심사(Critic) 에이전트**가 이를 적대적으로 검증(승인/개선요구)합니다. "
-    "(기본 Gemini / Claude 선택 가능 · 각 도구는 '개별 도구' 패널에서 수동 실행도 가능)"
+    "**평가(BBB·독성·수용체·안정성·개발성·선택성·용해도) · 구조(ESMFold) · 생성(FBGAN) · 정밀 설계** 도구를 "
+    "스스로 골라 써가며 후보를 만들고, **심사(Critic) 에이전트**가 이를 적대적으로 검증(승인/개선요구)합니다. "
+    "(각 도구는 '개별 도구' 패널에서 수동 실행도 가능)"
 )
 st.caption(
     "※ **BBB 투과 점수**는 deepB3P 예측 확률(0~100)로 **실제 물리적 투과율이 아닙니다** — "
@@ -94,33 +93,20 @@ with _hero:
         help="링커·셔틀은 라이브러리에서 전부 자동으로 붙여봅니다. (표준 20종 아미노산 1글자 코드)",
     )
     # === 메인 CTA: 자율 설계 에이전트 (공모전 flagship) ===
-    agent_run, agent_rounds, agent_provider = False, 8, None
-    _providers = []  # (id, label) — 기본 Gemini 먼저
+    agent_run, agent_rounds = False, 8
     if settings.use_gemini_agent:
-        _providers.append(("gemini", f"Gemini ({settings.gemini_model})"))
-    if settings.use_llm_agent:
-        _providers.append(("claude", f"Claude ({settings.llm_model})"))
-    if _providers:
         agent_rounds = st.slider("최대 스텝 수", 4, 12, 8,
                                  help="에이전트가 도구를 호출하는 최대 횟수. 낮추면 빠르고 저렴합니다.")
-        if len(_providers) > 1:
-            _labels = [lb for _, lb in _providers]
-            _sel = st.radio("브레인 모델", _labels, index=0, horizontal=True,
-                            help="기본은 Gemini(정직한 BBB 프레이밍). Claude는 안전분류기 우회용 "
-                                 "도메인 중립화 버전.")
-            agent_provider = _providers[_labels.index(_sel)][0]
-        else:
-            agent_provider = _providers[0][0]
-            st.caption(f"브레인: **{_providers[0][1]}**")
+        st.caption(f"브레인: **Gemini ({settings.gemini_model})**")
         agent_run = st.button("🤖 자율 설계 에이전트 실행", type="primary",
                               width='stretch')
         st.caption("에이전트가 **BBB·독성·구조·수용체·생성 도구를 스스로 오케스트레이션**해 "
                    "최종 융합체를 설계합니다.")
     else:
         st.info(
-            "🔑 **자율 설계 에이전트는 LLM API 키가 필요합니다.** `.env`에 "
-            "`GEMINI_API_KEY=...`(기본·무료 티어) 또는 `LLM_API_KEY=sk-ant-...`(Claude)를 넣고 "
-            "앱을 재시작하세요. (키 없이 무료로 확인하려면 아래 '개별 도구'를 이용하세요.)",
+            "🔑 **자율 설계 에이전트는 Gemini API 키가 필요합니다.** `.env`에 "
+            "`GEMINI_API_KEY=...`를 넣고 앱을 재시작하세요. "
+            "(키 없이 무료로 확인하려면 아래 '개별 도구'를 이용하세요.)",
             icon="🔑",
         )
 
@@ -549,12 +535,8 @@ else:
         if not cargo or (set(cargo) - VALID_AMINO_ACIDS):
             st.error("⚠️ 유효한 화물 펩타이드 서열을 입력해 주세요.")
             st.stop()
-        if agent_provider == "claude":
-            agent = get_optimization_agent(settings, max_rounds=agent_rounds)
-            brain = f"Claude ({settings.llm_model})"
-        else:
-            agent = get_gemini_agent(settings, max_rounds=agent_rounds)
-            brain = f"Gemini ({settings.gemini_model})"
+        agent = get_gemini_agent(settings, max_rounds=agent_rounds)
+        brain = f"Gemini ({settings.gemini_model})"
         st.session_state["agent_analysis"] = {}  # 새 실행 → 이전 온디맨드 분석 초기화
         st.divider()
         st.subheader("🤖 자율 설계 에이전트")
@@ -686,11 +668,11 @@ else:
             "실제 합성·In Vitro 검증이 반드시 필요합니다. BBB/독성은 deepB3P·ToxinPred3 예측값."
         )
     else:
-        if settings.use_gemini_agent or settings.use_llm_agent:
+        if settings.use_gemini_agent:
             st.info("👆 화물 펩타이드를 입력하고 **[🤖 자율 설계 에이전트 실행]** 버튼을 눌러 주세요.")
         else:
             st.info(
-                "👆 화물 펩타이드를 입력하세요. 자율 설계 에이전트를 쓰려면 **LLM API 키**가 "
-                "필요합니다(기본 Gemini, 위 안내 참고). 키 없이 확인하려면 **[🔧 개별 도구 직접 실행]** "
+                "👆 화물 펩타이드를 입력하세요. 자율 설계 에이전트를 쓰려면 **Gemini API 키**가 "
+                "필요합니다(위 안내 참고). 키 없이 확인하려면 **[🔧 개별 도구 직접 실행]** "
                 "패널을 펼쳐 각 도구를 수동으로 실행할 수 있어요."
             )
