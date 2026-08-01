@@ -63,6 +63,13 @@ def _dot(ok):
     return "🟢" if ok else "🟠"
 
 
+def _clean_cargo(raw):
+    """화물 입력 정리: FASTA 헤더(>) 줄 제거 + 모든 공백·줄바꿈·탭 제거 + 대문자화.
+    (복붙 시 딸려오는 줄바꿈·띄어쓰기를 자동으로 걷어낸다.)"""
+    lines = [ln for ln in (raw or "").splitlines() if not ln.strip().startswith(">")]
+    return "".join("".join(lines).split()).upper()
+
+
 def _cargo_error(cargo):
     """화물 서열이 유효하면 None, 아니면 어떤 문자가 문제인지 구체적 메시지를 돌려준다."""
     if not cargo:
@@ -132,7 +139,7 @@ with _hero:
         # 디자인 미리보기 — 엔진/키 없이 결과 화면(포디움·심사 등) 목업 렌더 (프론트 작업용)
         if st.button("🎨 디자인 미리보기 (목업 결과 화면 · 엔진 없이)", width='stretch'):
             from core.mock import mock_agent_run
-            _mock = mock_agent_run(cargo_input.strip().upper() or DEFAULT_CARGO)
+            _mock = mock_agent_run(_clean_cargo(cargo_input) or DEFAULT_CARGO)
             st.session_state["agent_analysis"] = {}
             st.session_state["agent"] = _mock
             _h = st.session_state.setdefault("agent_runs", [])
@@ -170,7 +177,7 @@ with _hero:
             width='stretch', hide_index=True,
         )
 
-    _cargo_preview = cargo_input.strip().upper()
+    _cargo_preview = _clean_cargo(cargo_input)
     if _cargo_preview:
         longest = max(len(v["seq"]) for v in SHUTTLES.values())
         longest_l = max(len(v["seq"]) for v in LINKER_LIBRARY.values())
@@ -446,7 +453,7 @@ def _render_dual_track(d):
 
 # --- 실행 -------------------------------------------------------------------
 if run:
-    cargo = cargo_input.strip().upper()
+    cargo = _clean_cargo(cargo_input)
     _err = _cargo_error(cargo)
     if _err:
         st.error(_err)
@@ -553,7 +560,7 @@ if run:
 else:
     # --- 자율 가설 에이전트 실행(버튼): 라이브 스트리밍 + session_state 저장 ---
     if agent_run:
-        cargo = cargo_input.strip().upper()
+        cargo = _clean_cargo(cargo_input)
         _err = _cargo_error(cargo)
         if _err:
             st.error(_err)
@@ -593,7 +600,7 @@ else:
 
     # --- 구조 기반 접합부 분석 실행(버튼) ---
     if struct_run:
-        cargo = cargo_input.strip().upper()
+        cargo = _clean_cargo(cargo_input)
         _err = _cargo_error(cargo)
         if _err:
             st.error(_err)
@@ -622,7 +629,7 @@ else:
     # FBGAN 실행(버튼) → 결과를 session_state에 저장 (rerun에도 유지)
     if fbgan_run:
         st.session_state["view"] = "fbgan"
-        cargo = cargo_input.strip().upper()
+        cargo = _clean_cargo(cargo_input)
         _err = _cargo_error(cargo)
         if _err:
             st.error(_err)
