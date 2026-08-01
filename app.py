@@ -91,22 +91,17 @@ with _hero:
         value=DEFAULT_CARGO,
         help="링커·셔틀은 라이브러리에서 전부 자동으로 붙여봅니다. (표준 20종 아미노산 1글자 코드)",
     )
-    # === 메인 CTA: 자율 설계 에이전트 (공모전 flagship) ===
-    agent_run, agent_rounds = False, 8
+    # === 메인 CTA: 자율 설계 에이전트 (버튼은 항상 노출) ===
+    agent_rounds = 8
     if settings.use_gemini_agent:
         agent_rounds = st.slider("최대 스텝 수", 4, 12, 8,
                                  help="에이전트가 도구를 호출하는 최대 횟수. 낮추면 빠르고 저렴합니다.")
         st.caption(f"모델 — Gemini ({settings.gemini_model})")
-        agent_run = st.button("자율 설계 에이전트 실행", type="primary",
-                              width='stretch')
-        st.caption("에이전트가 BBB·독성·구조·수용체·생성 도구를 스스로 오케스트레이션해 "
-                   "최종 융합체를 설계합니다.")
     else:
-        with st.container(key="yy-more-apikey"):
-            st.info(
-                "자율 설계 에이전트는 Gemini API 키가 필요합니다. `.env`에 `GEMINI_API_KEY`를 "
-                "설정하고 앱을 재시작하세요. 키 없이 확인하려면 아래 ‘개별 도구’ 패널을 이용하세요."
-            )
+        st.caption("데모 모드 — API 키 없이 예시 결과로 화면을 미리봅니다.")
+    agent_run = st.button("자율 설계 에이전트 실행", type="primary", width='stretch')
+    st.caption("에이전트가 BBB·독성·구조·수용체·생성 도구를 스스로 오케스트레이션해 "
+               "최종 융합체를 설계합니다.")
 
     # === 개별 도구 (에이전트가 내부적으로 쓰는 도구들 · 수동 실행 · 무료) ===
     run = fbgan_run = struct_run = False
@@ -194,6 +189,75 @@ def _style_verdict(data: dict, cellmap: dict, col: str = "판정"):
         return f"background-color:{pair[0]};color:{pair[1]};font-weight:600;" if pair else ""
 
     return df.style.map(_c, subset=[col])
+
+
+class _Ev:
+    """실제 에이전트 이벤트와 동일한 형태(kind/text/data)의 경량 이벤트 객체 (데모용)."""
+    __slots__ = ("kind", "text", "data")
+
+    def __init__(self, kind, text="", data=None):
+        self.kind = kind
+        self.text = text
+        self.data = data or {}
+
+
+def _demo_agent_events(cargo):
+    """API 키 없이 결과 화면을 미리보기 위한 예시(더미) 이벤트 스트림.
+    실제 Gemini 에이전트가 내보내는 이벤트와 같은 kind/text/data 형태로 흉내낸다."""
+    cargo = cargo or "GHRPYD"
+    sh, lk = list(SHUTTLES), list(LINKER_LIBRARY)
+
+    def _mk(shuttle_name, linker_name, bbb, tox, **extra):
+        s, l = SHUTTLES[shuttle_name], LINKER_LIBRARY[linker_name]
+        row = {
+            "label": f"{shuttle_name} · {linker_name}",
+            "linker": l["seq"], "shuttle": s["seq"],
+            "shuttle_name": shuttle_name, "linker_name": linker_name,
+            "sequence": cargo + l["seq"] + s["seq"],
+            "bbb": bbb, "tox": tox, "toxic": tox > settings.toxicity_threshold,
+            "bind_ref": s.get("target", "TfR"), "bind_score": extra.get("bind_score", 0.72),
+            "instability": extra.get("instability", 34), "stable": extra.get("stable", True),
+            "dev_risk": extra.get("dev_risk", "낮음"), "dev_liab": extra.get("dev_liab", 1),
+            "dev_charge": extra.get("dev_charge", "+2"),
+            "dev_liabilities": extra.get("dev_liabilities", []),
+            "sol_level": extra.get("sol_level", "양호"), "sol_score": extra.get("sol_score", 0.71),
+            "selectivity": extra.get("selectivity", "높음"),
+            "sel_level": extra.get("sel_level", "낮음"),
+            "sel_mech": extra.get("sel_mech", f"{s.get('target', 'TfR')} 특이 결합"),
+        }
+        return row
+
+    r_win = _mk(sh[0], lk[0], 0.94, 0.06, bind_score=0.81, instability=31)
+    r2 = _mk(sh[1 % len(sh)], lk[1 % len(lk)], 0.88, 0.12, bind_score=0.69,
+             instability=38, dev_risk="중간", selectivity="중간", sel_level="중간")
+    r3 = _mk(sh[2 % len(sh)], lk[2 % len(lk)], 0.83, 0.09, bind_score=0.60, instability=41,
+             dev_risk="중간")
+    r_tox = _mk(sh[3 % len(sh)], lk[0], 0.71, 0.63, bind_score=0.55, stable=False,
+                dev_risk="높음", dev_liab=3, sel_level="높음", selectivity="낮음")
+    rows = [r_win, r2, r3, r_tox]
+
+    yield _Ev("plan", text=(
+        "**전략** — 라이브러리의 셔틀·링커 조합을 전수 평가해 BBB 투과·독성·안정성·"
+        "수용체 결합을 함께 만족하는 융합체를 찾습니다. 상위 후보는 구조(ESMFold)로 재검증합니다."))
+    yield _Ev("reasoning", text=(
+        "화물이 짧아 셔틀의 표면 노출이 결합에 결정적입니다. 유연 링커(GS 계열)를 우선 검토합니다."))
+    yield _Ev("evaluation", text="1차 후보 평가", data={"rows": rows})
+    for i, b in enumerate([0.72, 0.85, 0.90, 0.94]):
+        yield _Ev("progress", data={"best_bbb": b, "round": i + 1})
+    yield _Ev("structure", text="상위 후보에서 셔틀이 표면에 충분히 노출됩니다.",
+              data={"exposed": True})
+    win = dict(r_win)
+    win["agent_pick"] = True
+    yield _Ev("choice", data=win)
+    yield _Ev("final", text=(
+        f"**최종 보고서** — `{r_win['shuttle_name']} · {r_win['linker_name']}` 조합이 "
+        f"BBB {r_win['bbb']*100:.0f}점, 독성 {r_win['tox']*100:.0f}%로 최적입니다. "
+        "안정성·선택성 모두 안전 범위이며, 실제 적용 전 합성·In Vitro 검증이 필요합니다."))
+    yield _Ev("critique", text=(
+        "BBB·독성·선택성 근거가 일관되고 임계값을 만족합니다. 최종 선택을 승인합니다."),
+        data={"approve": True})
+    yield _Ev("reflection", text=(
+        "추가로 FBGAN 생성 셔틀을 탐색하면 라이브러리 밖에서 더 나은 후보를 얻을 수 있습니다."))
 
 
 def _emit_agent_event(ev):
@@ -566,18 +630,22 @@ else:
         if not cargo or (set(cargo) - VALID_AMINO_ACIDS):
             st.error("유효한 화물 펩타이드 서열을 입력해 주세요.")
             st.stop()
-        agent = get_gemini_agent(settings, max_rounds=agent_rounds)
-        brain = f"Gemini ({settings.gemini_model})"
+        if settings.use_gemini_agent:
+            event_source = get_gemini_agent(settings, max_rounds=agent_rounds).run(cargo)
+            brain = f"Gemini ({settings.gemini_model})"
+        else:
+            event_source = _demo_agent_events(cargo)   # API 키 없음 → 예시 데이터로 화면 미리보기
+            brain = "데모 모드 (예시 데이터)"
         st.session_state["agent_analysis"] = {}  # 새 실행 → 이전 온디맨드 분석 초기화
         st.divider()
         st.subheader("자율 설계 에이전트")
         st.caption(
-            f"화물 `{cargo}` · **{brain}**가 **BBB·독성·구조·생성 도구를 자율 오케스트레이션**해 "
+            f"화물 `{cargo}` · **{brain}**가 BBB·독성·구조·생성 도구를 자율 오케스트레이션해 "
             f"최종 융합체를 탐색 (최대 {agent_rounds}스텝)"
         )
         events = []
         with st.status("에이전트가 후보를 제안하고 평가 중...", expanded=True) as status:
-            for ev in agent.run(cargo):
+            for ev in event_source:
                 events.append(ev)
                 _emit_agent_event(ev)  # 라이브 스트리밍(완료 시 접힘 → 과정 기록)
                 if ev.kind == "error":
@@ -585,7 +653,10 @@ else:
             status.update(label="최적화 완료 · 위 status를 펼치면 과정 기록", state="complete",
                           expanded=False)
         _render_agent_summary(events, cargo)
-        st.caption("최적화 판단은 deepB3P·ToxinPred3 예측 기반입니다. 실제 합성·검증 필요.")
+        if settings.use_gemini_agent:
+            st.caption("최적화 판단은 deepB3P·ToxinPred3 예측 기반입니다. 실제 합성·검증 필요.")
+        else:
+            st.caption("※ 예시(더미) 데이터입니다 — 실제 예측·설계 결과가 아니라 화면 미리보기용입니다.")
         _rec = {"cargo": cargo, "events": events, "rounds": agent_rounds, "brain": brain}
         _opt = (next((e.data for e in events if e.kind == "choice"), None)
                 or next((e.data for e in events if e.kind == "optimum"), None))
