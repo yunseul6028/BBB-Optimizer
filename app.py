@@ -13,6 +13,7 @@ import re
 import time
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
@@ -376,8 +377,20 @@ def _render_agent_summary(events, cargo):
             st.markdown(plan)
     if len(progress) >= 2:
         st.markdown("##### 최적화 궤적")
-        st.line_chart({"best BBB": [p["best_bbb"] for p in progress]},
-                      x_label="라운드", y_label="BBB 투과 점수")
+        _traj = pd.DataFrame({
+            "라운드": list(range(1, len(progress) + 1)),
+            "BBB 투과 점수": [round(p["best_bbb"] * 100) for p in progress],
+        })
+        _chart = (
+            alt.Chart(_traj)
+            .mark_line(point=True, color="#30405c")
+            .encode(
+                x=alt.X("라운드:O", title="라운드"),
+                y=alt.Y("BBB 투과 점수:Q", title="BBB 투과 점수",
+                        scale=alt.Scale(domain=[0, 100])),  # 0~100 고정, 음수 제거
+            )
+        )
+        st.altair_chart(_chart, use_container_width=True)
     if podium:
         st.markdown("##### 상위 후보")
         st.caption("에이전트가 finish로 고른 최종 선택이 1위이고, 나머지는 BBB 순 차순위입니다. "
@@ -753,11 +766,24 @@ else:
         )
         if fb["history"]:
             st.markdown("##### 라운드별 BBB 개선")
-            st.line_chart(
-                {"평균 BBB": [h["mean_bbb"] for h in fb["history"]],
-                 "최고 BBB": [h["best_bbb"] for h in fb["history"]]},
-                x_label="라운드", y_label="BBB 투과 점수",
+            _hist_df = pd.DataFrame({
+                "라운드": list(range(1, len(fb["history"]) + 1)),
+                "평균 BBB": [round(h["mean_bbb"] * 100) for h in fb["history"]],
+                "최고 BBB": [round(h["best_bbb"] * 100) for h in fb["history"]],
+            }).melt("라운드", var_name="구분", value_name="BBB 투과 점수")
+            _hist_chart = (
+                alt.Chart(_hist_df)
+                .mark_line(point=True)
+                .encode(
+                    x=alt.X("라운드:O", title="라운드"),
+                    y=alt.Y("BBB 투과 점수:Q", title="BBB 투과 점수",
+                            scale=alt.Scale(domain=[0, 100])),  # 0~100 고정, 음수 제거
+                    color=alt.Color("구분:N", title="",
+                                    scale=alt.Scale(domain=["최고 BBB", "평균 BBB"],
+                                                    range=["#30405c", "#8a929e"])),
+                )
             )
+            st.altair_chart(_hist_chart, use_container_width=True)
         st.markdown("##### 생성된 베스트 셔틀")
         top = fb["best"][:3]
         if not top:
