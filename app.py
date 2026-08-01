@@ -63,6 +63,19 @@ def _dot(ok):
     return "🟢" if ok else "🟠"
 
 
+def _cargo_error(cargo):
+    """화물 서열이 유효하면 None, 아니면 어떤 문자가 문제인지 구체적 메시지를 돌려준다."""
+    if not cargo:
+        return "⚠️ 화물 펩타이드 서열을 입력해 주세요."
+    bad = sorted(set(cargo) - VALID_AMINO_ACIDS)
+    if bad:
+        shown = ", ".join(("공백/줄바꿈" if not c.strip() else f"`{c}`") for c in bad)
+        return (f"⚠️ 표준 20종 아미노산이 아닌 문자가 있습니다: {shown}. "
+                "1글자 코드(ACDEFGHIKLMNPQRSTVWY)만 사용하세요 — 항체 서열의 **X(불명 잔기)**·"
+                "공백·복붙 특수문자 등을 확인하세요.")
+    return None
+
+
 st.caption(
     f"엔진 상태 — 효능 deepB3P {_dot(settings.use_deepb3p_local)} · "
     f"독성 ToxinPred3 {_dot(settings.use_toxinpred3_local)} · 구조 ESMFold 🟢(API) · "
@@ -434,11 +447,9 @@ def _render_dual_track(d):
 # --- 실행 -------------------------------------------------------------------
 if run:
     cargo = cargo_input.strip().upper()
-    if not cargo:
-        st.error("⚠️ 화물 펩타이드 서열을 입력해 주세요.")
-        st.stop()
-    if set(cargo) - VALID_AMINO_ACIDS:
-        st.error("⚠️ 유효하지 않은 아미노산 문자가 있습니다. (표준 20종 1글자 코드만)")
+    _err = _cargo_error(cargo)
+    if _err:
+        st.error(_err)
         st.stop()
 
     agent = build_agent(settings)
@@ -543,8 +554,9 @@ else:
     # --- 자율 가설 에이전트 실행(버튼): 라이브 스트리밍 + session_state 저장 ---
     if agent_run:
         cargo = cargo_input.strip().upper()
-        if not cargo or (set(cargo) - VALID_AMINO_ACIDS):
-            st.error("⚠️ 유효한 화물 펩타이드 서열을 입력해 주세요.")
+        _err = _cargo_error(cargo)
+        if _err:
+            st.error(_err)
             st.stop()
         agent = get_gemini_agent(settings, max_rounds=agent_rounds)
         brain = f"Gemini ({settings.gemini_model})"
@@ -582,8 +594,9 @@ else:
     # --- 구조 기반 접합부 분석 실행(버튼) ---
     if struct_run:
         cargo = cargo_input.strip().upper()
-        if not cargo or (set(cargo) - VALID_AMINO_ACIDS):
-            st.error("⚠️ 유효한 화물 펩타이드 서열을 입력해 주세요.")
+        _err = _cargo_error(cargo)
+        if _err:
+            st.error(_err)
             st.stop()
         linker = LINKER_LIBRARY[struct_linker_name]["seq"]
         shuttle = SHUTTLES[struct_shuttle_name]["seq"]
@@ -610,8 +623,9 @@ else:
     if fbgan_run:
         st.session_state["view"] = "fbgan"
         cargo = cargo_input.strip().upper()
-        if not cargo or (set(cargo) - VALID_AMINO_ACIDS):
-            st.error("⚠️ 유효한 화물 펩타이드 서열을 입력해 주세요.")
+        _err = _cargo_error(cargo)
+        if _err:
+            st.error(_err)
             st.stop()
         linker = LINKER_LIBRARY[STANDARD_LINKER_NAME]["seq"]
         with st.status(f"🧬 생성 최적화 루프 실행 중... ({fbgan_rounds}라운드: 생성→평가→피드백)",
