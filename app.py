@@ -116,6 +116,17 @@ with _hero:
     struct_linker_name, struct_shuttle_name = STANDARD_LINKER_NAME, list(SHUTTLES)[0]
     with st.expander("🔧 개별 도구 직접 실행 (에이전트 없이 · 무료)"):
         st.caption("에이전트가 자율적으로 호출하는 도구들을 수동으로도 돌려볼 수 있습니다.")
+        # 디자인 미리보기 — 엔진/키 없이 결과 화면(포디움·심사 등) 목업 렌더 (프론트 작업용)
+        if st.button("🎨 디자인 미리보기 (목업 결과 화면 · 엔진 없이)", width='stretch'):
+            from core.mock import mock_agent_run
+            _mock = mock_agent_run(cargo_input.strip().upper() or DEFAULT_CARGO)
+            st.session_state["agent_analysis"] = {}
+            st.session_state["agent"] = _mock
+            _h = st.session_state.setdefault("agent_runs", [])
+            _h.append(_mock)
+            del _h[:-3]
+            st.session_state["view"] = "agent"
+            st.rerun()
         run = st.button("🚀 라이브러리 전수 스윕 (모든 링커 × 셔틀)", width='stretch')
 
         st.markdown("**🧬 이중 트랙 — 구조(ESMFold)+투과 점수+수용체**")
