@@ -13,6 +13,7 @@ import re
 import time
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -42,7 +43,7 @@ st.set_page_config(page_title="BBB-Optimize AI Agent", page_icon="🧬", layout=
 def _inject_theme():
     css = Path(__file__).parent / "assets" / "theme.css"
     if css.exists():
-        st.html(f"<style>{css.read_text()}</style>")
+        st.html(f"<style>{css.read_text(encoding='utf-8')}</style>")
 
 
 _inject_theme()
@@ -103,12 +104,13 @@ with _hero:
         st.caption("에이전트가 **BBB·독성·구조·수용체·생성 도구를 스스로 오케스트레이션**해 "
                    "최종 융합체를 설계합니다.")
     else:
-        st.info(
-            "🔑 **자율 설계 에이전트는 Gemini API 키가 필요합니다.** `.env`에 "
-            "`GEMINI_API_KEY=...`를 넣고 앱을 재시작하세요. "
-            "(키 없이 무료로 확인하려면 아래 '개별 도구'를 이용하세요.)",
-            icon="🔑",
-        )
+        with st.container(key="yy-more-apikey"):
+            st.info(
+                "🔑 **자율 설계 에이전트는 Gemini API 키가 필요합니다.** `.env`에 "
+                "`GEMINI_API_KEY=...`를 넣고 앱을 재시작하세요. "
+                "(키 없이 무료로 확인하려면 아래 '개별 도구'를 이용하세요.)",
+                icon="🔑",
+            )
 
     # === 개별 도구 (에이전트가 내부적으로 쓰는 도구들 · 수동 실행 · 무료) ===
     run = fbgan_run = struct_run = False
@@ -167,6 +169,45 @@ _VERDICT_LABEL = {
 }
 _MEDAL = ["🥇", "🥈", "🥉"]
 
+# 상태 색 언어(theme.css와 동일): 초록=좋음 · 주황=애매 · 빨강=위험 · 보라=더 알아야함
+_VERDICT_PILL = {
+    Verdict.ACCEPTED:       ("채택(베스트)",   "#e7f6ed", "#0b6b34"),  # 초록
+    Verdict.SUBOPTIMAL:     ("후순위",          "#fdf1de", "#8a5406"),  # 주황
+    Verdict.REJECTED_TOXIC: ("독성 탈락",       "#fbe9e9", "#a32020"),  # 빨강
+    Verdict.REFERENCE:      ("화물 단독(기준)", "#efeafc", "#4a2fa0"),  # 보라
+}
+# 판정 컬럼 셀 배경 (라벨 텍스트 → (배경, 글자))
+_VERDICT_CELL = {label: (bg, fg) for label, bg, fg in _VERDICT_PILL.values()}
+_PASS_CELL = {"✅ 통과": ("#e7f6ed", "#0b6b34"), "❌ 독성": ("#fbe9e9", "#a32020")}
+
+
+def _pill(text: str, bg: str, fg: str) -> str:
+    """색 알약(pill) 배지 HTML. st.markdown(..., unsafe_allow_html=True)로 렌더."""
+    return (f'<span style="display:inline-block;font-size:12px;font-weight:600;'
+            f'padding:3px 10px;border-radius:9999px;background:{bg};color:{fg};'
+            f'vertical-align:middle;">{text}</span>')
+
+
+def _verdict_pill(verdict) -> str:
+    text, bg, fg = _VERDICT_PILL.get(verdict, ("-", "#eee", "#333"))
+    return _pill(text, bg, fg)
+
+
+def _approve_pill(approve: bool) -> str:
+    return (_pill("✅ 승인 APPROVE", "#e7f6ed", "#0b6b34") if approve
+            else _pill("🔴 개선 요구 REVISE", "#fbe9e9", "#a32020"))
+
+
+def _style_verdict(data: dict, cellmap: dict, col: str = "판정"):
+    """dict → 판정 컬럼을 상태색으로 배경 칠한 pandas Styler."""
+    df = pd.DataFrame(data)
+
+    def _c(v):
+        pair = cellmap.get(v)
+        return f"background-color:{pair[0]};color:{pair[1]};font-weight:600;" if pair else ""
+
+    return df.style.map(_c, subset=[col])
+
 
 def _emit_agent_event(ev):
     """최적화 에이전트 이벤트 한 개 렌더 (plan/reflection/final/optimum/progress는 요약에서도 처리)."""
@@ -179,9 +220,11 @@ def _emit_agent_event(ev):
             st.markdown("🔎 **[자기평가] 에이전트 반성**")
             st.markdown(ev.text)
     elif ev.kind == "critique":
-        badge = "✅ 승인(APPROVE)" if ev.data.get("approve") else "🔴 개선 요구(REVISE)"
         with st.container(border=True):
-            st.markdown(f"🧑‍⚖️ **[심사 에이전트] 적대적 검증 — {badge}**")
+            st.markdown(
+                f"🧑‍⚖️ **[심사 에이전트] 적대적 검증** &nbsp; {_approve_pill(ev.data.get('approve'))}",
+                unsafe_allow_html=True,
+            )
             st.markdown(ev.text)
     elif ev.kind == "reasoning":
         with st.container(border=True):
@@ -195,17 +238,19 @@ def _emit_agent_event(ev):
             def _sh(s):
                 return (s[:14] + "…") if len(s) > 15 else (s or "—")
             st.dataframe(
-                {"라벨": [r["label"] for r in rows],
-                 "링커": [r["linker"] or "—" for r in rows],
-                 "셔틀": [_sh(r["shuttle"]) for r in rows],
-                 "BBB점": [f"{r['bbb']*100:.0f}" for r in rows],
-                 "독성": [f"{r['tox']*100:.0f}%" for r in rows],
-                 "수용체": [f"{r.get('bind_ref','?')}·{r.get('bind_score',0):.2f}" for r in rows],
-                 "안정성(II)": [f"{r.get('instability','?')}·"
-                                f"{'안정' if r.get('stable') else '불안정'}" for r in rows],
-                 "개발성": [f"{r.get('dev_risk','?')}·L{r.get('dev_liab','?')}·q{r.get('dev_charge','?')}"
-                            for r in rows],
-                 "판정": ["❌독성" if r["toxic"] else "✅통과" for r in rows]},
+                _style_verdict({
+                    "라벨": [r["label"] for r in rows],
+                    "링커": [r["linker"] or "—" for r in rows],
+                    "셔틀": [_sh(r["shuttle"]) for r in rows],
+                    "BBB점": [f"{r['bbb']*100:.0f}" for r in rows],
+                    "독성": [f"{r['tox']*100:.0f}%" for r in rows],
+                    "수용체": [f"{r.get('bind_ref','?')}·{r.get('bind_score',0):.2f}" for r in rows],
+                    "안정성(II)": [f"{r.get('instability','?')}·"
+                                   f"{'안정' if r.get('stable') else '불안정'}" for r in rows],
+                    "개발성": [f"{r.get('dev_risk','?')}·L{r.get('dev_liab','?')}·q{r.get('dev_charge','?')}"
+                               for r in rows],
+                    "판정": ["❌ 독성" if r["toxic"] else "✅ 통과" for r in rows],
+                }, _PASS_CELL),
                 width='stretch', hide_index=True,
             )
     elif ev.kind == "structure":
@@ -330,9 +375,11 @@ def _render_agent_summary(events, cargo):
             st.markdown("### 🏁 설계 에이전트 — 최종 보고서")
             st.markdown(final)
     if critique is not None:
-        badge = "✅ 승인 (APPROVE)" if critique.data.get("approve") else "🔴 개선 요구 (REVISE)"
         with st.container(border=True):
-            st.markdown(f"### 🧑‍⚖️ 심사 에이전트 — 적대적 검증  ·  {badge}")
+            st.markdown(
+                f"### 🧑‍⚖️ 심사 에이전트 — 적대적 검증  &nbsp; {_approve_pill(critique.data.get('approve'))}",
+                unsafe_allow_html=True,
+            )
             st.markdown(critique.text)
     if reflection:
         with st.container(border=True):
@@ -511,15 +558,15 @@ if run:
         )
         tox_col = "독성(ToxinPred3)" if settings.use_toxinpred3_local else "독성(임시)"
         st.dataframe(
-            {
+            _style_verdict({
                 "조합": [e.construct.label for e in rows],
                 "링커": [e.construct.linker or "—" for e in rows],
                 "BBB 투과 점수": [f"{e.prediction.bbb_permeability*100:.0f}" for e in rows],
                 tox_col: [f"{e.prediction.toxicity_risk*100:.0f}%" for e in rows],
                 "길이": [f"{len(e.construct.sequence)}aa" + ("🔎" if e.construct.truncated else "")
                         for e in rows],
-                "판정": [_VERDICT_LABEL.get(e.verdict, "-") for e in rows],
-            },
+                "판정": [_VERDICT_PILL.get(e.verdict, ("-",))[0] for e in rows],
+            }, _VERDICT_CELL),
             width='stretch', hide_index=True,
         )
 
@@ -683,10 +730,12 @@ else:
         )
     else:
         if settings.use_gemini_agent:
-            st.info("👆 화물 펩타이드를 입력하고 **[🤖 자율 설계 에이전트 실행]** 버튼을 눌러 주세요.")
+            with st.container(key="yy-more-input1"):
+                st.info("👆 화물 펩타이드를 입력하고 **[🤖 자율 설계 에이전트 실행]** 버튼을 눌러 주세요.")
         else:
-            st.info(
-                "👆 화물 펩타이드를 입력하세요. 자율 설계 에이전트를 쓰려면 **Gemini API 키**가 "
-                "필요합니다(위 안내 참고). 키 없이 확인하려면 **[🔧 개별 도구 직접 실행]** "
-                "패널을 펼쳐 각 도구를 수동으로 실행할 수 있어요."
-            )
+            with st.container(key="yy-more-input2"):
+                st.info(
+                    "👆 화물 펩타이드를 입력하세요. 자율 설계 에이전트를 쓰려면 **Gemini API 키**가 "
+                    "필요합니다(위 안내 참고). 키 없이 확인하려면 **[🔧 개별 도구 직접 실행]** "
+                    "패널을 펼쳐 각 도구를 수동으로 실행할 수 있어요."
+                )

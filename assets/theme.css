@@ -1,6 +1,6 @@
 /* ==========================================================================
-   냠냠픽업(YumYum) 디자인 시스템 — Streamlit 적용 레이어
-   Figma: YumYum-v1 에서 추출한 토큰 기반
+   냠냠픽업(YumYum) 디자인 시스템 — Streamlit 적용 레이어 (쿨 · 노옐로 버전)
+   브랜드 옐로를 걷어내고 쿨그레이 베이스 + 딥 인디고블루 강조 + 딥틸 보조로 재구성.
    ========================================================================== */
 /* Pretendard self-host(앱 내장) → CDN·브라우저 무관하게 로드. @import는 주입 스타일에서
    불안정해 @font-face 직접 선언으로 대체. static/는 Streamlit static serving으로 서빙. */
@@ -14,19 +14,23 @@
 }
 
 :root {
-  /* Brand */
-  --yy-yellow: #ffde36;
-  --yy-yellow-press: #fdbc45;
-  --yy-yellow-soft: #fff6cf;
-  --yy-orange: #ff8500;
-  /* Neutral */
-  --yy-n0: #ffffff;  --yy-n100: #f7f7f7; --yy-n150: #ededed; --yy-n200: #cecece;
-  --yy-n350: #848484; --yy-n400: #777777; --yy-n500: #6b6b6b; --yy-n700: #333333;
-  --yy-n900: #222222; --yy-black: #080808;
+  /* Accent — 딥 인디고블루 (구 브랜드 옐로 대체) */
+  --yy-accent: #2f6fe0;
+  --yy-accent-press: #2457b8;
+  --yy-accent-soft: #e8eefb;
+  --yy-accent-tx: #1c3f86;
+  /* Secondary — 딥틸 */
+  --yy-teal: #0f6e56;
+  --yy-teal-soft: #e1f5ee;
+  /* Neutral (쿨 스케일) */
+  --yy-n0: #ffffff;  --yy-n100: #f1f3f6; --yy-n150: #e6e9ee; --yy-n200: #d4d9e0;
+  --yy-n350: #8a929e; --yy-n400: #79818d; --yy-n500: #5b6470; --yy-n700: #2b313b;
+  --yy-n900: #14181f; --yy-black: #0a0c10;
+  --yy-page: #f6f7f9;   /* 앱 베이스(쿨 페이퍼) */
   /* Semantic */
-  --yy-success: #3cde75; --yy-success-bg: #c5ff9c; --yy-success-tx: #458a4b;
-  --yy-error: #eb2323;   --yy-error-bg: #fcdede;
-  --yy-info: #2597ba;    --yy-info-bg: #c2e3eb;
+  --yy-success: #1d9e75; --yy-success-bg: #e1f5ee; --yy-success-tx: #0f6e56;
+  --yy-error: #e24b4a;   --yy-error-bg: #fceceb;
+  --yy-info: #2f6fe0;    --yy-info-bg: #e8eefb;
   /* Radius / Spacing */
   --yy-r-sm: 8px; --yy-r-lg: 12px; --yy-r-full: 9999px;
 }
@@ -54,7 +58,7 @@ code, pre, [data-testid="stCode"], [data-testid="stCode"] * {
                'Material Icons', 'Material Icons Outlined' !important;
 }
 
-.stApp { background: var(--yy-n0); }
+.stApp { background: var(--yy-page); }
 
 /* ---- 웹(데스크톱) 레이아웃 -------------------------------------------- */
 /* 와이드 레이아웃을 읽기 좋은 최대폭으로 제한하고 중앙 정렬 */
@@ -80,9 +84,9 @@ h1 {
   letter-spacing: -0.02em; line-height: 1.15;
   font-size: clamp(2rem, 3.4vw, 3rem) !important;   /* 웹 히어로 사이즈 */
 }
-h1::after {   /* 브랜드 옐로 언더라인 액센트 */
+h1::after {   /* 액센트 언더라인 (딥 인디고블루) */
   content: ""; display: block; width: 72px; height: 6px; margin-top: 14px;
-  background: var(--yy-yellow); border-radius: var(--yy-r-full);
+  background: var(--yy-accent); border-radius: var(--yy-r-full);
 }
 h2 { font-size: 1.7rem !important; }
 h3 { font-size: 1.3rem !important; }
@@ -90,17 +94,17 @@ h2, h3 { font-weight: 700 !important; color: var(--yy-n900) !important; letter-s
 h4 { font-weight: 600 !important; color: var(--yy-n900) !important; }
 [data-testid="stCaptionContainer"] { color: var(--yy-n500) !important; font-size: 12px !important; }
 
-/* ---- 메인 CTA 버튼: 옐로 필 + 다크 텍스트 ----------------------------- */
+/* ---- 메인 CTA 버튼: 인디고블루 필 + 화이트 텍스트 -------------------- */
 .stButton > button[kind="primary"] {
-  background: var(--yy-yellow) !important;
-  color: var(--yy-black) !important;
+  background: var(--yy-accent) !important;
+  color: #ffffff !important;
   border: none !important; font-weight: 700 !important; font-size: 16px !important;
   border-radius: var(--yy-r-lg) !important; padding: 0.72rem 1rem !important;
-  box-shadow: 0 2px 0 rgba(0,0,0,0.10); transition: background .15s, transform .04s;
+  box-shadow: 0 2px 0 rgba(20,24,31,0.14); transition: background .15s, transform .04s;
 }
-.stButton > button[kind="primary"]:hover { background: var(--yy-yellow-press) !important; color: #000 !important; }
+.stButton > button[kind="primary"]:hover { background: var(--yy-accent-press) !important; color: #fff !important; }
 .stButton > button[kind="primary"]:active { transform: translateY(1px); box-shadow: none; }
-.stButton > button[kind="primary"]:focus { box-shadow: 0 0 0 3px rgba(255,222,54,.45) !important; }
+.stButton > button[kind="primary"]:focus { box-shadow: 0 0 0 3px rgba(47,111,224,.40) !important; }
 
 /* ---- 보조 버튼 -------------------------------------------------------- */
 .stButton > button[kind="secondary"] {
@@ -108,7 +112,7 @@ h4 { font-weight: 600 !important; color: var(--yy-n900) !important; }
   border: 1.5px solid var(--yy-n150) !important; border-radius: var(--yy-r-lg) !important;
   font-weight: 600 !important;
 }
-.stButton > button[kind="secondary"]:hover { border-color: var(--yy-yellow) !important; color: #000 !important; }
+.stButton > button[kind="secondary"]:hover { border-color: var(--yy-accent) !important; color: var(--yy-accent-tx) !important; }
 
 /* ---- 입력 필드 -------------------------------------------------------- */
 .stTextInput input, .stTextArea textarea {
@@ -116,7 +120,7 @@ h4 { font-weight: 600 !important; color: var(--yy-n900) !important; }
   background: #fff !important; font-size: 16px !important; color: var(--yy-n900) !important;
 }
 .stTextInput input:focus, .stTextArea textarea:focus {
-  border-color: var(--yy-yellow) !important; box-shadow: 0 0 0 3px rgba(255,222,54,.35) !important;
+  border-color: var(--yy-accent) !important; box-shadow: 0 0 0 3px rgba(47,111,224,.30) !important;
 }
 .stTextInput input::placeholder { color: var(--yy-n350) !important; }
 
@@ -129,28 +133,28 @@ h4 { font-weight: 600 !important; color: var(--yy-n900) !important; }
   border-radius: var(--yy-r-lg) !important; border: 1px solid var(--yy-n150) !important;
   background: #fff; overflow: hidden;
 }
-[data-testid="stExpander"] summary:hover { color: var(--yy-orange) !important; }
+[data-testid="stExpander"] summary:hover { color: var(--yy-accent) !important; }
 
 /* ---- 베스트 3 랭크 액센트 (container key 기반) ------------------------ */
 .st-key-best-card-0, .st-key-gen-card-0 {
-  border: 2px solid var(--yy-yellow) !important;
-  box-shadow: 0 6px 24px rgba(255,222,54,.28) !important;
-  background: linear-gradient(180deg, var(--yy-yellow-soft) 0%, #fff 42%) !important;
+  border: 2px solid var(--yy-accent) !important;
+  box-shadow: 0 6px 24px rgba(47,111,224,.22) !important;
+  background: linear-gradient(180deg, var(--yy-accent-soft) 0%, #fff 42%) !important;
 }
-.st-key-best-card-1, .st-key-gen-card-1 { border-left: 6px solid #c4c4c4 !important; }
-.st-key-best-card-2, .st-key-gen-card-2 { border-left: 6px solid #cd8f4e !important; }
+.st-key-best-card-1, .st-key-gen-card-1 { border-left: 6px solid #b9c0cb !important; }  /* 실버(쿨 그레이) */
+.st-key-best-card-2, .st-key-gen-card-2 { border-left: 6px solid #5dcaa5 !important; }  /* 딥틸 라이트 */
 .st-key-opt-card {
-  border: 2px solid var(--yy-yellow) !important;
-  box-shadow: 0 6px 24px rgba(255,222,54,.28) !important;
-  background: linear-gradient(180deg, var(--yy-yellow-soft) 0%, #fff 42%) !important;
+  border: 2px solid var(--yy-accent) !important;
+  box-shadow: 0 6px 24px rgba(47,111,224,.22) !important;
+  background: linear-gradient(180deg, var(--yy-accent-soft) 0%, #fff 42%) !important;
 }
 
 /* ---- 메트릭 ----------------------------------------------------------- */
 [data-testid="stMetricValue"] { font-weight: 800 !important; color: var(--yy-n900) !important; }
 [data-testid="stMetricLabel"] p { color: var(--yy-n500) !important; font-size: 12px !important; font-weight: 500 !important; }
 
-/* ---- 프로그레스: 옐로 필 --------------------------------------------- */
-[data-testid="stProgress"] div[role="progressbar"] > div > div { background: var(--yy-yellow) !important; }
+/* ---- 프로그레스: 인디고블루 필 -------------------------------------- */
+[data-testid="stProgress"] div[role="progressbar"] > div > div { background: var(--yy-accent) !important; }
 
 /* ---- 코드 블록(서열) -------------------------------------------------- */
 [data-testid="stCode"] { border-radius: var(--yy-r-sm) !important; }
@@ -167,5 +171,51 @@ h4 { font-weight: 600 !important; color: var(--yy-n900) !important; }
 /* ---- 데이터프레임 라운딩 --------------------------------------------- */
 [data-testid="stDataFrame"] { border-radius: var(--yy-r-sm) !important; overflow: hidden; }
 
-/* ---- 멀티셀렉트/드롭다운 태그 옐로 ----------------------------------- */
-[data-baseweb="tag"] { background: var(--yy-yellow) !important; color: var(--yy-black) !important; }
+/* ---- 멀티셀렉트/드롭다운 태그: 소프트 인디고 --------------------------- */
+[data-baseweb="tag"] { background: var(--yy-accent-soft) !important; color: var(--yy-accent-tx) !important; }
+
+/* ==========================================================================
+   상태 색 언어 (위험도·실행가능성 → 색으로 한눈에)
+   빨강=위험/실행어려움 · 초록·파랑=좋음/실행OK · 주황=애매/살짝위험 · 보라=더 알아야함
+   ========================================================================== */
+:root {
+  --sem-red: #dc3b3b;    --sem-red-bg: #fbe9e9;
+  --sem-amber: #f59e0b;  --sem-amber-bg: #fdf1de;
+  --sem-green: #12a150;  --sem-green-bg: #e7f6ed;
+  --sem-blue: #2f6fe0;   --sem-blue-bg: #e8eefb;
+  --sem-purple: #7c5cdb; --sem-purple-bg: #efeafc;
+}
+
+/* Streamlit 알림: 내부 content testid로 종류를 구분해 좌측 액센트 + 틴트 배경.
+   inset box-shadow로 라운드 코너를 유지한 채 좌측 바만 그림. */
+[data-testid="stAlertContainer"]:has([data-testid="stAlertContentSuccess"]) {
+  background: var(--sem-green-bg) !important;
+  box-shadow: inset 4px 0 0 var(--sem-green) !important;   /* 초록 — 좋음/실행OK */
+}
+[data-testid="stAlertContainer"]:has([data-testid="stAlertContentInfo"]) {
+  background: var(--sem-blue-bg) !important;
+  box-shadow: inset 4px 0 0 var(--sem-blue) !important;    /* 파랑 — 좋음/정보 */
+}
+[data-testid="stAlertContainer"]:has([data-testid="stAlertContentWarning"]) {
+  background: var(--sem-amber-bg) !important;
+  box-shadow: inset 4px 0 0 var(--sem-amber) !important;   /* 주황 — 애매/살짝위험 */
+}
+[data-testid="stAlertContainer"]:has([data-testid="stAlertContentError"]) {
+  background: var(--sem-red-bg) !important;
+  box-shadow: inset 4px 0 0 var(--sem-red) !important;     /* 빨강 — 위험/실행어려움 */
+}
+
+/* 보라 — 더 알아야 함. app.py에서 st.container(key="yy-more-*")로 감싼 알림에 적용.
+   info 규칙과 동일 특이도이므로 반드시 뒤에 위치해 덮어씀. */
+[class*="st-key-yy-more"] [data-testid="stAlertContainer"] {
+  background: var(--sem-purple-bg) !important;
+  box-shadow: inset 4px 0 0 var(--sem-purple) !important;
+}
+
+/* 상태 배지 유틸 (필요 시 markdown/HTML에서 사용) */
+.yy-badge { display:inline-block; font-size:12px; font-weight:600; padding:3px 10px; border-radius:9999px; }
+.yy-badge.red    { background:var(--sem-red-bg);    color:#a32020; }
+.yy-badge.amber  { background:var(--sem-amber-bg);  color:#8a5406; }
+.yy-badge.green  { background:var(--sem-green-bg);  color:#0b6b34; }
+.yy-badge.blue   { background:var(--sem-blue-bg);   color:var(--yy-accent-tx); }
+.yy-badge.purple { background:var(--sem-purple-bg); color:#4a2fa0; }
