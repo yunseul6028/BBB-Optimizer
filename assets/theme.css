@@ -14,11 +14,11 @@
 }
 
 :root {
-  /* Accent — 딥 인디고블루 (구 브랜드 옐로 대체) */
-  --yy-accent: #2f6fe0;
-  --yy-accent-press: #2457b8;
-  --yy-accent-soft: #e8eefb;
-  --yy-accent-tx: #1c3f86;
+  /* Accent — 딥 슬레이트 잉크 (세련·에디토리얼) */
+  --yy-accent: #30405c;
+  --yy-accent-press: #22304a;
+  --yy-accent-soft: #eaedf2;
+  --yy-accent-tx: #2a3850;
   /* Secondary — 딥틸 */
   --yy-teal: #0f6e56;
   --yy-teal-soft: #e1f5ee;
@@ -32,7 +32,7 @@
   --yy-error: #e24b4a;   --yy-error-bg: #fceceb;
   --yy-info: #2f6fe0;    --yy-info-bg: #e8eefb;
   /* Radius / Spacing */
-  --yy-r-sm: 8px; --yy-r-lg: 12px; --yy-r-full: 9999px;
+  --yy-r-sm: 4px; --yy-r-lg: 6px; --yy-r-full: 9999px;
 }
 
 /* ---- 타이포: Pretendard 전역 적용 -------------------------------------- */
@@ -84,8 +84,8 @@ h1 {
   letter-spacing: -0.02em; line-height: 1.15;
   font-size: clamp(2rem, 3.4vw, 3rem) !important;   /* 웹 히어로 사이즈 */
 }
-h1::after {   /* 액센트 언더라인 (딥 인디고블루) */
-  content: ""; display: block; width: 72px; height: 6px; margin-top: 14px;
+h1::after {   /* 액센트 언더라인 (딥 슬레이트 · 얇고 정제) */
+  content: ""; display: block; width: 44px; height: 3px; margin-top: 12px;
   background: var(--yy-accent); border-radius: var(--yy-r-full);
 }
 h2 { font-size: 1.7rem !important; }
@@ -104,7 +104,7 @@ h4 { font-weight: 600 !important; color: var(--yy-n900) !important; }
 }
 .stButton > button[kind="primary"]:hover { background: var(--yy-accent-press) !important; color: #fff !important; }
 .stButton > button[kind="primary"]:active { transform: translateY(1px); box-shadow: none; }
-.stButton > button[kind="primary"]:focus { box-shadow: 0 0 0 3px rgba(47,111,224,.40) !important; }
+.stButton > button[kind="primary"]:focus { box-shadow: 0 0 0 3px rgba(48,64,92,.32) !important; }
 
 /* ---- 보조 버튼 -------------------------------------------------------- */
 .stButton > button[kind="secondary"] {
@@ -120,7 +120,7 @@ h4 { font-weight: 600 !important; color: var(--yy-n900) !important; }
   background: #fff !important; font-size: 16px !important; color: var(--yy-n900) !important;
 }
 .stTextInput input:focus, .stTextArea textarea:focus {
-  border-color: var(--yy-accent) !important; box-shadow: 0 0 0 3px rgba(47,111,224,.30) !important;
+  border-color: var(--yy-accent) !important; box-shadow: 0 0 0 3px rgba(48,64,92,.24) !important;
 }
 .stTextInput input::placeholder { color: var(--yy-n350) !important; }
 
@@ -138,14 +138,14 @@ h4 { font-weight: 600 !important; color: var(--yy-n900) !important; }
 /* ---- 베스트 3 랭크 액센트 (container key 기반) ------------------------ */
 .st-key-best-card-0, .st-key-gen-card-0 {
   border: 2px solid var(--sem-green) !important;                      /* 1위=채택 → 초록 */
-  box-shadow: 0 6px 24px rgba(18,161,80,.18) !important;
+  box-shadow: 0 2px 10px rgba(18,161,80,.12) !important;
   background: linear-gradient(180deg, var(--sem-green-bg) 0%, #fff 42%) !important;
 }
 .st-key-best-card-1, .st-key-gen-card-1,
 .st-key-best-card-2, .st-key-gen-card-2 { border-left: 4px solid var(--yy-n200) !important; }  /* 차순위=중립 */
 .st-key-opt-card {
   border: 2px solid var(--sem-green) !important;
-  box-shadow: 0 6px 24px rgba(18,161,80,.18) !important;
+  box-shadow: 0 2px 10px rgba(18,161,80,.12) !important;
   background: linear-gradient(180deg, var(--sem-green-bg) 0%, #fff 42%) !important;
 }
 
