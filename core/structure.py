@@ -49,28 +49,48 @@ class StructureResult:
     error: str = ""
 
 
-def fold_esmfold(sequence: str, timeout: float = 120.0) -> tuple[str, str]:
-    """서열 → ESMFold PDB. (pdb, error) 반환. sha256 캐싱으로 재폴딩 방지."""
+def fold_esmfold(sequence: str, timeout: float = 90.0, tries: int = 3) -> tuple[str, str]:
+    """서열 → ESMFold PDB. (pdb, error) 반환. sha256 캐싱 + 일시적 서버오류 백오프 재시도.
+
+    ESMFold 공개 API는 종종 502/503/**504(게이트웨이 타임아웃)** 나 응답 지연을 내는데,
+    대부분 일시적이라 짧게 기다렸다 재시도하면 성공한다. 4xx(클라이언트 오류)는 재시도 안 함.
+    """
+    import time
     import requests
     seq = "".join(ch for ch in sequence.upper() if ch.isalpha())
     cache = CACHE_DIR / (hashlib.sha256(seq.encode()).hexdigest() + ".pdb")
     if cache.exists():
         return cache.read_text(), ""
-    try:
-        r = requests.post(ESMFOLD_URL, data=seq, timeout=timeout)
-        r.raise_for_status()
-        pdb = r.text
-        if "ATOM" not in pdb:
-            return "", f"ESMFold 응답 이상: {pdb[:150]}"
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache.write_text(pdb)
-        return pdb, ""
-    except Exception as exc:  # noqa: BLE001
-        return "", f"ESMFold API 오류: {type(exc).__name__}: {exc}"
+
+    last = ""
+    for attempt in range(tries):
+        try:
+            r = requests.post(ESMFOLD_URL, data=seq, timeout=timeout)
+            if r.status_code in (429, 500, 502, 503, 504):
+                last = f"서버 {r.status_code}(일시적)"          # transient → 재시도
+            elif not r.ok:
+                return "", f"ESMFold API 오류: HTTP {r.status_code}"  # 4xx 등 → 즉시 실패
+            else:
+                pdb = r.text
+                if "ATOM" not in pdb:
+                    last = f"응답 이상: {pdb[:120]}"
+                else:
+                    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                    cache.write_text(pdb)
+                    return pdb, ""
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+            last = type(exc).__name__                          # 네트워크 지연 → 재시도
+        except Exception as exc:  # noqa: BLE001
+            return "", f"ESMFold API 오류: {type(exc).__name__}: {exc}"
+        if attempt < tries - 1:
+            time.sleep(3 * (attempt + 1))                      # 3초, 6초 백오프
+
+    return "", (f"ESMFold 서버 일시 오류({last}) — 재시도 후에도 실패했습니다. "
+                "잠시 후 다시 시도하세요. (구조 노출도는 보조 지표라 나머지 결과엔 영향 없습니다.)")
 
 
 def analyze_construct(cargo: str, linker: str, shuttle: str,
-                      timeout: float = 120.0) -> StructureResult:
+                      timeout: float = 90.0) -> StructureResult:
     """융합체를 접고 셔틀 노출도를 분석한다."""
     cargo, linker, shuttle = cargo.upper(), linker.upper(), shuttle.upper()
     seq = cargo + linker + shuttle
