@@ -290,8 +290,8 @@ class GeminiOptimizationAgent(OptimizationAgent):
             # ── 1. 설계자 실행 + 자기종료(finish) → 심사(Critic) → REVISE 시 재설계 ──
             choice = final_report = critique_text = None
             approve = True
-            critiques, MAX_CRITIQUES, turn = 0, 1, 0
-            while turn < self.max_rounds:
+            critiques, MAX_CRITIQUES, turn, grace = 0, 1, 0, 0
+            while turn < self.max_rounds + grace:
                 turn += 1
                 resp = self._gen_retry(client, model, contents, _cfg(True))
                 cand = (resp.candidates or [None])[0]
@@ -348,8 +348,9 @@ class GeminiOptimizationAgent(OptimizationAgent):
                     approve, critique_text = True, "후보 채점 실패로 심사를 생략합니다."
                 yield AgentEvent("progress", data={"round": turn,
                                                    "best_bbb": (choice or best or {}).get("bbb", 0)})
-                if (not approve) and critiques < MAX_CRITIQUES and turn < self.max_rounds:
+                if (not approve) and critiques < MAX_CRITIQUES:
                     critiques += 1
+                    grace += 1  # 재설계용 여분 턴 부여 → 마지막 스텝에서 REVISE가 나와도 개선 1회 보장
                     contents.append(types.Content(role="user", parts=fr_parts + [types.Part.from_text(
                         text="독립 **심사 에이전트가 REVISE(개선 요구)**를 냈다. 심사 반박:\n"
                              f"{critique_text}\n이 지적을 반영해 design_candidate 등으로 후보를 개선하고, "
@@ -372,12 +373,15 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 approve, critique_text = self._critic_review(client, model, types, cargo, final_pick)
 
             # ── 결과 방출 (한 번씩): 설계자 결론 + 심사 판정 ──
+            # 심사 최종 판정을 최종 후보에 각인 → UI가 "승인/미승인"을 정직하게 표시한다.
             if choice is not None:
+                choice["critic_approved"] = approve
                 yield AgentEvent("choice", data=choice)
             yield AgentEvent("final", final_report or "")
             if critique_text:
                 yield AgentEvent("critique", critique_text, data={"approve": approve})
             if final_pick:
+                final_pick["critic_approved"] = approve
                 yield AgentEvent("optimum", data=final_pick)
         except Exception as exc:  # noqa: BLE001
             yield AgentEvent("error", f"Gemini 호출 오류: {type(exc).__name__}: {exc}")
