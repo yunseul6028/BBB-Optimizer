@@ -334,8 +334,8 @@ def _render_agent_summary(events, cargo):
                 is_pick = cand.get("agent_pick") or approved is not None
                 with st.container(border=True, key=f"best-card-{i}"):
                     if is_pick and approved is False:
-                        # 심사가 REVISE(개선요구) → 확정이 아님. 거부된 후보를 "최종"으로 위장하지 않는다.
-                        st.markdown("### ⚠️ 에이전트 제출 · 심사 미승인")
+                        # 1위(최종 선택)로는 제시하되, 심사 미승인임을 옆에 명시한다.
+                        st.markdown("### 🎯 에이전트 최종 선택  ·  ⚠️ 심사 미승인")
                         st.caption("🧑‍⚖️ 심사 에이전트가 **개선요구(REVISE)** — 확정 아님. 아래 심사 의견을 "
                                    "참고하고, 스텝 수를 늘려 재실행하면 개선안을 냅니다.")
                     elif is_pick:
