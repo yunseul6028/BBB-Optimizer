@@ -206,6 +206,7 @@ class OptimizationAgent:
         from .stability import assess_stability
         from .developability import assess_developability
         from .selectivity import assess_selectivity
+        from .solubility import assess_solubility
         bbb = self.predictor.predict_many([bbb_scoring_seq(cargo, c["linker"], c["shuttle"]) for c in clean])
         tox = self.tox_predictor.predict_many([c["sequence"] for c in clean])
         thr = self.settings.toxicity_threshold
@@ -216,6 +217,7 @@ class OptimizationAgent:
             stab = assess_stability(c["sequence"])
             dev = assess_developability(c["sequence"])
             selr = assess_selectivity(c["shuttle"])   # off-target은 셔틀이 주도
+            solr = assess_solubility(c["sequence"])   # 용해도는 전체 융합체
             rows.append({"label": c["label"], "linker": c["linker"], "shuttle": c["shuttle"],
                          "sequence": c["sequence"], "bbb": round(p.bbb_permeability, 4),
                          "tox": round(t.risk, 4), "toxic": toxic,
@@ -226,7 +228,8 @@ class OptimizationAgent:
                          "dev_liabilities": dev.liabilities,
                          "sel_off": selr.off_target_risk, "selectivity": selr.selectivity,
                          "sel_level": selr.risk_level, "sel_mech": selr.mechanism,
-                         "sel_drivers": selr.drivers})
+                         "sel_drivers": selr.drivers,
+                         "sol_score": solr.score, "sol_level": solr.level})
             lines.append(f"{c['label']} | {p.bbb_permeability:.3f} | {t.risk:.3f} | "
                          f"{stab.instability_index} | {bind.score:.2f} | "
                          f"{'FAIL(penalty)' if toxic else 'ok'} | {c['sequence']}")

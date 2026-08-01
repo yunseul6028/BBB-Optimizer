@@ -329,7 +329,8 @@ def _render_agent_summary(events, cargo):
                     _devs = cand.get("dev_liabilities") or []
                     st.caption(
                         f"개발성 위험 **{cand.get('dev_risk', '?')}** · 순전하 {cand.get('dev_charge', '?')} · "
-                        f"liability {cand.get('dev_liab', 0)}개"
+                        f"liability {cand.get('dev_liab', 0)}개 · 용해도 **{cand.get('sol_level', '?')}**"
+                        f"({cand.get('sol_score', '?')})"
                         + (f" ({', '.join(_devs[:2])}…)" if _devs else ""))
                     st.caption(
                         f"🎯 선택성 **{cand.get('selectivity', '?')}** · off-target 위험 "

@@ -192,7 +192,8 @@ class GeminiOptimizationAgent(OptimizationAgent):
              f"응집={choice.get('dev_agg', '?')}, liability({len(dev_list)}): "
              + ("; ".join(dev_list) if dev_list else "없음") + "\n"
              f"선택성/off-target — 위험={choice.get('sel_level', '?')}"
-             f"(선택성 {choice.get('selectivity', '?')}), {choice.get('sel_mech', '?')}")
+             f"(선택성 {choice.get('selectivity', '?')}), {choice.get('sel_mech', '?')}\n"
+             f"용해도 — {choice.get('sol_level', '?')}(점수 {choice.get('sol_score', '?')})")
         cfg = types.GenerateContentConfig(
             system_instruction=self._critic_prompt(), temperature=1.0,
             thinking_config=types.ThinkingConfig(include_thoughts=False))
