@@ -207,6 +207,43 @@ class GeminiOptimizationAgent(OptimizationAgent):
         approve = "APPROVE" in (text or "").upper().rsplit("VERDICT:", 1)[-1]
         return approve, text
 
+    def _recommend_on_failure(self, client, model, types, cargo, choice, critique_text):
+        """최종 미승인(전 후보 반려)일 때, 실패 진단 + 시스템 내 구체적 대안을 권고한다.
+
+        화물(치료 목표)은 고정이므로 화물 교체가 아니라 셔틀·링커·생성(FBGAN)·모달리티 관점의
+        '다음 수'를 제시한다. 실패 경로에서만 1회 호출되어 비용 부담이 작다. 반환: 권고안 텍스트.
+        """
+        dev_list = choice.get("dev_liabilities") or []
+        m = (f"화물={cargo}, 링커={choice.get('linker') or '—'}, 셔틀={choice.get('shuttle')}\n"
+             f"BBB={choice['bbb']:.3f}, 독성={choice['tox']:.3f}, 불안정성={choice['instability']}, "
+             f"선택성={choice.get('selectivity', '?')}({choice.get('sel_level', '?')}), "
+             f"개발성위험={choice.get('dev_risk', '?')}, 용해도={choice.get('sol_level', '?')}, "
+             f"liability={len(dev_list)}개")
+        sys = (
+            "너는 BBB 융합체 설계의 자문(advisory) 에이전트다. 최종 후보가 심사에서 **최종 미승인**됐다. "
+            "화물(치료 목표)은 고정이므로 **화물 교체는 권하지 마라.** 실패 원인을 데이터로 진단하고, "
+            "**우리 시스템 안에서 실행 가능한 구체적 다음 수**를 우선순위로 제시하라.\n"
+            "선택 가능한 대안(근거를 들어 골라라):\n"
+            "  1) generate_novel_shuttles(FBGAN)로 라이브러리 밖 신규 셔틀 생성 — 라이브러리 셔틀이 "
+            "모두 off-target/저BBB일 때.\n"
+            "  2) 링커 교체 — 셔틀이 구조상 파묻힐(occluded) 땐 (GGGGS)3 등 긴 유연 링커로 노출 개선, "
+            "반대로 너무 길어 불안정하면 직접융합/짧은 링커로.\n"
+            "  3) 라이브러리 내 다른 셔틀 — 선택성(RMT형) 높은 쪽으로.\n"
+            "  4) 실패가 화물 자체 특성(독성·불안정·과소수성) 때문이면 그 사실을 명시하고, 셔틀로는 "
+            "해결 불가임을 정직히 밝힌 뒤 화물 측 개량 또는 다른 전달 모달리티(향후)를 권고.\n"
+            "출력: 한국어로 '### 🔧 권고안(대안)' 제목 아래 ①실패 진단 1~2문장 + ②우선순위 대안 2~3개"
+            "(각 한 줄, 근거 포함). **새 서열을 지어내지 마라**(생성은 도구의 몫).")
+        cfg = types.GenerateContentConfig(
+            system_instruction=sys, temperature=1.0,
+            thinking_config=types.ThinkingConfig(include_thoughts=False))
+        contents = [types.Content(role="user", parts=[types.Part.from_text(
+            text=f"최종 미승인된 후보:\n{m}\n\n심사 반박:\n{critique_text}\n\n권고안을 작성하라.")])]
+        resp = self._gen_retry(client, model, contents, cfg)
+        cand = (resp.candidates or [None])[0]
+        parts = (cand.content.parts if cand and cand.content else None) or []
+        return "\n\n".join(p.text for p in parts
+                           if getattr(p, "text", None) and not getattr(p, "thought", False))
+
     def _gen_retry(self, client, model, contents, config, tries=6):
         """일시적 오류(503/429)는 백오프 재시도. 그 외는 즉시 raise."""
         last = None
@@ -371,6 +408,16 @@ class GeminiOptimizationAgent(OptimizationAgent):
             final_pick = choice or best
             if critique_text is None and final_pick is not None:
                 approve, critique_text = self._critic_review(client, model, types, cargo, final_pick)
+
+            # 최종 미승인(막다른 경우) → 실패 진단 + 대안 권고를 최종 보고서에 덧붙인다(실패 때만 1회).
+            if final_pick is not None and not approve:
+                try:
+                    rec = self._recommend_on_failure(client, model, types, cargo,
+                                                     final_pick, critique_text or "")
+                    if rec:
+                        final_report = (final_report or "") + "\n\n" + rec
+                except Exception:  # noqa: BLE001 - 권고는 부가기능, 실패해도 결과는 낸다
+                    pass
 
             # ── 결과 방출 (한 번씩): 설계자 결론 + 심사 판정 ──
             # 심사 최종 판정을 최종 후보에 각인 → UI가 "승인/미승인"을 정직하게 표시한다.
