@@ -22,6 +22,12 @@ from .optimizer_agent import AgentEvent, OptimizationAgent
 # 일시적 오류(모델 과부하·분당 레이트리밋) — 백오프 재시도 대상
 _TRANSIENT = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "overloaded", "high demand")
 
+# 양이온 편향 완화용 선택성 감점 계수 λ.
+# 유효 BBB = BBB − λ·off_target_risk. deepB3P가 양이온성 CPP를 고평가해 BBB만 좇으면
+# 비특이(off-target) 후보로 수렴하므로, off-target 위험을 소폭 감점해 RMT형에 기회를 준다.
+# λ↑ = 선택성 중시(BBB 지배↓), λ↓ = BBB 지배↑. 0.25 = "조금만" 낮춘 값.
+OFF_TARGET_PENALTY = 0.25
+
 
 def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int, has_fbgan: bool) -> str:
     lib_l = ", ".join(f"{n}({v['seq'] or '링커없음/직접융합'})" for n, v in LINKER_LIBRARY.items())
@@ -41,10 +47,15 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int, has
         "독립 **심사(Critic) 에이전트**의 적대적 검증을 거칩니다.\n\n"
         f"고정 화물(cargo): {cargo}\n융합체 = cargo + linker + shuttle.\n\n"
         "다중 목적 (모두 만족하는 최종 융합체 하나로 수렴):\n"
-        "  ① BBB 투과 점수(deepB3P 예측확률 0~1, 실제 투과율 아님·상대비교용) 최대화\n"
+        "  ① BBB 투과 점수(deepB3P 예측확률 0~1, 실제 투과율 아님·상대비교용)를 높이되, **BBB 단독이 "
+        f"아니라 선택성으로 감점된 '유효 점수 = BBB − {OFF_TARGET_PENALTY}×off_target_risk'를 최종 "
+        "기준으로 삼는다.** deepB3P는 양이온성 CPP를 고평가하는 편향이 있어, BBB만 좇으면 비특이"
+        "(off-target) 후보로 수렴하기 때문이다.\n"
         f"  ② 독성(ToxinPred3) ≤ {tox_threshold:.2f}\n"
-        "  ③ 셔틀이 구조적으로 노출(ESMFold) + 검증 셔틀과 유사(수용체 메커니즘 근거)\n"
-        "  ④ 융합체 자체 안정성: 불안정성 지수 < 40 선호\n\n"
+        "  ③ **선택성(off-target 최소화)**: 비특이 양이온성 CPP보다 **수용체 선택적 RMT형"
+        "(Angiopep-2·ApoE·Leptin30 계열)**을 선호 — off-target 위험이 낮은 쪽.\n"
+        "  ④ 셔틀이 구조적으로 노출(ESMFold) + 검증 셔틀과 유사(수용체 메커니즘 근거)\n"
+        "  ⑤ 융합체 자체 안정성: 불안정성 지수 < 40 선호\n\n"
         f"사용 가능한 도구: {tools}\n"
         "권장 워크플로우(자율 판단): evaluate_candidates로 라이브러리 조합(**링커 유무 — 직접융합"
         "(링커 빈칸)도 포함**)을 폭넓게 스크리닝 → "
@@ -144,6 +155,11 @@ class GeminiOptimizationAgent(OptimizationAgent):
             text, gdata = self._generate(cargo, args)
             return text, AgentEvent("generation", text=text, data=gdata)
         return f"unknown tool: {name}", None
+
+    @staticmethod
+    def _eff_bbb(r):
+        """양이온 편향 완화용 유효 점수 = BBB − λ·off_target_risk. best 선정/수렴에 사용."""
+        return r.get("bbb", 0.0) - OFF_TARGET_PENALTY * r.get("sel_off", 0.0)
 
     def _score_choice(self, cargo, fa):
         """finish가 제출한 최종 후보를 채점해 row(dict)로 반환. 실패 시 None."""
@@ -362,7 +378,8 @@ class GeminiOptimizationAgent(OptimizationAgent):
                         yield ev
                         if ev.kind == "evaluation":
                             for r in ev.data["rows"]:
-                                if not r["toxic"] and (best is None or r["bbb"] > best["bbb"]):
+                                if not r["toxic"] and (best is None
+                                                       or self._eff_bbb(r) > self._eff_bbb(best)):
                                     best = r
                     fr_parts.append(types.Part.from_function_response(
                         name=fc.name, response={"result": text}))
