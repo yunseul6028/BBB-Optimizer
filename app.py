@@ -20,9 +20,9 @@ import streamlit.components.v1 as components
 
 from core import build_agent, get_settings
 from core.antibody import (
-    ANTIBODY_SHUTTLES,
     AntibodyShuttle,
     assess_antibody_shuttle,
+    detect_modality,
     transcytosis_sweetspot,
 )
 from core.binding import shuttle_similarity
@@ -105,27 +105,50 @@ st.divider()
 _hl, _hero, _hr = st.columns([1, 2, 1])
 with _hero:
     cargo_input = st.text_input(
-        "화물(cargo) 펩타이드 서열",
+        "화물(펩타이드) 또는 항체 서열",
         value=DEFAULT_CARGO,
-        help="링커·셔틀은 라이브러리에서 전부 자동으로 붙여봅니다. (표준 20종 아미노산 1글자 코드)",
+        help="펩타이드(화물)를 넣으면 자율 설계 에이전트가, 항체/나노바디 서열을 넣으면 항체 평가가 "
+             "자동으로 실행됩니다. (표준 20종 1글자 코드)",
     )
-    # === 메인 CTA: 자율 설계 에이전트 (버튼은 항상 노출) ===
-    agent_rounds = 8
-    if settings.use_gemini_agent:
-        agent_rounds = st.slider("최대 스텝 수", 4, 12, 8,
-                                 help="에이전트가 도구를 호출하는 최대 횟수. 낮추면 빠르고 저렴합니다.")
-        st.caption(f"모델 — Gemini ({settings.gemini_model})")
-    else:
-        st.caption("데모 모드 — API 키 없이 예시 결과로 화면을 미리봅니다.")
-    agent_run = st.button("자율 설계 에이전트 실행", type="primary", width='stretch')
-    st.caption("에이전트가 BBB·독성·구조·수용체·생성 도구를 스스로 오케스트레이션해 "
-               "최종 융합체를 설계합니다.")
+    _seq = _clean_cargo(cargo_input)
+    _modality, _why = detect_modality(_seq)
+    st.caption(f"자동 감지 — **{'항체 / 나노바디 셔틀' if _modality == 'antibody' else '펩타이드 화물'}** · {_why}")
 
-    # === 개별 도구 (에이전트가 내부적으로 쓰는 도구들 · 수동 실행 · 무료) ===
-    run = fbgan_run = struct_run = antibody_run = False
+    # 실행 플래그·기본값 (분기 전에 초기화)
+    agent_run = run = fbgan_run = struct_run = antibody_run = False
     ab_input: dict = {}
-    fbgan_rounds = 4
+    agent_rounds, fbgan_rounds = 8, 4
     struct_linker_name, struct_shuttle_name = STANDARD_LINKER_NAME, list(SHUTTLES)[0]
+
+    if _modality == "antibody":
+        # === 항체 분기: 입력 서열 = 항체 사슬(VH). BBB는 서열 예측 불가 → sweet-spot·결합가·개발성 ===
+        st.caption("항체는 서열로 BBB를 예측할 수 없어(구조+친화도 기반) 친화도 sweet-spot·결합가·"
+                   "개발성으로 평가합니다(Tier-3). 표적·결합가·KD를 채우면 더 정밀해집니다.")
+        _c1, _c2, _c3 = st.columns([2, 2, 3])
+        ab_target = _c1.text_input("표적", value="TfR")
+        _fmts = ["VHH", "scFv", "Fab", "IgG"]
+        ab_fmt = _c2.selectbox("포맷", _fmts, index=0)
+        ab_valency = _c3.radio("결합가", [1, 2], index=0, horizontal=True,
+                               format_func=lambda v: "monovalent(권장)" if v == 1 else "bivalent")
+        _c4, _c5 = st.columns(2)
+        ab_kd = _c4.number_input("친화도 KD (nM · 0=미입력)", min_value=0.0, value=0.0, step=1.0,
+                                 help="TfR sweet-spot: 과결합(저 KD)=갇힘, 약결합=미결합. 중간(수십~수백 nM)이 유리.")
+        ab_vl = _c5.text_input("VL 서열 (scFv에서 VL 따로 · 선택)", value="")
+        antibody_run = st.button("항체 셔틀 평가 실행", type="primary", width='stretch')
+        ab_input = {"name": "입력 항체", "target": ab_target, "fmt": ab_fmt,
+                    "valency": int(ab_valency), "vh": _seq, "vl": ab_vl,
+                    "kd_nM": (ab_kd if ab_kd > 0 else None), "source": "사용자 입력"}
+    else:
+        # === 펩타이드 분기: 자율 설계 에이전트 ===
+        if settings.use_gemini_agent:
+            agent_rounds = st.slider("최대 스텝 수", 4, 12, 8,
+                                     help="에이전트가 도구를 호출하는 최대 횟수. 낮추면 빠르고 저렴합니다.")
+            st.caption(f"모델 — Gemini ({settings.gemini_model})")
+        else:
+            st.caption("데모 모드 — API 키 없이 예시 결과로 화면을 미리봅니다.")
+        agent_run = st.button("자율 설계 에이전트 실행", type="primary", width='stretch')
+        st.caption("에이전트가 BBB·독성·구조·수용체·생성 도구를 스스로 오케스트레이션해 "
+                   "최종 융합체를 설계합니다.")
     with st.expander("개별 도구 직접 실행 (에이전트 없이 · 무료)"):
         st.caption("에이전트가 자율적으로 호출하는 도구들을 수동으로도 실행할 수 있습니다.")
         run = st.button("라이브러리 전수 스윕 (모든 링커 × 셔틀)", width='stretch')
@@ -158,37 +181,7 @@ with _hero:
             width='stretch', hide_index=True,
         )
 
-    with st.expander("항체 셔틀 평가 (Tier-3 · 펩타이드와 별개 모달리티)"):
-        st.caption("항-TfR 등 **항체/나노바디 셔틀**은 서열로 BBB를 예측할 수 없고(구조+친화도 기반), "
-                   "친화도 sweet-spot·결합가·개발성으로 평가합니다. **서열은 검증된 것만 입력하세요.**")
-        _ab_presets = ["직접 입력"] + list(ANTIBODY_SHUTTLES)
-        _ab_pick = st.selectbox("프리셋", _ab_presets, index=0,
-                                help="프리셋은 문헌상 설계 사실(표적·포맷·결합가)만 담고 서열·KD는 비어 있습니다.")
-        _pre = ANTIBODY_SHUTTLES.get(_ab_pick, {}) if _ab_pick != "직접 입력" else {}
-        _c1, _c2 = st.columns(2)
-        ab_name = _c1.text_input("이름", value=(_ab_pick if _pre else "my-antibody"))
-        ab_target = _c2.text_input("표적 수용체", value=_pre.get("target", "TfR"))
-        _c3, _c4 = st.columns(2)
-        _fmts = ["VHH", "scFv", "Fab", "IgG"]
-        _fmt_default = _pre.get("fmt", "VHH")
-        ab_fmt = _c3.selectbox("포맷", _fmts,
-                               index=_fmts.index(_fmt_default) if _fmt_default in _fmts else 0)
-        ab_valency = _c4.radio("결합가", [1, 2], index=(_pre.get("valency", 1) - 1),
-                               format_func=lambda v: "monovalent(1가·권장)" if v == 1 else "bivalent(2가)",
-                               horizontal=True)
-        ab_vh = st.text_area("VH 서열 (검증된 것만 · 없으면 비워두기)",
-                             value=_pre.get("vh") or "", height=68)
-        ab_vl = st.text_area("VL 서열 (VHH면 비움 · 검증된 것만)",
-                             value=_pre.get("vl") or "", height=68)
-        _kd_default = float(_pre.get("kd_nM") or 0.0)
-        ab_kd = st.number_input("친화도 KD (nM · 0 = 미입력)", min_value=0.0, value=_kd_default, step=1.0,
-                                help="TfR sweet-spot: 너무 낮으면(과결합) 갇힘, 너무 높으면 미결합. 중간(수십~수백 nM)이 유리.")
-        antibody_run = st.button("항체 셔틀 평가", width='stretch')
-        ab_input = {"name": ab_name, "target": ab_target, "fmt": ab_fmt, "valency": int(ab_valency),
-                    "vh": ab_vh, "vl": ab_vl, "kd_nM": (ab_kd if ab_kd > 0 else None),
-                    "source": _pre.get("source", "사용자 입력")}
-
-    _cargo_preview = _clean_cargo(cargo_input)
+    _cargo_preview = _seq if _modality == "peptide" else ""
     if _cargo_preview:
         longest = max(len(v["seq"]) for v in SHUTTLES.values())
         longest_l = max(len(v["seq"]) for v in LINKER_LIBRARY.values())

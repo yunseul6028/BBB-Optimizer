@@ -29,6 +29,27 @@ from dataclasses import dataclass, field
 # 대표 RMT 항체 표적(참고) — 실제 브레인셔틀들이 노리는 수용체.
 ANTIBODY_TARGETS = ["TfR", "IGF1R", "CD98hc"]
 
+# 항체 도메인은 보통 ≥~110aa(VHH)~450aa(Fab), 펩타이드 화물/셔틀은 ≤~50aa. 길이가 주 신호.
+ANTIBODY_MIN_LEN = 60
+_AB_N_TERM = ("EVQL", "QVQL", "DVQL", "QVKL", "EVKL", "QITL", "AVQL",  # VH 관용 N말단
+              "DIQM", "DIVM", "EIVL", "DIVL", "QSVL", "QAVL", "SYEL", "NFML")  # VL 관용
+
+
+def detect_modality(seq: str) -> tuple[str, str]:
+    """서열을 보고 'peptide'(펩타이드 화물) vs 'antibody'(항체/나노바디)로 자동 분기.
+
+    길이가 주 신호(항체 도메인 ≥~110aa, 펩타이드 ≤~50aa), 항체 관용 N말단 모티프로 보강.
+    반환 (modality, 근거 문자열).
+    """
+    s = "".join(ch for ch in (seq or "").upper() if ch.isalpha())
+    n = len(s)
+    if not s:
+        return "peptide", "빈 입력"
+    motif = s[:4] in _AB_N_TERM
+    if n >= ANTIBODY_MIN_LEN or (n >= 45 and motif):
+        return "antibody", f"길이 {n}aa{'·항체 N말단 모티프' if motif else ''} → 항체/나노바디로 판단"
+    return "peptide", f"길이 {n}aa → 펩타이드 화물로 판단"
+
 # 항체/나노바디 셔틀 라이브러리. 스키마:
 #   {name: {"target": str, "fmt": "VHH|scFv|Fab|IgG", "vh": str|None, "vl": str|None,
 #           "kd_nM": float|None, "valency": 1|2, "source": str}}
