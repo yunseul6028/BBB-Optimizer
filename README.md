@@ -75,7 +75,8 @@ git clone https://github.com/GreatChenLab/deepB3P.git
 python3 -m venv .venv-deepb3p
 .venv-deepb3p/bin/pip install -r requirements-deepb3p.txt   # (repo 루트에 있음)
 cp ../scripts/deepb3p/_run_predict.py ../scripts/deepb3p/_run_fbgan.py \
-   ../scripts/deepb3p/_run_coevo.py ../scripts/deepb3p/_physchem.py deepB3P/
+   ../scripts/deepb3p/_run_coevo.py ../scripts/deepb3p/_run_modular.py \
+   ../scripts/deepb3p/_physchem.py deepB3P/
 
 # --- ToxinPred3 (독성) ---
 git clone https://github.com/raghavagps/toxinpred3.git
@@ -107,6 +108,7 @@ core/
   agent.py              라이브러리 전수 스윕 오케스트레이션
   generative.py         FBGAN 생성 최적화 (셔틀 잠재 진화)
   coevolution.py        링커·셔틀 잠재 co-evolution (멀티모듈 동시 진화)
+  modular.py            모듈별 최적화 → 조립 재순위 (셔틀·링커 각자 공간)
   optimizer_agent.py    LLM tool-use 분자 최적화 루프
   structure.py          ESMFold 구조 + 셔틀 노출도
   schemas.py            데이터 구조

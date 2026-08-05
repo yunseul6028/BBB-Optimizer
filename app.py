@@ -38,6 +38,7 @@ from core.config import (
 )
 from core.generative import get_fbgan
 from core.coevolution import get_coevolution
+from core.modular import get_modular
 from core.optimizer_agent_gemini import get_gemini_agent
 from core.predictors import get_predictor
 from core.structure import analyze_construct
@@ -117,9 +118,9 @@ with _hero:
     st.caption(f"자동 감지 — **{'항체 / 나노바디 셔틀' if _modality == 'antibody' else '펩타이드 화물'}** · {_why}")
 
     # 실행 플래그·기본값 (분기 전에 초기화)
-    agent_run = run = fbgan_run = struct_run = antibody_run = coevo_run = False
+    agent_run = run = fbgan_run = struct_run = antibody_run = coevo_run = modular_run = False
     ab_input: dict = {}
-    agent_rounds, fbgan_rounds, coevo_rounds = 8, 4, 4
+    agent_rounds, fbgan_rounds, coevo_rounds, modular_rounds = 8, 4, 4, 4
     struct_linker_name, struct_shuttle_name = STANDARD_LINKER_NAME, list(SHUTTLES)[0]
 
     if _modality == "antibody":
@@ -181,6 +182,11 @@ with _hero:
             st.markdown("**링커·셔틀 동시 진화 (co-evolution)**")
             coevo_rounds = st.slider("공진화 라운드 수", 2, 8, 4, key="coevo_rounds")
             coevo_run = st.button("공진화 실행", width='stretch')
+
+        if settings.use_modular_local:
+            st.markdown("**모듈별 최적화 → 조립 (셔틀·링커 각자 공간)**")
+            modular_rounds = st.slider("셔틀 진화 라운드 수", 2, 8, 4, key="modular_rounds")
+            modular_run = st.button("모듈별 최적화 실행", width='stretch')
 
     with st.expander(f"라이브러리 구성 (링커 {len(LINKER_LIBRARY)} · 셔틀 {len(SHUTTLES)})"):
         st.markdown("**링커**")
@@ -891,6 +897,31 @@ else:
                 st.stop()
             status.update(label="공진화 완료!", state="complete", expanded=False)
 
+    # 모듈별 최적화 → 조립(버튼) → 결과를 session_state에 저장
+    if modular_run:
+        st.session_state["view"] = "modular"
+        cargo = _clean_cargo(cargo_input)
+        _err = _cargo_error(cargo)
+        if _err:
+            st.error(_err)
+            st.stop()
+        with st.status("모듈별 최적화 실행 중... (셔틀·링커 각자 공간 → N×M 조립 재순위)",
+                       expanded=True) as status:
+            st.write("① 셔틀 공간(BBB·전하) → ② 링커 공간(개발성) → ③ 조립 결합 재채점(deepB3P·ToxinPred3)")
+            try:
+                mres = get_modular(settings).run(
+                    cargo, s_rounds=modular_rounds,
+                    tox_threshold=settings.toxicity_threshold)
+                st.session_state["modular"] = {
+                    "shuttles": mres.shuttles, "linkers": mres.linkers, "best": mres.best,
+                    "cargo": cargo, "rounds": modular_rounds, "n_grid": mres.n_grid,
+                }
+            except Exception as exc:  # noqa: BLE001
+                status.update(label="모듈별 최적화 실패", state="error")
+                st.error(f"실행 오류: {exc}")
+                st.stop()
+            status.update(label="모듈별 최적화 완료!", state="complete", expanded=False)
+
     # --- 항체 셔틀 평가 실행(버튼) ---
     if antibody_run:
         _ab = AntibodyShuttle(
@@ -911,6 +942,7 @@ else:
     _struct = st.session_state.get("struct")
     fb = st.session_state.get("fbgan")
     co = st.session_state.get("coevo")
+    mo = st.session_state.get("modular")
     _ab_state = st.session_state.get("antibody")
     if _view == "antibody" and _ab_state:
         _render_antibody(_ab_state["ab"], _ab_state["assessment"])
@@ -1053,6 +1085,59 @@ else:
             "링커·셔틀 모두 AI가 새로 생성·공진화한 서열입니다. 선정은 deepB3P BBB에서 "
             "**과도한 양전하·비양친매성을 감점**해 보정한 적합도 기준이며, 실제 합성·In Vitro "
             "검증이 필요합니다(BBB/독성은 deepB3P·ToxinPred3 예측값)."
+        )
+    elif mo:
+        st.divider()
+        st.subheader("모듈별 최적화 → 조립 — 최적화 결과")
+        st.caption(
+            f"화물 {len(mo['cargo'])}aa · 셔틀 {mo['rounds']}라운드 · 각 모듈을 **자기 공간에서 따로** "
+            f"최적화 후 **{mo.get('n_grid', 0)}조합 조립 재순위**(셔틀=BBB·전하, 링커=개발성)"
+        )
+        _mc1, _mc2 = st.columns(2)
+        with _mc1:
+            st.markdown("##### ① 셔틀 공간 (BBB·전하)")
+            _sh = mo["shuttles"][:5]
+            if _sh:
+                st.dataframe(
+                    {"셔틀": [s["seq"] for s in _sh],
+                     "BBB": [f"{s['bbb']*100:.0f}" for s in _sh],
+                     "순전하": [f"{s.get('charge', 0):+g}" for s in _sh]},
+                    width='stretch', hide_index=True)
+        with _mc2:
+            st.markdown("##### ② 링커 공간 (개발성)")
+            _lk = mo["linkers"][:5]
+            if _lk:
+                st.dataframe(
+                    {"링커": [l["seq"] for l in _lk],
+                     "개발성": [f"{l['dev']:.2f}" for l in _lk],
+                     "순전하": [f"{l.get('charge', 0):+g}" for l in _lk]},
+                    width='stretch', hide_index=True)
+        st.markdown("##### ③ 조립 재순위 — 베스트 조합 (링커 + 셔틀)")
+        top = mo["best"][:3]
+        if not top:
+            st.warning("비독성 후보를 찾지 못했습니다. 라운드를 늘려 다시 시도해 보세요.")
+        else:
+            cols = st.columns(len(top))
+            for i, b in enumerate(top):
+                with cols[i]:
+                    with st.container(border=True, key=f"modular-card-{i}"):
+                        st.markdown(f"### 조립 #{i+1}")
+                        st.caption(f"링커 ({b['linker_len']}aa)")
+                        st.code(b["linker"], language="text")
+                        st.caption("셔틀")
+                        st.code(b["shuttle"], language="text")
+                        m1, m2 = st.columns(2)
+                        m1.metric("BBB 투과 점수", f"{b['bbb']*100:.0f}")
+                        m2.metric("독성 위험", f"{b['tox']*100:.0f}%", delta="안전",
+                                  delta_color="off")
+                        st.caption(
+                            f"순전하 pH7.4 `{b.get('charge', 0):+g}` · 양친매성 μH "
+                            f"`{b.get('muH', '—')}` (양전하 편향 보정 선정)"
+                        )
+                        st.caption(f"전체 융합체({b['len']}aa): `{b['sequence']}`")
+        st.caption(
+            "셔틀은 BBB·전하 공간, 링커는 개발성 공간에서 각각 최적화한 뒤 조립하고, 전체 융합체로 "
+            "**결합 재채점(BBB·독성·전하)**해 궁합까지 반영했습니다. 실제 합성·In Vitro 검증이 필요합니다."
         )
     else:
         if settings.use_gemini_agent:

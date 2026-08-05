@@ -53,6 +53,9 @@ FBGAN_GEN_CKPT = DEEPB3P_REPO / "fbgan" / "checkpoint" / "G_weights_1000.pth"
 # 로컬 링커·셔틀 co-evolution (멀티모듈 동시 진화) 러너 — FBGAN 생성기 가중치 공유
 COEVO_RUNNER = DEEPB3P_REPO / "_run_coevo.py"
 
+# 로컬 모듈별 최적화 → 조립 재순위 (decoupled optimization) 러너
+MODULAR_RUNNER = DEEPB3P_REPO / "_run_modular.py"
+
 # 로컬 ToxinPred3 (펩타이드 독성 예측) 자원 경로
 TOXINPRED3_REPO = BASE_DIR / "vendor" / "toxinpred3"
 TOXINPRED3_PYTHON = BASE_DIR / "vendor" / ".venv-toxinpred3" / "bin" / "python"
@@ -165,6 +168,11 @@ class Settings:
     def use_coevo_local(self) -> bool:
         """로컬 링커·셔틀 co-evolution 사용 가능 여부 (FBGAN 생성기 + deepB3P + ToxinPred3)."""
         return self.use_fbgan_local and COEVO_RUNNER.exists()
+
+    @property
+    def use_modular_local(self) -> bool:
+        """로컬 모듈별 최적화→조립 사용 가능 여부 (FBGAN 생성기 + deepB3P + ToxinPred3)."""
+        return self.use_fbgan_local and MODULAR_RUNNER.exists()
 
     @property
     def use_real_predictor(self) -> bool:
