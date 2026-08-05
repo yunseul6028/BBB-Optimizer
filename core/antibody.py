@@ -56,6 +56,17 @@ def detect_modality(seq: str) -> tuple[str, str]:
 # ⚠️ **서열(vh/vl)·KD는 지어내지 않는다.** 아래 프리셋은 문헌으로 공개된 '설계 사실'
 #   (표적·포맷·결합가)만 담고, 서열/친화도는 None → 검증된 값을 확인 후 채운다.
 ANTIBODY_SHUTTLES: dict[str, dict] = {
+    "BBB00533 (항-TfR VHH · 크로스종)": {
+        "target": "TfR", "fmt": "VHH", "vh": None, "vl": None, "kd_nM": 207.0,
+        "valency": 1,
+        "source": "PMC10300862 (인간/영장류 교차 항-TfR 나노바디) — 인간 TfR KD≈207 nM, "
+                  "monovalent. 서열은 원문 미공개 → 확보 시 입력.",
+    },
+    "BBB00515 (항-TfR VHH · 크로스종)": {
+        "target": "TfR", "fmt": "VHH", "vh": None, "vl": None, "kd_nM": 1184.0,
+        "valency": 1,
+        "source": "PMC10300862 — 인간 TfR KD≈1184 nM(저친화), monovalent. 서열 원문 미공개.",
+    },
     "Trontinemab (monovalent 항-TfR)": {
         "target": "TfR", "fmt": "Fab", "vh": None, "vl": None, "kd_nM": None,
         "valency": 1,

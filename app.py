@@ -20,6 +20,7 @@ import streamlit.components.v1 as components
 
 from core import build_agent, get_settings
 from core.antibody import (
+    ANTIBODY_SHUTTLES,
     AntibodyShuttle,
     assess_antibody_shuttle,
     detect_modality,
@@ -123,21 +124,31 @@ with _hero:
     if _modality == "antibody":
         # === 항체 분기: 입력 서열 = 항체 사슬(VH). BBB는 서열 예측 불가 → sweet-spot·결합가·개발성 ===
         st.caption("항체는 서열로 BBB를 예측할 수 없어(구조+친화도 기반) 친화도 sweet-spot·결합가·"
-                   "개발성으로 평가합니다(Tier-3). 표적·결합가·KD를 채우면 더 정밀해집니다.")
-        _c1, _c2, _c3 = st.columns([2, 2, 3])
-        ab_target = _c1.text_input("표적", value="TfR")
+                   "개발성으로 평가합니다(Tier-3). **프리셋**을 고르면 문헌 실측 KD·결합가가 채워집니다.")
+        _ab_presets = ["직접 입력"] + list(ANTIBODY_SHUTTLES)
+        _ab_pick = st.selectbox("항체 프리셋 (문헌 실측 KD·결합가 자동 로드)", _ab_presets, index=0)
+        _pre = ANTIBODY_SHUTTLES.get(_ab_pick, {}) if _ab_pick != "직접 입력" else {}
+        if _pre.get("source"):
+            st.caption(f"출처 — {_pre['source']}")
         _fmts = ["VHH", "scFv", "Fab", "IgG"]
-        ab_fmt = _c2.selectbox("포맷", _fmts, index=0)
-        ab_valency = _c3.radio("결합가", [1, 2], index=0, horizontal=True,
-                               format_func=lambda v: "monovalent(권장)" if v == 1 else "bivalent")
+        _fmt_def = _pre.get("fmt", "VHH")
+        _c1, _c2, _c3 = st.columns([2, 2, 3])
+        ab_target = _c1.text_input("표적", value=_pre.get("target", "TfR"), key=f"ab_tgt_{_ab_pick}")
+        ab_fmt = _c2.selectbox("포맷", _fmts, index=_fmts.index(_fmt_def) if _fmt_def in _fmts else 0,
+                               key=f"ab_fmt_{_ab_pick}")
+        ab_valency = _c3.radio("결합가", [1, 2], index=(int(_pre.get("valency", 1)) - 1), horizontal=True,
+                               format_func=lambda v: "monovalent(권장)" if v == 1 else "bivalent",
+                               key=f"ab_val_{_ab_pick}")
         _c4, _c5 = st.columns(2)
-        ab_kd = _c4.number_input("친화도 KD (nM · 0=미입력)", min_value=0.0, value=0.0, step=1.0,
+        ab_kd = _c4.number_input("친화도 KD (nM · 0=미입력)", min_value=0.0,
+                                 value=float(_pre.get("kd_nM") or 0.0), step=1.0, key=f"ab_kd_{_ab_pick}",
                                  help="TfR sweet-spot: 과결합(저 KD)=갇힘, 약결합=미결합. 중간(수십~수백 nM)이 유리.")
         ab_vl = _c5.text_input("VL 서열 (scFv에서 VL 따로 · 선택)", value="")
         antibody_run = st.button("항체 셔틀 평가 실행", type="primary", width='stretch')
-        ab_input = {"name": "입력 항체", "target": ab_target, "fmt": ab_fmt,
+        ab_input = {"name": (_ab_pick if _pre else "입력 항체"), "target": ab_target, "fmt": ab_fmt,
                     "valency": int(ab_valency), "vh": _seq, "vl": ab_vl,
-                    "kd_nM": (ab_kd if ab_kd > 0 else None), "source": "사용자 입력"}
+                    "kd_nM": (ab_kd if ab_kd > 0 else None),
+                    "source": _pre.get("source", "사용자 입력")}
     else:
         # === 펩타이드 분기: 자율 설계 에이전트 ===
         if settings.use_gemini_agent:
