@@ -56,13 +56,51 @@ def detect_modality(seq: str) -> tuple[str, str]:
 # ⚠️ **서열(vh/vl)·KD는 지어내지 않는다.** 아래 프리셋은 문헌으로 공개된 '설계 사실'
 #   (표적·포맷·결합가)만 담고, 서열/친화도는 None → 검증된 값을 확인 후 채운다.
 ANTIBODY_SHUTTLES: dict[str, dict] = {
-    "BBB00533 (항-TfR VHH · 크로스종)": {
+    # --- 서열 보유 (사용자 제공 · 표적/PDB 주석은 원문 대조 권장) ---
+    "8D3 (항-마우스 TfR1 · scFv)": {
+        "target": "Mouse TfR1", "fmt": "scFv", "valency": 1, "kd_nM": None,
+        "vh": ("EVQLQQSGAELVKPGASVKLSCTASGFNIKDTYIHWVKQRPEQGLEWIGRIDPANGNTKY"
+               "DPKFQGKATITADTSSNTAYLQLSSLTSEDTAVYYCARGLYGYFDVWGAGTTVTVSS"),
+        "vl": ("DIQMTQSPASLSASVGETVTITCRASENIYSYLAWYQQKQGKSPQLLVYNAKTLAEGVPS"
+               "RFSGSGSGTQFSLKINSLQPEDFGSYYCQHHYGTPFTFGGGTKLEIK"),
+        "source": "사용자 제공 · PDB 6D04. 표적/구조 원문 대조 권장.",
+    },
+    "Ri18b (항-마우스 TfR1 · VHH)": {
+        "target": "Mouse TfR1", "fmt": "VHH", "valency": 1, "kd_nM": None,
+        "vh": ("QVQLQESGGGLVQAGGSLRLSCAASGRTFSSYAMGWFRQAPGKEREFVAAIRWSGGSTYY"
+               "ADSVKGRFTISRDNAKNTVYLQMNSLKPEDTAVYYCAAGRGSYWYFDYWGQGTQVTVSS"),
+        "vl": None,
+        "source": "사용자 제공 · 저-nM 중간 친화(정성). 원문 대조 권장.",
+    },
+    "FC5 (BBB 투과 VHH)": {
+        "target": "CEACAM/시알산 (원문 확인)", "fmt": "VHH", "valency": 1, "kd_nM": None,
+        "vh": ("EVQLQASGGGLVQAGGSLRLSCAASGFKITHYTMGWFRQAPGKEREFVAGITWGGGSTYY"
+               "ADSVKGRFTISRDNAKNTVYLQMNSLKPEDTAVYVCAAGSTSTATMGGYWGQGTQVTVSS"),
+        "vl": None,
+        "source": "사용자 제공 · PDB 3U85. 표적 주석 원문 대조 권장.",
+    },
+    "FC44 (BBB 투과 VHH)": {
+        "target": "BBB 수용체 (원문 확인)", "fmt": "VHH", "valency": 1, "kd_nM": None,
+        "vh": ("EVQLQASGGGLVQPGGSLRLSCAASGFTFSSYAMSWVRQAPGKGLEWVSSINNGGGSTYY"
+               "ADSVKGRFTISRDNAKNTLYLQMNSLKPEDTAVYYCAKDRLVTAYYFDYWGQGTQVTVSS"),
+        "vl": None,
+        "source": "사용자 제공 · 고투과 VHH. 표적 주석 원문 대조 권장.",
+    },
+    "HIRMAb 83-14 (항-인간 인슐린수용체)": {
+        "target": "Human INSR", "fmt": "scFv", "valency": 1, "kd_nM": None,
+        "vh": ("EVQLVESGGGLVQPGGSLRLSCAASGFTFSSYAMSWVRQAPGKGLEWVAVISYDGSNKYY"
+               "ADSVKGRFTISRDNSKNTLYLQMNSLRAEDTAVYYCARWGLGYYFDYWGQGTLVTVSS"),
+        "vl": ("DIQMTQSPSSLSASVGDRVTITCRASQGISSWLAWYQQKPEKAPKSLIYAASSLQSGVPS"
+               "RFSGSGSGTDFTLTISSLQPEDFATYYCQQYNSYPPTFGGGTKVEIK"),
+        "source": "사용자 제공 · Pardridge HIRMAb 83-14 계열(IGF/INSR RMT). 원문 대조 권장.",
+    },
+    # --- 서열 미공개, 실측 KD 보유 (sweet-spot 계산용) ---
+    "BBB00533 (항-TfR VHH · KD 207nM)": {
         "target": "TfR", "fmt": "VHH", "vh": None, "vl": None, "kd_nM": 207.0,
         "valency": 1,
-        "source": "PMC10300862 (인간/영장류 교차 항-TfR 나노바디) — 인간 TfR KD≈207 nM, "
-                  "monovalent. 서열은 원문 미공개 → 확보 시 입력.",
+        "source": "PMC10300862 — 인간 TfR KD≈207 nM, monovalent. 서열 원문 미공개.",
     },
-    "BBB00515 (항-TfR VHH · 크로스종)": {
+    "BBB00515 (항-TfR VHH · KD 1184nM)": {
         "target": "TfR", "fmt": "VHH", "vh": None, "vl": None, "kd_nM": 1184.0,
         "valency": 1,
         "source": "PMC10300862 — 인간 TfR KD≈1184 nM(저친화), monovalent. 서열 원문 미공개.",
@@ -71,11 +109,6 @@ ANTIBODY_SHUTTLES: dict[str, dict] = {
         "target": "TfR", "fmt": "Fab", "vh": None, "vl": None, "kd_nM": None,
         "valency": 1,
         "source": "Roche brainshuttle — monovalent 설계(문헌). 서열·KD는 검증 후 입력.",
-    },
-    "기존형 bivalent 항-TfR (비교용)": {
-        "target": "TfR", "fmt": "IgG", "vh": None, "vl": None, "kd_nM": None,
-        "valency": 2,
-        "source": "이가(bivalent) 일반형 비교 기준 — 특정 제품 아님.",
     },
 }
 
