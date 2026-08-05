@@ -29,10 +29,23 @@ from dataclasses import dataclass, field
 # 대표 RMT 항체 표적(참고) — 실제 브레인셔틀들이 노리는 수용체.
 ANTIBODY_TARGETS = ["TfR", "IGF1R", "CD98hc"]
 
-# 항체/나노바디 셔틀 라이브러리 — **서열 DB는 추후 주입**. 스키마:
-#   {name: {"target": str, "fmt": "VHH|scFv|Fab", "vh": str|None, "vl": str|None,
+# 항체/나노바디 셔틀 라이브러리. 스키마:
+#   {name: {"target": str, "fmt": "VHH|scFv|Fab|IgG", "vh": str|None, "vl": str|None,
 #           "kd_nM": float|None, "valency": 1|2, "source": str}}
-ANTIBODY_SHUTTLES: dict[str, dict] = {}
+# ⚠️ **서열(vh/vl)·KD는 지어내지 않는다.** 아래 프리셋은 문헌으로 공개된 '설계 사실'
+#   (표적·포맷·결합가)만 담고, 서열/친화도는 None → 검증된 값을 확인 후 채운다.
+ANTIBODY_SHUTTLES: dict[str, dict] = {
+    "Trontinemab (monovalent 항-TfR)": {
+        "target": "TfR", "fmt": "Fab", "vh": None, "vl": None, "kd_nM": None,
+        "valency": 1,
+        "source": "Roche brainshuttle — monovalent 설계(문헌). 서열·KD는 검증 후 입력.",
+    },
+    "기존형 bivalent 항-TfR (비교용)": {
+        "target": "TfR", "fmt": "IgG", "vh": None, "vl": None, "kd_nM": None,
+        "valency": 2,
+        "source": "이가(bivalent) 일반형 비교 기준 — 특정 제품 아님.",
+    },
+}
 
 
 @dataclass

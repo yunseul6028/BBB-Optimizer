@@ -19,6 +19,12 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from core import build_agent, get_settings
+from core.antibody import (
+    ANTIBODY_SHUTTLES,
+    AntibodyShuttle,
+    assess_antibody_shuttle,
+    transcytosis_sweetspot,
+)
 from core.binding import shuttle_similarity
 from core.config import (
     DEFAULT_CARGO,
@@ -116,7 +122,8 @@ with _hero:
                "최종 융합체를 설계합니다.")
 
     # === 개별 도구 (에이전트가 내부적으로 쓰는 도구들 · 수동 실행 · 무료) ===
-    run = fbgan_run = struct_run = False
+    run = fbgan_run = struct_run = antibody_run = False
+    ab_input: dict = {}
     fbgan_rounds = 4
     struct_linker_name, struct_shuttle_name = STANDARD_LINKER_NAME, list(SHUTTLES)[0]
     with st.expander("개별 도구 직접 실행 (에이전트 없이 · 무료)"):
@@ -150,6 +157,36 @@ with _hero:
              "설명": [v["note"] for v in SHUTTLES.values()]},
             width='stretch', hide_index=True,
         )
+
+    with st.expander("항체 셔틀 평가 (Tier-3 · 펩타이드와 별개 모달리티)"):
+        st.caption("항-TfR 등 **항체/나노바디 셔틀**은 서열로 BBB를 예측할 수 없고(구조+친화도 기반), "
+                   "친화도 sweet-spot·결합가·개발성으로 평가합니다. **서열은 검증된 것만 입력하세요.**")
+        _ab_presets = ["직접 입력"] + list(ANTIBODY_SHUTTLES)
+        _ab_pick = st.selectbox("프리셋", _ab_presets, index=0,
+                                help="프리셋은 문헌상 설계 사실(표적·포맷·결합가)만 담고 서열·KD는 비어 있습니다.")
+        _pre = ANTIBODY_SHUTTLES.get(_ab_pick, {}) if _ab_pick != "직접 입력" else {}
+        _c1, _c2 = st.columns(2)
+        ab_name = _c1.text_input("이름", value=(_ab_pick if _pre else "my-antibody"))
+        ab_target = _c2.text_input("표적 수용체", value=_pre.get("target", "TfR"))
+        _c3, _c4 = st.columns(2)
+        _fmts = ["VHH", "scFv", "Fab", "IgG"]
+        _fmt_default = _pre.get("fmt", "VHH")
+        ab_fmt = _c3.selectbox("포맷", _fmts,
+                               index=_fmts.index(_fmt_default) if _fmt_default in _fmts else 0)
+        ab_valency = _c4.radio("결합가", [1, 2], index=(_pre.get("valency", 1) - 1),
+                               format_func=lambda v: "monovalent(1가·권장)" if v == 1 else "bivalent(2가)",
+                               horizontal=True)
+        ab_vh = st.text_area("VH 서열 (검증된 것만 · 없으면 비워두기)",
+                             value=_pre.get("vh") or "", height=68)
+        ab_vl = st.text_area("VL 서열 (VHH면 비움 · 검증된 것만)",
+                             value=_pre.get("vl") or "", height=68)
+        _kd_default = float(_pre.get("kd_nM") or 0.0)
+        ab_kd = st.number_input("친화도 KD (nM · 0 = 미입력)", min_value=0.0, value=_kd_default, step=1.0,
+                                help="TfR sweet-spot: 너무 낮으면(과결합) 갇힘, 너무 높으면 미결합. 중간(수십~수백 nM)이 유리.")
+        antibody_run = st.button("항체 셔틀 평가", width='stretch')
+        ab_input = {"name": ab_name, "target": ab_target, "fmt": ab_fmt, "valency": int(ab_valency),
+                    "vh": ab_vh, "vl": ab_vl, "kd_nM": (ab_kd if ab_kd > 0 else None),
+                    "source": _pre.get("source", "사용자 입력")}
 
     _cargo_preview = _clean_cargo(cargo_input)
     if _cargo_preview:
@@ -487,6 +524,67 @@ def _structure_html(pdb, cargo_len, linker_len, height=420):
     return v._make_html()
 
 
+def _render_antibody(ab, a):
+    """항체 셔틀 평가 결과 렌더 (계산된 축 + Tier-3/보류 축 정직 표시)."""
+    st.divider()
+    st.subheader(f"항체 셔틀 평가 — {a.name}")
+    st.caption(f"표적 **{a.target}** · 포맷 **{a.fmt}** · "
+               f"{'monovalent(1가)' if a.valency < 2 else 'bivalent(2가)'} · 출처: {ab.source}")
+
+    # 친화도 sweet-spot (KD 입력 시)
+    if a.sweetspot is not None:
+        _good = a.sweetspot >= 0.6
+        _pill_html = _pill(f"sweet-spot {a.sweetspot:.2f}",
+                           *(("#e7f6ed", "#0b6b34") if _good else ("#fbe9e9", "#a32020")))
+        st.markdown(f"**친화도 sweet-spot** (KD {a.kd_nM:g} nM) &nbsp; {_pill_html}",
+                    unsafe_allow_html=True)
+        st.caption("TfR: 과결합(저 KD)=세포내 갇힘·리소좀 분해, 약결합=미결합. 중간(수십~수백 nM)이 유리 — "
+                   "**적당한 친화도 + monovalent가 현대 BBB 셔틀 핵심**(예: Trontinemab).")
+        _xs = [1, 3, 10, 30, 100, 300, 1000, 3000, 10000]
+        st.line_chart({"sweet-spot": [transcytosis_sweetspot(x) for x in _xs]},
+                      x_label="KD (nM, 로그 눈금 근사)", y_label="sweet-spot(0~1)")
+    else:
+        st.info("친화도 sweet-spot은 **KD(nM) 입력 시** 평가됩니다 (Tier-3 핵심 축).")
+
+    # 결합가
+    _mono = a.valency < 2
+    st.markdown("**결합가** &nbsp; " + _pill("monovalent · 권장" if _mono else "bivalent · 감점",
+                *(("#e7f6ed", "#0b6b34") if _mono else ("#fbe9e9", "#a32020"))),
+                unsafe_allow_html=True)
+    st.caption(a.valency_note)
+
+    # 서열 기반 축 (개발성·용해도·전하) — 서열 입력 시
+    if a.developability or a.solubility:
+        c1, c2, c3 = st.columns(3)
+        if a.developability:
+            c1.metric("개발성 위험", a.developability["risk"])
+            c1.caption(f"liability {a.developability['n_liab']}개 · 응집 {a.developability['agg']}")
+        if a.solubility:
+            c2.metric("용해도", a.solubility["level"], f"{a.solubility['score']}")
+        if a.net_charge is not None:
+            c3.metric("순전하(pH7.4)", f"{a.net_charge:+g}")
+        _liab = (a.developability or {}).get("liabilities") or []
+        if _liab:
+            st.caption("서열 liability: " + ", ".join(_liab[:4]) + ("…" if len(_liab) > 4 else ""))
+        if a.notes:
+            st.caption(a.notes)
+    else:
+        st.caption("개발성·용해도·전하는 **VH/VL 서열 입력 시** 계산됩니다.")
+
+    # 구조 훅 상태
+    if a.structure and not a.structure.get("available"):
+        st.caption("구조: " + a.structure.get("note", ""))
+
+    # 보류(Tier-3) 축 — 정직하게
+    if a.pending:
+        with st.container(border=True):
+            st.markdown("**계산 못 하는 축 (Tier-3 · 정직한 한계)**")
+            for p in a.pending:
+                st.markdown(f"- {p}")
+    st.caption("모든 수치는 서열/휴리스틱 프록시이며 실측(SPR/BLI·뇌흡수) 대체가 아닙니다. "
+               "BBB 통과는 서열로 예측 불가 — 친화도+구조 기반 Tier-3.")
+
+
 def _render_dual_track(d):
     """이중 트랙 결과 렌더: Track1(구조/ESMFold) + Track2(투과 점수/deepB3P) + 독성."""
     sr = d["sr"]
@@ -758,11 +856,29 @@ else:
                 st.stop()
             status.update(label="생성 최적화 완료!", state="complete", expanded=False)
 
+    # --- 항체 셔틀 평가 실행(버튼) ---
+    if antibody_run:
+        _ab = AntibodyShuttle(
+            name=ab_input["name"] or "my-antibody", target=ab_input["target"] or "TfR",
+            fmt=ab_input["fmt"],
+            vh=_clean_cargo(ab_input["vh"]) or None, vl=_clean_cargo(ab_input["vl"]) or None,
+            kd_nM=ab_input["kd_nM"], valency=ab_input["valency"], source=ab_input["source"])
+        # 서열이 있으면 표준 20종만 허용
+        for _lbl, _s in (("VH", _ab.vh), ("VL", _ab.vl)):
+            if _s and (set(_s) - VALID_AMINO_ACIDS):
+                st.error(f"{_lbl} 서열에 표준 20종이 아닌 문자가 있습니다.")
+                st.stop()
+        st.session_state["antibody"] = {"ab": _ab, "assessment": assess_antibody_shuttle(_ab)}
+        st.session_state["view"] = "antibody"
+
     _view = st.session_state.get("view")
     _agent = st.session_state.get("agent")
     _struct = st.session_state.get("struct")
     fb = st.session_state.get("fbgan")
-    if _view == "struct" and _struct:
+    _ab_state = st.session_state.get("antibody")
+    if _view == "antibody" and _ab_state:
+        _render_antibody(_ab_state["ab"], _ab_state["assessment"])
+    elif _view == "struct" and _struct:
         st.divider()
         st.subheader("융합체 정밀 분석 — 이중 트랙")
         _render_dual_track(_struct)
