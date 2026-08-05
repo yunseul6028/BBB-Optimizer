@@ -32,6 +32,8 @@ from utils.config_transformer import Config as B3Config
 from utils.utils import SeqDataset
 from torch.utils.data import DataLoader
 
+from _physchem import charge_guardrail   # 양전하 편향 억제 물성 가드레일
+
 SEQ_LEN, N_CHARS, HIDDEN, MODEL_MAX = 50, 21, 128, 50
 
 
@@ -123,22 +125,25 @@ def main(cargo, linker, rounds, pop, elite, tox_thr, toxpy, toxrepo, toxscript, 
     for rd in range(rounds):
         shuttles = decode(G, z)
         constructs = [cargo + linker + s for s in shuttles]
-        bbb_scores = bbb.score([bbb_region(cargo, linker, s) for s in shuttles])
+        regions = [bbb_region(cargo, linker, s) for s in shuttles]
+        bbb_scores = bbb.score(regions)
         tox_scores = score_tox(constructs, toxpy, toxrepo, toxscript)
+        guards = [charge_guardrail(r) for r in regions]   # (penalty, net_charge, muH)
 
         fitness = np.array([
-            b if t <= tox_thr else b - 1.0            # 독성이면 페널티
-            for b, t in zip(bbb_scores, tox_scores)
+            (b if t <= tox_thr else b - 1.0) - g[0]       # 독성·과양전하 페널티
+            for b, t, g in zip(bbb_scores, tox_scores, guards)
         ])
         order = np.argsort(fitness)[::-1]
 
-        # 전역 베스트 갱신 (비독성 중 최고 BBB)
+        # 전역 베스트 갱신 (비독성 중 보정 적합도 최고)
         for i in order:
             if tox_scores[i] <= tox_thr:
                 cand = {"shuttle": shuttles[i], "sequence": constructs[i],
                         "bbb": round(float(bbb_scores[i]), 4), "tox": round(float(tox_scores[i]), 4),
-                        "len": len(constructs[i])}
-                if not best or cand["bbb"] > best["bbb"]:
+                        "charge": guards[i][1], "muH": guards[i][2],
+                        "fit": round(float(fitness[i]), 4), "len": len(constructs[i])}
+                if not best or cand["fit"] > best["fit"]:
                     best = cand
                 break
 
@@ -146,7 +151,8 @@ def main(cargo, linker, rounds, pop, elite, tox_thr, toxpy, toxrepo, toxscript, 
         history.append({"round": rd + 1,
                         "mean_bbb": round(float(np.mean(bbb_scores)), 4),
                         "best_bbb": round(float(np.max(bbb_scores)), 4),
-                        "n_safe": len(safe)})
+                        "n_safe": len(safe),
+                        "mean_charge": round(float(np.mean([g[1] for g in guards])), 1)})
 
         # --- 피드백: 상위 elite z 주변 변이 + 소량 랜덤 재샘플 ---
         elites = z[order[:elite]]
@@ -160,15 +166,18 @@ def main(cargo, linker, rounds, pop, elite, tox_thr, toxpy, toxrepo, toxscript, 
     # 마지막 세대 상위 후보들도 수집
     final_seqs = decode(G, z)
     fc = [cargo + linker + s for s in final_seqs]
-    fb = bbb.score([bbb_region(cargo, linker, s) for s in final_seqs])
+    fregions = [bbb_region(cargo, linker, s) for s in final_seqs]
+    fb = bbb.score(fregions)
     ft = score_tox(fc, toxpy, toxrepo, toxscript)
-    pool = [{"shuttle": s, "sequence": c, "bbb": round(float(b), 4), "tox": round(float(t), 4), "len": len(c)}
-            for s, c, b, t in zip(final_seqs, fc, fb, ft) if t <= tox_thr]
+    fg = [charge_guardrail(r) for r in fregions]
+    pool = [{"shuttle": s, "sequence": c, "bbb": round(float(b), 4), "tox": round(float(t), 4),
+             "charge": g[1], "muH": g[2], "fit": round(float(b - g[0]), 4), "len": len(c)}
+            for s, c, b, t, g in zip(final_seqs, fc, fb, ft, fg) if t <= tox_thr]
     if best:
         pool.append(best)
-    # 중복 제거 + BBB 내림차순 top
+    # 중복 제거 + 보정 적합도 내림차순 top
     seen, top = set(), []
-    for item in sorted(pool, key=lambda x: x["bbb"], reverse=True):
+    for item in sorted(pool, key=lambda x: x["fit"], reverse=True):
         if item["sequence"] in seen:
             continue
         seen.add(item["sequence"]); top.append(item)

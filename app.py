@@ -37,6 +37,7 @@ from core.config import (
     bbb_scoring_seq,
 )
 from core.generative import get_fbgan
+from core.coevolution import get_coevolution
 from core.optimizer_agent_gemini import get_gemini_agent
 from core.predictors import get_predictor
 from core.structure import analyze_construct
@@ -116,9 +117,9 @@ with _hero:
     st.caption(f"자동 감지 — **{'항체 / 나노바디 셔틀' if _modality == 'antibody' else '펩타이드 화물'}** · {_why}")
 
     # 실행 플래그·기본값 (분기 전에 초기화)
-    agent_run = run = fbgan_run = struct_run = antibody_run = False
+    agent_run = run = fbgan_run = struct_run = antibody_run = coevo_run = False
     ab_input: dict = {}
-    agent_rounds, fbgan_rounds = 8, 4
+    agent_rounds, fbgan_rounds, coevo_rounds = 8, 4, 4
     struct_linker_name, struct_shuttle_name = STANDARD_LINKER_NAME, list(SHUTTLES)[0]
 
     if _modality == "antibody":
@@ -175,6 +176,11 @@ with _hero:
             st.markdown("**신규 셔틀 생성 (FBGAN)**")
             fbgan_rounds = st.slider("생성 라운드 수", 2, 8, 4)
             fbgan_run = st.button("생성 실행", width='stretch')
+
+        if settings.use_coevo_local:
+            st.markdown("**링커·셔틀 동시 진화 (co-evolution)**")
+            coevo_rounds = st.slider("공진화 라운드 수", 2, 8, 4, key="coevo_rounds")
+            coevo_run = st.button("공진화 실행", width='stretch')
 
     with st.expander(f"라이브러리 구성 (링커 {len(LINKER_LIBRARY)} · 셔틀 {len(SHUTTLES)})"):
         st.markdown("**링커**")
@@ -860,6 +866,31 @@ else:
                 st.stop()
             status.update(label="생성 최적화 완료!", state="complete", expanded=False)
 
+    # 링커·셔틀 co-evolution(버튼) → 결과를 session_state에 저장
+    if coevo_run:
+        st.session_state["view"] = "coevo"
+        cargo = _clean_cargo(cargo_input)
+        _err = _cargo_error(cargo)
+        if _err:
+            st.error(_err)
+            st.stop()
+        with st.status(f"공진화 루프 실행 중... ({coevo_rounds}라운드: 링커·셔틀 동시 진화)",
+                       expanded=True) as status:
+            st.write("각 개체 = (셔틀 잠재 z + 링커 펩타이드) → deepB3P·ToxinPred3 채점 → 링커·셔틀 공진화")
+            try:
+                cres = get_coevolution(settings).run(
+                    cargo, rounds=coevo_rounds,
+                    tox_threshold=settings.toxicity_threshold)
+                st.session_state["coevo"] = {
+                    "history": cres.history, "best": cres.best,
+                    "cargo": cargo, "rounds": coevo_rounds,
+                }
+            except Exception as exc:  # noqa: BLE001
+                status.update(label="공진화 실패", state="error")
+                st.error(f"실행 오류: {exc}")
+                st.stop()
+            status.update(label="공진화 완료!", state="complete", expanded=False)
+
     # --- 항체 셔틀 평가 실행(버튼) ---
     if antibody_run:
         _ab = AntibodyShuttle(
@@ -879,6 +910,7 @@ else:
     _agent = st.session_state.get("agent")
     _struct = st.session_state.get("struct")
     fb = st.session_state.get("fbgan")
+    co = st.session_state.get("coevo")
     _ab_state = st.session_state.get("antibody")
     if _view == "antibody" and _ab_state:
         _render_antibody(_ab_state["ab"], _ab_state["assessment"])
@@ -931,6 +963,9 @@ else:
                 )
             )
             st.altair_chart(_hist_chart, use_container_width=True)
+            _c0, _c1 = fb["history"][0].get("mean_charge"), fb["history"][-1].get("mean_charge")
+            if _c0 is not None and _c1 is not None:
+                st.caption(f"평균 순전하 pH7.4 `{_c0:+g}` → `{_c1:+g}` (양전하 편향 억제)")
         st.markdown("##### 생성된 베스트 셔틀")
         top = fb["best"][:3]
         if not top:
@@ -946,10 +981,78 @@ else:
                         m1.metric("BBB 투과 점수", f"{b['bbb']*100:.0f}")
                         m2.metric("독성 위험", f"{b['tox']*100:.0f}%", delta="안전",
                                   delta_color="off")
+                        st.caption(
+                            f"순전하 pH7.4 `{b.get('charge', 0):+g}` · 양친매성 μH "
+                            f"`{b.get('muH', '—')}` (양전하 편향 보정 선정)"
+                        )
                         st.caption(f"전체 융합체({b['len']}aa): `{b['sequence']}`")
         st.caption(
-            "이 셔틀들은 AI가 새로 생성한 서열로, 자연·검증된 펩타이드가 아닙니다. "
-            "실제 합성·In Vitro 검증이 반드시 필요하며, BBB/독성은 deepB3P·ToxinPred3 예측값입니다."
+            "이 셔틀들은 AI가 새로 생성한 서열로, 자연·검증된 펩타이드가 아닙니다. 선정은 "
+            "deepB3P BBB에서 **과도한 양전하·비양친매성을 감점**해 보정한 적합도 기준이며, "
+            "실제 합성·In Vitro 검증이 필요합니다(BBB/독성은 deepB3P·ToxinPred3 예측값)."
+        )
+    elif co:
+        st.divider()
+        st.subheader("링커·셔틀 공진화 — 최적화 결과")
+        st.caption(
+            f"화물 {len(co['cargo'])}aa · {co['rounds']}라운드 · "
+            f"링커·셔틀을 **동시에** 진화(멀티모듈 co-evolution) — 링커·셔틀 모두 **AI가 새로 생성**"
+        )
+        if co["history"]:
+            st.markdown("##### 라운드별 BBB 개선")
+            _co_df = pd.DataFrame({
+                "라운드": list(range(1, len(co["history"]) + 1)),
+                "평균 BBB": [round(h["mean_bbb"] * 100) for h in co["history"]],
+                "최고 BBB": [round(h["best_bbb"] * 100) for h in co["history"]],
+            }).melt("라운드", var_name="구분", value_name="BBB 투과 점수")
+            _co_chart = (
+                alt.Chart(_co_df)
+                .mark_line(point=True)
+                .encode(
+                    x=alt.X("라운드:O", title="라운드"),
+                    y=alt.Y("BBB 투과 점수:Q", title="BBB 투과 점수",
+                            scale=alt.Scale(domain=[0, 100])),
+                    color=alt.Color("구분:N", title="",
+                                    scale=alt.Scale(domain=["최고 BBB", "평균 BBB"],
+                                                    range=["#30405c", "#8a929e"])),
+                )
+            )
+            st.altair_chart(_co_chart, use_container_width=True)
+            _first, _last = co["history"][0], co["history"][-1]
+            _c0, _c1 = _first.get("mean_charge"), _last.get("mean_charge")
+            _ctrend = (f" · 평균 순전하 `{_c0:+g}` → `{_c1:+g}`(양전하 편향 억제)"
+                       if _c0 is not None and _c1 is not None else "")
+            st.caption(
+                f"링커 다양성(마지막 라운드 고유 링커 수): {_last.get('n_uniq_linker', '—')} · "
+                f"베스트 링커: `{_last.get('best_linker', '—')}`{_ctrend}"
+            )
+        st.markdown("##### 공진화된 베스트 조합 (링커 + 셔틀)")
+        top = co["best"][:3]
+        if not top:
+            st.warning("비독성 후보를 찾지 못했습니다. 라운드를 늘려 다시 시도해 보세요.")
+        else:
+            cols = st.columns(len(top))
+            for i, b in enumerate(top):
+                with cols[i]:
+                    with st.container(border=True, key=f"coevo-card-{i}"):
+                        st.markdown(f"### 공진화 #{i+1}")
+                        st.caption(f"링커 ({b['linker_len']}aa)")
+                        st.code(b["linker"], language="text")
+                        st.caption("셔틀")
+                        st.code(b["shuttle"], language="text")
+                        m1, m2 = st.columns(2)
+                        m1.metric("BBB 투과 점수", f"{b['bbb']*100:.0f}")
+                        m2.metric("독성 위험", f"{b['tox']*100:.0f}%", delta="안전",
+                                  delta_color="off")
+                        st.caption(
+                            f"순전하 pH7.4 `{b.get('charge', 0):+g}` · 양친매성 μH "
+                            f"`{b.get('muH', '—')}` (양전하 편향 보정 선정)"
+                        )
+                        st.caption(f"전체 융합체({b['len']}aa): `{b['sequence']}`")
+        st.caption(
+            "링커·셔틀 모두 AI가 새로 생성·공진화한 서열입니다. 선정은 deepB3P BBB에서 "
+            "**과도한 양전하·비양친매성을 감점**해 보정한 적합도 기준이며, 실제 합성·In Vitro "
+            "검증이 필요합니다(BBB/독성은 deepB3P·ToxinPred3 예측값)."
         )
     else:
         if settings.use_gemini_agent:
