@@ -19,8 +19,13 @@ from typing import Generator
 from .config import LINKER_LIBRARY, MODEL_MAX_LEN, SHUTTLES, Settings
 from .optimizer_agent import AgentEvent, OptimizationAgent
 
-# 일시적 오류(모델 과부하·분당 레이트리밋) — 백오프 재시도 대상
-_TRANSIENT = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "overloaded", "high demand")
+# 일시적 오류(모델 과부하·분당 레이트리밋·응답 지연) — 백오프 재시도 대상
+_TRANSIENT = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "overloaded", "high demand",
+              "504", "DEADLINE_EXCEEDED", "timeout", "timed out")
+
+# Gemini 요청당 최대 대기(ms). 응답이 이 시간 내 안 오면 예외 → 재시도/에러 표시.
+# (미설정 시 stall된 연결에서 UI가 무한 "실행 중"에 걸린다.)
+_REQUEST_TIMEOUT_MS = 120_000
 
 # 양이온 편향 완화용 선택성 감점 계수 λ.
 # 유효 BBB = BBB − λ·off_target_risk. deepB3P가 양이온성 CPP를 고평가해 BBB만 좇으면
@@ -287,7 +292,10 @@ class GeminiOptimizationAgent(OptimizationAgent):
             yield AgentEvent("error", "google-genai 미설치: pip install google-genai")
             return
 
-        client = genai.Client(api_key=key)
+        client = genai.Client(
+            api_key=key,
+            http_options=types.HttpOptions(timeout=_REQUEST_TIMEOUT_MS),
+        )
         model = self.settings.gemini_model
         has_fbgan = self.settings.use_fbgan_local
         tools = types.Tool(function_declarations=self._function_decls(types, has_fbgan))
