@@ -21,9 +21,24 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
-from .antibody import transcytosis_sweetspot
+
+def transcytosis_sweetspot(kd_nM: float | None,
+                           optimum_nM: float = 100.0,
+                           width_decades: float = 1.0) -> float | None:
+    """TfR 친화도 sweet-spot의 **정성 프록시**(0~1). KD 없으면 None.
+
+    문헌 관찰: TfR 친화도가 **너무 높으면(저 KD)** 뇌 쪽에서 방출되지 못해 갇히고, **너무 낮으면**
+    결합 자체가 안 돼 뇌흡수가 준다 → 중간~약 친화가 유리. 로그 KD에 대한 종형(bell) 근사이며,
+    optimum_nM·width는 **튜닝 파라미터**(실측으로 보정해야 함, 지금은 기본 휴리스틱).
+    """
+    if kd_nM is None or kd_nM <= 0:
+        return None
+    x = math.log10(kd_nM) - math.log10(optimum_nM)
+    return round(math.exp(-(x * x) / (2 * width_decades * width_decades)), 3)
+
 
 # 메커니즘 분류용 키워드 (target/mechanism 문자열에서 탐지).
 _CPP_HINTS = ("CPP", "세포투과", "막 직접투과", "막직접투과", "막 투과", "직접투과")
