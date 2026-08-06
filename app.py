@@ -557,6 +557,14 @@ def _render_antibody(ab, a):
     st.caption(f"표적 **{a.target}** · 포맷 **{a.fmt}** · "
                f"{'monovalent(1가)' if a.valency < 2 else 'bivalent(2가)'} · 출처: {ab.source}")
 
+    # 서열 Tier 초기 랭킹 (triage — 결합·구조 미포함)
+    st.metric("서열 Tier 초기 랭킹", f"{a.initial_rank * 100:.0f}",
+              help="특이성·개발성·용해도·결합가·avidity 종합(0~100). ⚠️ BBB 투과 확률이 아니라 "
+                   "'만들기 좋고 비특이 흡착 낮은' 후보의 우선순위 — 결합/구조는 Tier-3.")
+    if a.paratope:
+        st.caption(f"CDR3(파라토프) 근사 — H3 `{a.cdr_h3 or '—'}`"
+                   + (f" · L3 `{a.cdr_l3}`" if a.cdr_l3 else "") + f"  ·  {a.cdr_method}")
+
     # 친화도 sweet-spot (KD 입력 시)
     if a.sweetspot is not None:
         _good = a.sweetspot >= 0.6
@@ -596,6 +604,17 @@ def _render_antibody(ab, a):
             st.caption(a.notes)
     else:
         st.caption("개발성·용해도·전하는 **VH/VL 서열 입력 시** 계산됩니다.")
+
+    # 비특이 흡착 프록시 (파라토프 CDR의 전하·친유성)
+    if a.nonspecific:
+        _ns = a.nonspecific
+        st.markdown(f"**비특이 흡착(파라토프)** &nbsp; 특이성 {_ns['specificity']:.2f} · 위험 "
+                    f"**{_ns['level']}**")
+        if _ns.get("drivers"):
+            st.caption("· " + " · ".join(_ns["drivers"][:2]))
+    if a.deepb3p_cdr is not None:
+        st.caption(f"CDR CPP-유사도(deepB3P) {a.deepb3p_cdr:.2f} — ⚠️ **BBB 투과도 아님**, "
+                   "높을수록 비특이 흡착(끈적) 우려. 참고 축.")
 
     # 구조 훅 상태
     if a.structure and not a.structure.get("available"):
@@ -944,7 +963,11 @@ else:
             if _s and (set(_s) - VALID_AMINO_ACIDS):
                 st.error(f"{_lbl} 서열에 표준 20종이 아닌 문자가 있습니다.")
                 st.stop()
-        st.session_state["antibody"] = {"ab": _ab, "assessment": assess_antibody_shuttle(_ab)}
+        # CDR(파라토프) CPP-유사도 참고축용 deepB3P scorer 주입(⚠️ BBB 투과도 아님·비특이흡착 프록시)
+        _pred = get_predictor(settings)
+        _ab_scorer = lambda s: _pred.predict_many([s])[0].bbb_permeability
+        st.session_state["antibody"] = {
+            "ab": _ab, "assessment": assess_antibody_shuttle(_ab, bbb_scorer=_ab_scorer)}
         st.session_state["view"] = "antibody"
 
     _view = st.session_state.get("view")

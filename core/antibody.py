@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 
 # 대표 RMT 항체 표적(참고) — 실제 브레인셔틀들이 노리는 수용체.
@@ -49,6 +50,47 @@ def detect_modality(seq: str) -> tuple[str, str]:
     if n >= ANTIBODY_MIN_LEN or (n >= 45 and motif):
         return "antibody", f"길이 {n}aa{'·항체 N말단 모티프' if motif else ''} → 항체/나노바디로 판단"
     return "peptide", f"길이 {n}aa → 펩타이드 화물로 판단"
+
+
+# ── CDR3(파라토프) 근사 추출 — dependency-free ──────────────────────────────
+_H_FR4 = re.compile(r"WG.G")   # 중쇄 FR4 시작(WGQG/WGAG/WGKG…) → CDR-H3 뒤 앵커
+_L_FR4 = re.compile(r"FG.G")   # 경쇄 FR4 시작(FGGG/FGQG…) → CDR-L3 뒤 앵커
+
+
+def _cdr3(seq: str | None, fr4_re) -> str:
+    """FR3 말단 보존 Cys ~ FR4 앵커 사이 = CDR3 루프(근사). 못 찾으면 ''."""
+    s = "".join(ch for ch in (seq or "").upper() if ch.isalpha())
+    if not s:
+        return ""
+    matches = list(fr4_re.finditer(s))
+    if not matches:
+        return ""
+    # FR4(WG.G/FG.G)는 V도메인 C말단 근처 → **마지막 앵커**를 취해 CDR 내부의 spurious 모티프
+    # (예: H3 안의 'WGLG', VHH FR3의 'WGGG')를 회피한다.
+    m = matches[-1]
+    cys = s.rfind("C", 0, m.start())
+    if cys < 0 or (m.start() - cys) > 40:   # Cys~앵커가 비정상적으로 멀면 신뢰 불가
+        return ""
+    return s[cys + 1 : m.start()]
+
+
+def extract_cdrs(vh: str | None, vl: str | None = None) -> dict:
+    """항체 서열에서 결합을 주도하는 CDR3(H3·L3)를 dependency-free 근사 추출.
+
+    CDR3(특히 H3)는 파라토프 결합의 지배적 결정인자다. 보존 Cys(FR3)~WG.G/FG.G(FR4) 앵커로 잡는다.
+    ⚠️ Kabat 넘버링(ANARCI) 없이 모티프 근사 — H1/H2/L1/L2는 신뢰도가 낮아 잡지 않는다.
+    반환 {h3, l3, paratope, method}. 못 잡으면 paratope=전체 Fv(fallback).
+    """
+    h3 = _cdr3(vh, _H_FR4)
+    l3 = _cdr3(vl, _L_FR4) if vl else ""
+    para = h3 + l3
+    if para:
+        method = "CDR3 근사(H3" + ("+L3" if l3 else "") + ")"
+    else:
+        para = "".join(ch for ch in ((vh or "") + (vl or "")).upper() if ch.isalpha())
+        method = "CDR3 추출 실패 → 전체 Fv(fallback)"
+    return {"h3": h3, "l3": l3, "paratope": para, "method": method}
+
 
 # 항체/나노바디 셔틀 라이브러리. 스키마:
 #   {name: {"target": str, "fmt": "VHH|scFv|Fab|IgG", "vh": str|None, "vl": str|None,
@@ -142,6 +184,13 @@ class AntibodyAssessment:
     developability: dict | None = None
     solubility: dict | None = None
     net_charge: float | None = None
+    # CDR(파라토프) 기반 — 결합 루프에 집중한 서열 축
+    cdr_h3: str = ""
+    cdr_l3: str = ""
+    paratope: str = ""
+    cdr_method: str = ""
+    nonspecific: dict | None = None      # 파라토프 비특이 흡착 프록시(전하·친유성)
+    deepb3p_cdr: float | None = None     # (선택) CDR CPP-유사도 = 비특이흡착 참고(⚠️BBB 투과도 아님)
     # 친화도 기반(Tier-3)
     sweetspot: float | None = None       # 0~1 (KD 있을 때만)
     kd_nM: float | None = None
@@ -149,6 +198,8 @@ class AntibodyAssessment:
     structure: dict | None = None
     # 결합가
     valency_note: str = ""
+    # 서열 Tier 초기 랭킹(triage — 결합·구조 미포함)
+    initial_rank: float = 0.0
     # 정직한 축 구분
     computable: list = field(default_factory=list)   # 실제 계산한 축
     pending: list = field(default_factory=list)       # Tier-3/DB 필요로 보류
@@ -191,12 +242,22 @@ def _valency_note(valency: int, target: str) -> str:
 
 
 # ── 6) 파이프라인 집계 ───────────────────────────────────────────────────────
-def assess_antibody_shuttle(ab: AntibodyShuttle) -> AntibodyAssessment:
-    """항체 셔틀을 가능한 축으로 평가하고, 보류 축을 정직하게 표시해 반환."""
+def assess_antibody_shuttle(ab: AntibodyShuttle, bbb_scorer=None) -> AntibodyAssessment:
+    """항체 셔틀을 서열 Tier 축으로 평가하고, 보류 축을 정직하게 표시해 반환.
+
+    bbb_scorer: (선택) seq→0~1 콜러블(deepB3P 등). 주어지면 **CDR(파라토프)의 CPP-유사 성향**을
+                참고 축으로 계산 — ⚠️ 이는 '비특이 흡착 프록시'이지 BBB 투과도 예측이 아니다
+                (높을수록 끈적 = off-target 우려). 결합/전달은 친화도+구조(Tier-3)가 결정한다.
+    """
     res = AntibodyAssessment(name=ab.name, target=ab.target, fmt=ab.fmt, valency=ab.valency,
                              kd_nM=ab.kd_nM)
 
-    # 2) 서열 기반 축 — 서열이 있을 때만(DB 주입 후). 엔진은 펩타이드 보정이라 근사.
+    # 1) CDR3(파라토프) 근사 추출 — 특이성 축은 결합 루프에 집중해 본다.
+    cd = extract_cdrs(ab.vh, ab.vl)
+    res.cdr_h3, res.cdr_l3 = cd["h3"], cd["l3"]
+    res.paratope, res.cdr_method = cd["paratope"], cd["method"]
+
+    # 2) 개발성·용해도 — Fv 전체(liability는 어디서든 의미, 용해도는 분자 물성). 엔진은 펩타이드 보정 근사.
     seq = ab.sequence
     if seq:
         from .developability import assess_developability
@@ -207,7 +268,7 @@ def assess_antibody_shuttle(ab: AntibodyShuttle) -> AntibodyAssessment:
             res.developability = {"risk": dev.risk_level, "n_liab": dev.n_liabilities,
                                   "liabilities": dev.liabilities, "agg": dev.agg_score}
             res.net_charge = dev.net_charge
-            res.computable.append("개발성")
+            res.computable.append("개발성(Fv)")
         if not sol.error:
             res.solubility = {"score": sol.score, "level": sol.level}
             res.computable.append("용해도")
@@ -215,7 +276,23 @@ def assess_antibody_shuttle(ab: AntibodyShuttle) -> AntibodyAssessment:
     else:
         res.pending.append("개발성·용해도(서열 DB 주입 후 계산)")
 
-    # 3) 친화도 sweet-spot — KD 있을 때만.
+    # 3) 비특이 흡착 프록시 — **파라토프(CDR)의 전하/친유성**. 결합 루프가 끈적하면 off-target·빠른 청소.
+    if res.paratope:
+        from .selectivity import assess_selectivity
+        sel = assess_selectivity(res.paratope)
+        res.nonspecific = {"off_risk": sel.off_target_risk, "specificity": sel.selectivity,
+                           "level": sel.risk_level, "drivers": sel.drivers}
+        res.computable.append("비특이 흡착(파라토프)")
+
+    # 4) (선택) CDR deepB3P = **CPP-유사 비특이 흡착 프록시** — BBB 투과도 아님(높을수록 끈적).
+    if bbb_scorer and res.paratope:
+        try:
+            res.deepb3p_cdr = round(float(bbb_scorer(res.paratope)), 3)
+            res.computable.append("CDR CPP-유사도(참고·비특이흡착)")
+        except Exception:  # noqa: BLE001
+            pass
+
+    # 5) 친화도 sweet-spot — KD 있을 때만.
     ss = transcytosis_sweetspot(ab.kd_nM)
     if ss is not None:
         res.sweetspot = ss
@@ -223,18 +300,37 @@ def assess_antibody_shuttle(ab: AntibodyShuttle) -> AntibodyAssessment:
     else:
         res.pending.append("친화도 sweet-spot(KD 실측/예측 필요, Tier-3)")
 
-    # 4) 구조 — 훅.
+    # 6) 구조 — 훅.
     res.structure = predict_antibody_structure(ab)
     if not res.structure.get("available"):
         res.pending.append("구조/결합 타당성(IgFold·AF-Multimer 연동, Tier-3)")
 
-    # 5) 결합가.
+    # 7) 결합가.
     res.valency_note = _valency_note(ab.valency, ab.target)
     res.computable.append("결합가")
 
-    # BBB 통과는 서열로 예측 불가 — 항상 보류(Tier-3 핵심).
-    res.pending.append("BBB 통과/뇌흡수(서열 예측 불가 — 친화도+구조 기반 Tier-3)")
+    # 8) 서열 Tier 초기 랭킹(triage) — 결합 친화도·구조 미포함(Tier-3에서 보강).
+    res.initial_rank = _initial_rank(res)
+
+    # BBB 통과 절대값은 서열로 예측 불가 — 항상 보류(Tier-3 핵심: 친화도+구조).
+    res.pending.append("BBB 통과/뇌흡수 절대값(서열 예측 불가 — 친화도+구조 기반 Tier-3)")
     return res
+
+
+def _initial_rank(res: AntibodyAssessment) -> float:
+    """서열 Tier 초기 랭킹(0~1, 높을수록 유망). 결합·구조 미포함 — triage 순서용.
+
+    특이성(비특이 흡착 낮음) 0.35 · 개발성 0.25 · 용해도 0.20 · 결합가 0.10 · avidity 0.10.
+    (deepB3P-CDR은 '참고' 축이라 점수에 넣지 않는다.)
+    """
+    spec = res.nonspecific["specificity"] if res.nonspecific else 0.5
+    devmap = {"낮음": 1.0, "보통": 0.6, "높음": 0.25}
+    dev = devmap.get(res.developability["risk"], 0.5) if res.developability else 0.5
+    sol = res.solubility["score"] if res.solubility else 0.5
+    val = 1.0 if res.valency < 2 else 0.6
+    avid = res.sweetspot if res.sweetspot is not None else 0.5
+    score = 0.35 * spec + 0.25 * dev + 0.20 * sol + 0.10 * val + 0.10 * avid
+    return round(max(0.0, min(1.0, score)), 3)
 
 
 def registry_shuttles() -> list[AntibodyShuttle]:
@@ -246,3 +342,15 @@ def registry_shuttles() -> list[AntibodyShuttle]:
             vh=v.get("vh"), vl=v.get("vl"), kd_nM=v.get("kd_nM"),
             valency=int(v.get("valency", 1)), source=v.get("source", "")))
     return out
+
+
+def rank_antibody_shuttles(shuttles: list | None = None, bbb_scorer=None) -> list:
+    """항체 셔틀들을 **서열 Tier 초기 랭킹**으로 정렬(결합·구조 미포함 triage).
+
+    서열(vh) 있는 것만 평가한다. bbb_scorer를 주면 CDR CPP-유사도(비특이흡착 참고)도 채운다.
+    ⚠️ 이 랭킹은 BBB 투과 확률이 아니라 '만들기 좋고 비특이 흡착 낮은' 후보의 우선순위다.
+    실제 뇌 전달은 친화도(sweet-spot)+구조(Tier-3)가 확정한다.
+    """
+    abs_list = shuttles if shuttles is not None else registry_shuttles()
+    assessed = [assess_antibody_shuttle(a, bbb_scorer=bbb_scorer) for a in abs_list if a.sequence]
+    return sorted(assessed, key=lambda r: r.initial_rank, reverse=True)
