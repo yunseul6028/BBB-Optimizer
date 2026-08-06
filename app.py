@@ -32,7 +32,7 @@ from core.config import (
 from core.generative import get_fbgan
 from core.coevolution import get_coevolution
 from core.modular import get_modular
-from core.optimizer_agent_gemini import get_gemini_agent
+from core.optimizer_agent_gemini import get_gemini_agent, OFF_TARGET_PENALTY
 from core.predictors import get_predictor
 from core.structure import analyze_construct
 from core.toxicity import get_toxicity_predictor
@@ -348,9 +348,17 @@ def _emit_agent_event(ev):
         st.error(ev.text)
 
 
+def _eff_bbb(r):
+    """에이전트 결정축과 동일한 **유효점수** = BBB − λ·off_target_risk.
+    raw BBB가 최고여도 비특이(off-target) CPP면 감점돼 밀린다(reward-hacking 회피).
+    표시축(랭킹)을 이 결정축과 일치시켜 '왜 1위를 안 골랐나' 불일치를 없앤다."""
+    return r.get("bbb", 0.0) - OFF_TARGET_PENALTY * r.get("sel_off", 0.0)
+
+
 def _extract_podium(events, n=3):
-    """상위 후보 n개. 에이전트가 finish로 고른 최종 선택(choice)이 있으면 1위로,
-    나머지는 비독성 후보 BBB 순으로 채운다(중복 제거)."""
+    """상위 후보 n개. 에이전트 결정축과 동일한 **유효점수(eff = BBB − λ·off_target)** 순으로
+    정렬한다 — raw BBB 최고여도 off-target CPP면 밀린다. 에이전트가 finish로 고른 최종
+    선택(choice)이 있으면 1위로 고정하고, 나머지는 유효점수 순으로 채운다(중복 제거)."""
     seen = {}
     for e in events:
         if e.kind == "evaluation":
@@ -358,9 +366,9 @@ def _extract_podium(events, n=3):
                 if r.get("toxic"):
                     continue
                 seq = r["sequence"]
-                if seq not in seen or r["bbb"] > seen[seq]["bbb"]:
+                if seq not in seen or _eff_bbb(r) > _eff_bbb(seen[seq]):
                     seen[seq] = r
-    ranked = sorted(seen.values(), key=lambda r: r["bbb"], reverse=True)
+    ranked = sorted(seen.values(), key=_eff_bbb, reverse=True)
     choice = next((e.data for e in events if e.kind == "choice"), None)
     if choice:
         cseq = choice.get("sequence")
@@ -427,7 +435,9 @@ def _render_agent_summary(events, cargo):
         st.altair_chart(_chart, use_container_width=True)
     if podium:
         st.markdown("##### 상위 후보")
-        st.caption("에이전트가 finish로 고른 최종 선택이 1위이고, 나머지는 BBB 순 차순위입니다.")
+        st.caption("에이전트가 finish로 고른 최종 선택이 1위이고, 나머지는 **유효점수"
+                   "(BBB − off-target 감점) 순** 차순위입니다 — raw BBB 최고여도 비특이(off-target) "
+                   "CPP는 밀립니다(에이전트 결정축과 동일).")
         cols = st.columns(len(podium))
         for i, cand in enumerate(podium):
             with cols[i]:
