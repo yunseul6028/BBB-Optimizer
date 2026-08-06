@@ -49,11 +49,16 @@ class StructureResult:
     error: str = ""
 
 
-def fold_esmfold(sequence: str, timeout: float = 90.0, tries: int = 3) -> tuple[str, str]:
+def fold_esmfold(sequence: str, timeout: float = 25.0, tries: int = 3,
+                 deadline: float = 60.0) -> tuple[str, str]:
     """서열 → ESMFold PDB. (pdb, error) 반환. sha256 캐싱 + 일시적 서버오류 백오프 재시도.
 
-    ESMFold 공개 API는 종종 502/503/**504(게이트웨이 타임아웃)** 나 응답 지연을 내는데,
-    대부분 일시적이라 짧게 기다렸다 재시도하면 성공한다. 4xx(클라이언트 오류)는 재시도 안 함.
+    ESMFold 공개 API(api.esmatlas.com)는 종종 502/503/**504(게이트웨이 타임아웃)** 나 응답
+    지연을 내는데, 대부분 일시적이라 짧게 기다렸다 재시도하면 성공한다. 4xx(클라이언트 오류)는
+    재시도 안 함. 다만 서버가 통째로 내려간 경우 재시도는 소용없으므로 **빨리 실패**가 중요하다:
+      · per-try timeout을 짧게(기본 25초) 잡고,
+      · `deadline`(기본 60초) 총 대기 상한을 두어 서버가 hang해도 UI가 오래 멎지 않게 한다.
+    구조 노출도는 **보조 지표**라 실패해도 나머지 결과(BBB·독성·전달 분해)엔 영향이 없다.
     """
     import time
     import requests
@@ -63,9 +68,14 @@ def fold_esmfold(sequence: str, timeout: float = 90.0, tries: int = 3) -> tuple[
         return cache.read_text(), ""
 
     last = ""
+    start = time.monotonic()
     for attempt in range(tries):
+        # 남은 예산이 per-try 타임아웃보다 작으면 그만큼만 기다린다(총 deadline 준수).
+        remaining = deadline - (time.monotonic() - start)
+        if remaining <= 0:
+            break
         try:
-            r = requests.post(ESMFOLD_URL, data=seq, timeout=timeout)
+            r = requests.post(ESMFOLD_URL, data=seq, timeout=min(timeout, remaining))
             if r.status_code in (429, 500, 502, 503, 504):
                 last = f"서버 {r.status_code}(일시적)"          # transient → 재시도
             elif not r.ok:
@@ -82,15 +92,16 @@ def fold_esmfold(sequence: str, timeout: float = 90.0, tries: int = 3) -> tuple[
             last = type(exc).__name__                          # 네트워크 지연 → 재시도
         except Exception as exc:  # noqa: BLE001
             return "", f"ESMFold API 오류: {type(exc).__name__}: {exc}"
-        if attempt < tries - 1:
-            time.sleep(3 * (attempt + 1))                      # 3초, 6초 백오프
+        # 다음 시도 전 짧은 백오프(2초, 4초) — 단, 총 deadline을 넘기지 않을 때만.
+        if attempt < tries - 1 and (deadline - (time.monotonic() - start)) > 2:
+            time.sleep(2 * (attempt + 1))
 
-    return "", (f"ESMFold 서버 일시 오류({last}) — 재시도 후에도 실패했습니다. "
+    return "", (f"ESMFold 서버 일시 오류({last or '응답 없음'}) — 재시도 후에도 실패했습니다. "
                 "잠시 후 다시 시도하세요. (구조 노출도는 보조 지표라 나머지 결과엔 영향 없습니다.)")
 
 
 def analyze_construct(cargo: str, linker: str, shuttle: str,
-                      timeout: float = 90.0) -> StructureResult:
+                      timeout: float = 25.0) -> StructureResult:
     """융합체를 접고 셔틀 노출도를 분석한다."""
     cargo, linker, shuttle = cargo.upper(), linker.upper(), shuttle.upper()
     seq = cargo + linker + shuttle
