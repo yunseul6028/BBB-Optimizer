@@ -55,10 +55,19 @@ class OptimizationAgent:
         from .developability import assess_developability
         from .selectivity import assess_selectivity
         from .solubility import assess_solubility
-        bbb = self.predictor.predict_many([bbb_scoring_seq(cargo, c["linker"], c["shuttle"]) for c in clean])
+        from .delivery import assess_delivery
+        # 융합 연결부위 deepB3P + 셔틀 단독 deepB3P를 **한 배치**로 추론(전달 축 분해용).
+        junction_seqs = [bbb_scoring_seq(cargo, c["linker"], c["shuttle"]) for c in clean]
+        uniq_shuttles: list[str] = []
+        for c in clean:
+            if c["shuttle"] and c["shuttle"] not in uniq_shuttles:
+                uniq_shuttles.append(c["shuttle"])
+        preds = self.predictor.predict_many(junction_seqs + uniq_shuttles)
+        bbb = preds[: len(clean)]
+        shuttle_bbb = {s: preds[len(clean) + i].bbb_permeability for i, s in enumerate(uniq_shuttles)}
         tox = self.tox_predictor.predict_many([c["sequence"] for c in clean])
         thr = self.settings.toxicity_threshold
-        rows, lines = [], ["label | primary | penalty | index | match | status | assembly"]
+        rows, lines = [], ["label | primary | shuttleBBB | mech | preserv | penalty | index | match | status | assembly"]
         for c, p, t in zip(clean, bbb, tox):
             toxic = t.risk > thr
             bind = shuttle_similarity(c["shuttle"])
@@ -66,6 +75,9 @@ class OptimizationAgent:
             dev = assess_developability(c["sequence"])
             selr = assess_selectivity(c["shuttle"])   # off-target은 셔틀이 주도
             solr = assess_solubility(c["sequence"])   # 용해도는 전체 융합체
+            # 전달 축 분해 — deepB3P를 '셔틀 내재 × 융합 보존 × 메커니즘 타당도'로 나눈다.
+            si = shuttle_bbb.get(c["shuttle"], 0.0)
+            dax = assess_delivery(si, p.bbb_permeability, target=bind.target, mechanism=bind.mechanism)
             rows.append({"label": c["label"], "linker": c["linker"], "shuttle": c["shuttle"],
                          "sequence": c["sequence"], "bbb": round(p.bbb_permeability, 4),
                          "tox": round(t.risk, 4), "toxic": toxic,
@@ -77,13 +89,21 @@ class OptimizationAgent:
                          "sel_off": selr.off_target_risk, "selectivity": selr.selectivity,
                          "sel_level": selr.risk_level, "sel_mech": selr.mechanism,
                          "sel_drivers": selr.drivers,
-                         "sol_score": solr.score, "sol_level": solr.level})
-            lines.append(f"{c['label']} | {p.bbb_permeability:.3f} | {t.risk:.3f} | "
-                         f"{stab.instability_index} | {bind.score:.2f} | "
+                         "sol_score": solr.score, "sol_level": solr.level,
+                         "shuttle_bbb": round(si, 4), "mechanism": dax.mechanism,
+                         "is_rmt": dax.is_rmt, "preservation": dax.preservation,
+                         "avidity": dax.avidity, "deepb3p_valid": dax.deepb3p_validity,
+                         "delivery_basis": dax.basis})
+            _pres = f"{dax.preservation:.2f}" if dax.preservation is not None else "n/a"
+            lines.append(f"{c['label']} | {p.bbb_permeability:.3f} | {si:.3f} | {dax.mechanism} | "
+                         f"{_pres} | {t.risk:.3f} | {stab.instability_index} | {bind.score:.2f} | "
                          f"{'FAIL(penalty)' if toxic else 'ok'} | {c['sequence']}")
         return ("\n".join(lines)
-                + f"\n(primary: maximize 0-1 | penalty: ≤{thr:.2f} else FAIL | "
-                  "index: lower better, <40 good | match: higher better 0-1)"), rows
+                + f"\n(primary: deepB3P 융합점수 0-1 — **RMT 셔틀엔 약한 프록시**(수용체 결합이 병목) | "
+                  "shuttleBBB: 셔틀 단독 deepB3P | mech: RMT(수용체매개)/CPP(막투과) | "
+                  f"preserv: 융합 보존도(융합/셔틀) | penalty: ≤{thr:.2f} else FAIL | "
+                  "index: lower better, <40 good | match: 수용체유사도 0-1 | "
+                  "→ RMT는 primary 절대값보다 mech·preserv·구조노출로 판단)"), rows
 
     def _structure(self, cargo, tool_input):
         from .structure import analyze_construct

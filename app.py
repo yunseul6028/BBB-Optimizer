@@ -491,6 +491,16 @@ def _render_agent_summary(events, cargo):
                     m1, m2 = st.columns(2)
                     m1.metric("BBB 투과 점수", f"{cand['bbb']*100:.0f}")
                     m2.metric("독성", f"{cand['tox']*100:.0f}%", delta="안전", delta_color="off")
+                    if cand.get("mechanism"):
+                        _mech = cand["mechanism"]
+                        _pres = cand.get("preservation")
+                        _pres_s = f"{_pres*100:.0f}" if isinstance(_pres, (int, float)) else "n/a"
+                        _avid = cand.get("avidity")
+                        st.caption(
+                            f"전달 분해 — 셔틀 내재 **{cand.get('shuttle_bbb', 0)*100:.0f}** × 융합보존 "
+                            f"**{_pres_s}** · 메커니즘 **{_mech}**"
+                            + (f" · avidity {_avid:.2f}" if isinstance(_avid, (int, float)) else "")
+                            + (f"  \n:gray[{'RMT — 실제 전달은 수용체 결합·avidity가 결정, deepB3P는 참고치' if cand.get('is_rmt') else 'CPP — deepB3P 비교적 유효하나 비특이(off-target) 주의' if _mech == 'CPP' else 'deepB3P 절대값 신뢰 낮음 — 상대 비교'}]"))
                     st.caption(
                         f"불안정성 {cand.get('instability', '?')}"
                         f"({'안정' if cand.get('stable') else '불안정'}) · "
