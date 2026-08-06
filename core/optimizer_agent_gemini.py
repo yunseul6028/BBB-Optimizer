@@ -38,7 +38,8 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
     lib_l = ", ".join(f"{n}({v['seq'] or '링커없음/직접융합'})" for n, v in LINKER_LIBRARY.items())
     lib_s = ", ".join(f"{n}({v['seq']})" for n, v in SHUTTLES.items())
     tools = ("evaluate_candidates(BBB·독성·안정성·수용체 배치), design_candidate(잔기 수준 편집 "
-             "서열 채점), analyze_structure(구조 노출도)")
+             "서열 채점), analyze_structure(구조 노출도), evolve_from_library(검증 셔틀·링커 서열 "
+             "directed evolution — 라이브러리 밖 탐색)")
     tools += ", finish(수렴 시 최종 후보 제출·종료)"
     return (
         "[연구 맥락] 이것은 알츠하이머병 치료제의 뇌 전달을 개선하기 위한 정당한 학술·공모전용 "
@@ -129,6 +130,17 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 }, required=["linker", "shuttle"]),
             ),
         ]
+        if self.settings.use_coevo_local:
+            decls.append(types.FunctionDeclaration(
+                name="evolve_from_library",
+                description=("검증 라이브러리 셔틀·링커를 **서열 directed evolution**(라이브러리 시드 "
+                             "point-mutation/crossover)으로 진화시켜 라이브러리 밖 후보를 제안하고 8축으로 "
+                             "재평가한다. 셔틀은 de-novo 생성이 아니라 검증 리간드에서 파생. 라이브러리 "
+                             "조합·잔기 편집으로 부족할 때만. 느림(수십 초~수 분)."),
+                parameters=S(type=T.OBJECT, properties={
+                    "rounds": S(type=T.INTEGER, description="2~3 진화 라운드"),
+                }, required=["rounds"]),
+            ))
         decls.append(types.FunctionDeclaration(
             name="finish",
             description=("충분히 수렴했다고 판단하면 호출해 최종 후보를 제출하고 종료한다. 고정 스텝을 "
@@ -158,6 +170,11 @@ class GeminiOptimizationAgent(OptimizationAgent):
         if name == "analyze_structure":
             text, sdata = self._structure(cargo, args)
             return text, AgentEvent("structure", text=text, data=sdata)
+        if name == "evolve_from_library":
+            text, rows = self._coevolve(cargo, args)
+            return text, AgentEvent("evaluation",
+                                    text="🧬 라이브러리 시드 directed evolution (셔틀·링커 공진화)",
+                                    data={"rows": rows})
         return f"unknown tool: {name}", None
 
     @staticmethod

@@ -1,43 +1,31 @@
 """
 BBB-Optimize AI Agent — Streamlit UI (thin layer)
 =================================================
-화물(cargo) 펩타이드를 받아, 링커·셔틀 라이브러리를 **전수 조합**해 융합체를 만들고,
-deepB3P(BBB)·ToxinPred3(독성)로 분석해 **투과 점수 높고 비독성인 베스트 N**을 추천한다.
+화물(cargo) 서열을 받아, **자율 설계 에이전트**가 링커·셔틀을 조립·잔기 편집·서열 진화 도구로
+오케스트레이션하고 deepB3P(BBB)·ToxinPred3(독성)·선택성 등 8축으로 평가해 최종 융합체를 설계한다.
+UI는 얇은 표시·스트리밍 계층이며 계산은 core/*.py.
 
 실행:
     pip install -r requirements.txt
     streamlit run app.py
 """
 
-import re
-import time
 from pathlib import Path
 
 import altair as alt
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 
-from core import build_agent, get_settings
-from core.binding import shuttle_similarity
+from core import get_settings
 from core.config import (
     DEFAULT_CARGO,
     LINKER_LIBRARY,
     MODEL_MAX_LEN,
     SHUTTLES,
-    STANDARD_LINKER_NAME,
     VALID_AMINO_ACIDS,
-    bbb_scoring_seq,
 )
-from core.coevolution import get_coevolution
-from core.modular import get_modular
 from core.optimizer_agent_gemini import get_gemini_agent, OFF_TARGET_PENALTY
-from core.predictors import get_predictor
-from core.structure import analyze_construct
-from core.toxicity import get_toxicity_predictor
 from core.schemas import Verdict
-
-STEP_DELAY = 0.7
 
 st.set_page_config(page_title="BBB-Optimize AI Agent", page_icon="🧬", layout="wide")
 
@@ -108,9 +96,8 @@ with _hero:
     _seq = _clean_cargo(cargo_input)
 
     # 실행 플래그·기본값
-    agent_run = run = struct_run = coevo_run = modular_run = False
-    agent_rounds, coevo_rounds, modular_rounds = 8, 4, 4
-    struct_linker_name, struct_shuttle_name = STANDARD_LINKER_NAME, list(SHUTTLES)[0]
+    agent_run = False
+    agent_rounds = 8
 
     # === 자율 설계 에이전트 (입력은 항상 화물) ===
     if settings.use_gemini_agent:
@@ -120,30 +107,8 @@ with _hero:
     else:
         st.caption("데모 모드 — API 키 없이 예시 결과로 화면을 미리봅니다.")
     agent_run = st.button("자율 설계 에이전트 실행", type="primary", width='stretch')
-    st.caption("에이전트가 BBB·독성·구조·수용체·잔기 편집 도구를 스스로 오케스트레이션해 "
+    st.caption("에이전트가 BBB·독성·구조·수용체·잔기 편집·서열 진화 도구를 스스로 오케스트레이션해 "
                "최종 융합체를 설계합니다.")
-    with st.expander("개별 도구 직접 실행 (에이전트 없이 · 무료)"):
-        st.caption("에이전트가 자율적으로 호출하는 도구들을 수동으로도 실행할 수 있습니다.")
-        run = st.button("라이브러리 전수 스윕 (모든 링커 × 셔틀)", width='stretch')
-
-        st.markdown("**이중 트랙 — 구조 · 투과 점수 · 수용체**")
-        _sc1, _sc2 = st.columns(2)
-        struct_linker_name = _sc1.selectbox(
-            "링커", list(LINKER_LIBRARY), index=list(LINKER_LIBRARY).index(STANDARD_LINKER_NAME))
-        struct_shuttle_name = _sc2.selectbox("셔틀", list(SHUTTLES), index=0)
-        struct_run = st.button("구조 분석 실행 (~10초)", width='stretch')
-
-        if settings.use_coevo_local:
-            st.markdown("**링커·셔틀 동시 진화 (co-evolution)**")
-            st.caption("셔틀은 검증 라이브러리 리간드에서 시드해 진화(de-novo 생성 아님) · 링커도 함께 진화")
-            coevo_rounds = st.slider("공진화 라운드 수", 2, 8, 4, key="coevo_rounds")
-            coevo_run = st.button("공진화 실행", width='stretch')
-
-        if settings.use_modular_local:
-            st.markdown("**모듈별 최적화 → 조립 (셔틀·링커 각자 공간)**")
-            modular_rounds = st.slider("셔틀 진화 라운드 수", 2, 8, 4, key="modular_rounds")
-            modular_run = st.button("모듈별 최적화 실행", width='stretch')
-
     with st.expander(f"라이브러리 구성 (링커 {len(LINKER_LIBRARY)} · 셔틀 {len(SHUTTLES)})"):
         st.markdown("**링커**")
         st.dataframe(
@@ -362,35 +327,6 @@ def _extract_podium(events, n=3):
         return [choice] + rest[:n - 1]
     return ranked[:n]
 
-
-def _render_candidate_analysis(cargo, cand, idx):
-    """온디맨드 구조 분석 (ESMFold) — 버튼을 누를 때만 실행하고 session_state에 보관."""
-    analyses = st.session_state.setdefault("agent_analysis", {})
-    seq = cand["sequence"]
-    if seq not in analyses:
-        if st.button("구조 분석 (ESMFold, ~10초)", key=f"agent-analyze-{idx}",
-                     width='stretch'):
-            with st.spinner("ESMFold로 접는 중..."):
-                sr = analyze_construct(cargo, cand["linker"], cand["shuttle"])
-            analyses[seq] = ({"error": sr.error} if sr.error else
-                             {"exposure": sr.shuttle_exposure, "shuttle_plddt": sr.shuttle_plddt,
-                              "mean_plddt": sr.mean_plddt, "exposed": sr.exposed,
-                              "verdict": sr.verdict})
-            st.rerun()  # 버튼→결과로 깔끔히 재렌더
-        else:
-            return
-    a = analyses.get(seq)
-    if not a:
-        return
-    if a.get("error"):
-        st.caption(f"구조 예측 실패: {a['error']}")
-        return
-    icon = "노출" if a["exposed"] else "가림·저신뢰"
-    st.caption(f"셔틀 노출도 **{a['exposure']:.2f}** ({icon}) · 셔틀 pLDDT {a['shuttle_plddt']} · "
-               f"전체 pLDDT {a['mean_plddt']}")
-    st.caption(a["verdict"])
-
-
 def _render_agent_summary(events, cargo):
     """최적화 궤적 + 상위 3 후보 카드(+온디맨드 분석) + 보고서."""
     progress = [e.data for e in events if e.kind == "progress"]
@@ -490,470 +426,81 @@ def _render_agent_summary(events, cargo):
             st.markdown("### 에이전트 자기평가")
             st.markdown(reflection)
 
-
-def _structure_html(pdb, cargo_len, linker_len, height=420):
-    """py3Dmol 3D 뷰: 화물=회색, 링커=슬레이트, 셔틀=강조색."""
-    import py3Dmol
-    v = py3Dmol.view(width=680, height=height)
-    v.addModel(pdb, "pdb")
-    c_end, l_end = cargo_len, cargo_len + linker_len
-    v.setStyle({}, {"cartoon": {"color": "#b9b9b9"}})
-    if cargo_len:
-        v.setStyle({"resi": f"1-{c_end}"}, {"cartoon": {"color": "#b9b9b9"}})
-    v.setStyle({"resi": f"{c_end + 1}-{l_end}"}, {"cartoon": {"color": "#8a929e"}})
-    v.setStyle({"resi": f"{l_end + 1}-99999"}, {"cartoon": {"color": "#2f6fe0"}})
-    v.setBackgroundColor("0xffffff")
-    v.zoomTo()
-    return v._make_html()
-
-
-def _render_dual_track(d):
-    """이중 트랙 결과 렌더: Track1(구조/ESMFold) + Track2(투과 점수/deepB3P) + 독성."""
-    sr = d["sr"]
-    full_len = len(d["cargo"]) + len(d["linker"]) + len(d["shuttle"])
-    st.caption(
-        f"융합체 {full_len}aa = 화물({len(d['cargo'])}aa) + {d['linker_name']}({len(d['linker'])}) "
-        f"+ {d['shuttle_name']}({len(d['shuttle'])})"
-    )
-
-    t1, t2 = st.columns([3, 2])
-
-    # ---- Track 1: 구조 ----
-    with t1:
-        st.markdown("#### Track 1 — 입체 구조 (ESMFold)")
-        if sr.error:
-            st.warning(f"구조 예측 실패: {sr.error}\n\n(전체 서열이 ESMFold 한계를 넘었을 수 있습니다. "
-                       "Track 2 투과 점수은 아래에서 확인하세요.)")
-        else:
-            components.html(_structure_html(sr.pdb, len(sr.cargo), len(sr.linker)), height=420)
-            st.caption("화물=회색 · 링커=슬레이트 · **셔틀=강조색**. 셔틀이 드러날수록 수용체 결합에 유리합니다.")
-            sm1, sm2, sm3 = st.columns(3)
-            sm1.metric("셔틀 노출도(RSA)", f"{sr.shuttle_exposure:.2f}",
-                       delta="노출" if sr.exposed else "가림 우려",
-                       delta_color="normal" if sr.exposed else "inverse")
-            sm2.metric("셔틀 pLDDT", f"{sr.shuttle_plddt:.0f}",
-                       delta="저신뢰" if sr.low_confidence else "양호",
-                       delta_color="inverse" if sr.low_confidence else "normal")
-            sm3.metric("전체 pLDDT", f"{sr.mean_plddt:.0f}")
-            (st.warning if (not sr.exposed or sr.low_confidence) else st.success)(sr.verdict)
-            st.download_button("PDB 다운로드", sr.pdb, file_name="fusion.pdb",
-                               mime="chemical/x-pdb")
-
-    # ---- Track 2: 투과 점수 + 독성 ----
-    with t2:
-        st.markdown("#### Track 2 — 투과 점수·독성")
-        with st.container(border=True):
-            st.metric("BBB 투과 점수 (deepB3P)", f"{d['bbb']*100:.0f}")
-            st.caption("예측 확률(0~100)·상대비교 — 실제 투과율 아님. "
-                       f"연결부위 슬라이스({len(d['bbb_seq'])}aa) 계산.")
-            st.divider()
-            _safe = d["tox"] <= settings.toxicity_threshold
-            st.metric("독성 위험 (ToxinPred3)", f"{d['tox']*100:.0f}%",
-                      delta="안전" if _safe else "위험",
-                      delta_color="normal" if _safe else "inverse")
-            st.caption(f"전체 {full_len}aa 서열로 계산 (조성 기반, 길이 무관)")
-
-        # ---- Track 3: 수용체 결합 가능성 (메커니즘 프록시) ----
-        st.markdown("#### Track 3 — 수용체 결합 가능성")
-        b = d.get("bind")
-        if b:
-            _strong = b.score >= 0.6
-            with st.container(border=True):
-                st.metric("수용체 결합 프록시", f"{b.score:.2f}",
-                          delta=f"{b.best_ref} 유사", delta_color="off")
-                st.caption(f"가장 닮은 검증 셔틀: **{b.best_ref}** ({b.target} · {b.mechanism})")
-                (st.success if _strong else st.info)(b.verdict)
-                st.caption("서열 유사도 기반 **기능 유추(프록시)** — 실제 결합 친화도 아님.")
-
-    st.caption(
-        "Track 1 구조는 짧은 펩타이드에선 무질서로 신뢰도↓(항체 등 큰 화물일수록↑). 셔틀 노출도·구조→BBB는 "
-        "검증된 모델이 아닌 **휴리스틱 프록시** — 실험 검증 필요. Track 2 BBB도 deepB3P 예측값(상대 비교 권장)."
-    )
-
-
 # --- 실행 -------------------------------------------------------------------
-if run:
+# --- 자율 가설 에이전트 실행(버튼): 라이브 스트리밍 + session_state 저장 ---
+if agent_run:
     cargo = _clean_cargo(cargo_input)
     _err = _cargo_error(cargo)
     if _err:
         st.error(_err)
         st.stop()
-
-    agent = build_agent(settings)
-
-    result = None
-    with st.status(f"{n_combos}개 조합 조립·분석 중...", expanded=True) as status:
-        gen = agent.run(cargo)
-        try:
-            while True:
-                step = next(gen)
-                st.write(f"**{step.stage}**: {step.message}")
-                time.sleep(STEP_DELAY)
-        except StopIteration as stop:
-            result = stop.value
-        status.update(label="최적화 완료", state="complete", expanded=False)
-
-    if result is None or result.winner is None:
-        st.error("독성 임계값을 통과한 조합이 없습니다. 임계값/라이브러리를 재검토하세요.")
-        st.stop()
-
-    cargo_only = result.cargo_only
-    base_bbb = cargo_only.prediction.bbb_permeability if cargo_only else 0.0
-
-    # 상위 N 재계산 (생존 조합 BBB 내림차순)
-    survivors = sorted(
-        (e for e in result.candidates if e.verdict != Verdict.REJECTED_TOXIC),
-        key=lambda e: e.prediction.bbb_permeability, reverse=True,
-    )
-    top = survivors[: settings.top_n]
-
-    st.divider()
-    st.subheader(f"베스트 {len(top)} 융합체")
-    st.caption(
-        f"화물 {len(cargo)}aa · {result.n_linkers}링커 × {result.n_shuttles}셔틀 = "
-        f"{len(result.candidates)}조합 분석 · 화물 단독 BBB {base_bbb*100:.0f}점"
-        + ("  ·  화물 자체가 독성" if cargo_only and cargo_only.prediction.toxicity_risk > settings.toxicity_threshold else "")
-    )
-
-    # --- 베스트 N 카드 (가로 3단) ------------------------------------------
-    cols = st.columns(len(top))
-    for i, e in enumerate(top):
-        c, p = e.construct, e.prediction
-        with cols[i]:
-            with st.container(border=True, key=f"best-card-{i}"):
-                st.markdown(f"### {i+1}위 · {c.label}")
-                st.markdown(_verdict_pill(e.verdict), unsafe_allow_html=True)
-                m1, m2 = st.columns(2)
-                m1.metric("BBB 투과 점수", f"{p.bbb_permeability*100:.0f}",
-                          delta=f"{(p.bbb_permeability-base_bbb)*100:+.0f}점")
-                m2.metric("독성 위험", f"{p.toxicity_risk*100:.0f}%", delta="안전",
-                          delta_color="off")
-                st.code(c.sequence, language="text")
-                st.caption(
-                    f"화물 `{c.cargo}` + 링커 `{c.linker}`({c.linker_name}) + "
-                    f"셔틀 `{c.shuttle_seq}`({c.shuttle_name})"
-                    + ("  ·  연결부위 계산" if c.truncated else "")
-                )
-
-    # --- 1위 상세 해설 ------------------------------------------------------
-    win = top[0]
-    wc, wp = win.construct, win.prediction
-    with st.container(border=True):
-        st.markdown(f"#### 1위 · {wc.label} 해설")
-        st.markdown(
-            f"""
-            라이브러리의 **{len(result.candidates)}개 조합**을 전수 분석한 결과,
-            **{wc.shuttle_name} 셔틀 + {wc.linker_name} 링커** 조합이 BBB 투과 점수
-            **{wp.bbb_permeability*100:.0f}점** ({(wp.bbb_permeability-base_bbb)*100:+.0f}점 vs 화물 단독)로
-            가장 높으면서, 독성 **{wp.toxicity_risk*100:.0f}%** (임계값 {settings.toxicity_threshold:.2f} 이하)로
-            안전 범위라 최적으로 선정됐습니다.
-
-            > {wp.note}
-            """
-        )
-
-    # --- 전체 조합 (접이식) -------------------------------------------------
-    with st.expander(f"전체 {len(result.candidates)}개 조합 + 기준선 (BBB 내림차순)"):
-        rows = ([cargo_only] if cargo_only else []) + sorted(
-            result.candidates, key=lambda e: e.prediction.bbb_permeability, reverse=True
-        )
-        tox_col = "독성(ToxinPred3)" if settings.use_toxinpred3_local else "독성(임시)"
-        st.dataframe(
-            _style_verdict({
-                "조합": [e.construct.label for e in rows],
-                "링커": [e.construct.linker or "—" for e in rows],
-                "BBB 투과 점수": [f"{e.prediction.bbb_permeability*100:.0f}" for e in rows],
-                tox_col: [f"{e.prediction.toxicity_risk*100:.0f}%" for e in rows],
-                "길이": [f"{len(e.construct.sequence)}aa" + ("*" if e.construct.truncated else "")
-                        for e in rows],
-                "판정": [_VERDICT_PILL.get(e.verdict, ("-",))[0] for e in rows],
-            }, _VERDICT_CELL),
-            width='stretch', hide_index=True,
-        )
-
-    _tox_note = "ToxinPred3 실측" if settings.use_toxinpred3_local else "placeholder"
-    st.caption(
-        f"BBB는 deepB3P 실측(짧은 펩타이드 학습 → 긴 융합체는 조합 간 상대 비교로 해석). "
-        f"독성은 {_tox_note}. 실제 적용 전 In Vitro/In Vivo 검증 필요."
-    )
-else:
-    # --- 자율 가설 에이전트 실행(버튼): 라이브 스트리밍 + session_state 저장 ---
-    if agent_run:
-        cargo = _clean_cargo(cargo_input)
-        _err = _cargo_error(cargo)
-        if _err:
-            st.error(_err)
-            st.stop()
-        if settings.use_gemini_agent:
-            event_source = get_gemini_agent(settings, max_rounds=agent_rounds).run(cargo)
-            brain = f"Gemini ({settings.gemini_model})"
-        else:
-            event_source = _demo_agent_events(cargo)   # API 키 없음 → 예시 데이터로 화면 미리보기
-            brain = "데모 모드 (예시 데이터)"
-        st.session_state["agent_analysis"] = {}  # 새 실행 → 이전 온디맨드 분석 초기화
-        st.divider()
-        st.subheader("자율 설계 에이전트")
-        st.caption(
-            f"화물 `{cargo}` · **{brain}**가 BBB·독성·구조·잔기 편집 도구를 자율 오케스트레이션해 "
-            f"최종 융합체를 탐색 (최대 {agent_rounds}스텝)"
-        )
-        events = []
-        with st.status("에이전트가 후보를 제안하고 평가 중...", expanded=True) as status:
-            for ev in event_source:
-                events.append(ev)
-                _emit_agent_event(ev)  # 라이브 스트리밍(완료 시 접힘 → 과정 기록)
-                if ev.kind == "error":
-                    status.update(label="중단됨", state="error")
-            status.update(label="최적화 완료 · 위 status를 펼치면 과정 기록", state="complete",
-                          expanded=False)
-        _render_agent_summary(events, cargo)
-        if settings.use_gemini_agent:
-            st.caption("최적화 판단은 deepB3P·ToxinPred3 예측 기반입니다. 실제 합성·검증 필요.")
-        else:
-            st.caption("※ 예시(더미) 데이터입니다 — 실제 예측·설계 결과가 아니라 화면 미리보기용입니다.")
-        _rec = {"cargo": cargo, "events": events, "rounds": agent_rounds, "brain": brain}
-        _opt = (next((e.data for e in events if e.kind == "choice"), None)
-                or next((e.data for e in events if e.kind == "optimum"), None))
-        _sm = (f"{_opt.get('sequence', '')[:18]}… BBB {_opt.get('bbb', 0)*100:.0f}"
-               if _opt else "결과 없음")
-        _hist = st.session_state.setdefault("agent_runs", [])
-        _rec["label"] = f"#{len(_hist)+1} · 화물 {cargo[:9]} → {_sm}"
-        _hist.append(_rec)
-        del _hist[:-3]                       # 최근 3개만 유지
-        st.session_state["agent"] = _rec
-        st.session_state["view"] = "agent"
-        st.stop()
-
-    # --- 구조 기반 접합부 분석 실행(버튼) ---
-    if struct_run:
-        cargo = _clean_cargo(cargo_input)
-        _err = _cargo_error(cargo)
-        if _err:
-            st.error(_err)
-            st.stop()
-        linker = LINKER_LIBRARY[struct_linker_name]["seq"]
-        shuttle = SHUTTLES[struct_shuttle_name]["seq"]
-        st.divider()
-        st.subheader("융합체 정밀 분석 — 이중 트랙")
-        with st.status("Track1: ESMFold 폴딩 · Track2: deepB3P·ToxinPred3 채점 중... (~10초)",
-                       expanded=True) as status:
-            sr = analyze_construct(cargo, linker, shuttle)                  # Track 1 (구조)
-            bbb_seq = bbb_scoring_seq(cargo, linker, shuttle)               # Track 2 슬라이스
-            bbb_val = get_predictor(settings).predict_many([bbb_seq])[0].bbb_permeability
-            tox_val = get_toxicity_predictor(settings).predict_many(
-                [cargo + linker + shuttle])[0].risk
-            bind = shuttle_similarity(shuttle)                              # Track 3 (수용체)
-            status.update(label="분석 완료", state="complete", expanded=False)
-        d = {"sr": sr, "cargo": cargo, "linker": linker, "shuttle": shuttle,
-             "linker_name": struct_linker_name, "shuttle_name": struct_shuttle_name,
-             "bbb": bbb_val, "bbb_seq": bbb_seq, "tox": tox_val, "bind": bind}
-        _render_dual_track(d)
-        st.session_state["struct"] = d
-        st.session_state["view"] = "struct"
-        st.stop()
-
-    # 링커·셔틀 co-evolution(버튼) → 결과를 session_state에 저장
-    if coevo_run:
-        st.session_state["view"] = "coevo"
-        cargo = _clean_cargo(cargo_input)
-        _err = _cargo_error(cargo)
-        if _err:
-            st.error(_err)
-            st.stop()
-        with st.status(f"공진화 루프 실행 중... ({coevo_rounds}라운드: 링커·셔틀 동시 진화)",
-                       expanded=True) as status:
-            st.write("각 개체 = (셔틀 잠재 z + 링커 펩타이드) → deepB3P·ToxinPred3 채점 → 링커·셔틀 공진화")
-            try:
-                cres = get_coevolution(settings).run(
-                    cargo, rounds=coevo_rounds,
-                    tox_threshold=settings.toxicity_threshold)
-                st.session_state["coevo"] = {
-                    "history": cres.history, "best": cres.best,
-                    "cargo": cargo, "rounds": coevo_rounds,
-                }
-            except Exception as exc:  # noqa: BLE001
-                status.update(label="공진화 실패", state="error")
-                st.error(f"실행 오류: {exc}")
-                st.stop()
-            status.update(label="공진화 완료!", state="complete", expanded=False)
-
-    # 모듈별 최적화 → 조립(버튼) → 결과를 session_state에 저장
-    if modular_run:
-        st.session_state["view"] = "modular"
-        cargo = _clean_cargo(cargo_input)
-        _err = _cargo_error(cargo)
-        if _err:
-            st.error(_err)
-            st.stop()
-        with st.status("모듈별 최적화 실행 중... (셔틀·링커 각자 공간 → N×M 조립 재순위)",
-                       expanded=True) as status:
-            st.write("① 셔틀 공간(BBB·전하) → ② 링커 공간(개발성) → ③ 조립 결합 재채점(deepB3P·ToxinPred3)")
-            try:
-                mres = get_modular(settings).run(
-                    cargo, s_rounds=modular_rounds,
-                    tox_threshold=settings.toxicity_threshold)
-                st.session_state["modular"] = {
-                    "shuttles": mres.shuttles, "linkers": mres.linkers, "best": mres.best,
-                    "cargo": cargo, "rounds": modular_rounds, "n_grid": mres.n_grid,
-                }
-            except Exception as exc:  # noqa: BLE001
-                status.update(label="모듈별 최적화 실패", state="error")
-                st.error(f"실행 오류: {exc}")
-                st.stop()
-            status.update(label="모듈별 최적화 완료!", state="complete", expanded=False)
-
-    _view = st.session_state.get("view")
-    _agent = st.session_state.get("agent")
-    _struct = st.session_state.get("struct")
-    co = st.session_state.get("coevo")
-    mo = st.session_state.get("modular")
-    if _view == "struct" and _struct:
-        st.divider()
-        st.subheader("융합체 정밀 분석 — 이중 트랙")
-        _render_dual_track(_struct)
-    elif _view == "agent" and _agent:
-        # 이전 최적화 실행 결과 다시 렌더 (rerun 유지)
-        st.divider()
-        st.subheader("자율 설계 에이전트")
-        _runs = st.session_state.get("agent_runs", [])
-        if len(_runs) > 1:                    # 실행 기록 선택 (최근 3개, 최신 먼저)
-            _rev = _runs[::-1]
-            _labels = [r.get("label", "실행") for r in _rev]
-            _pick = st.selectbox("실행 기록 (최근 3개)", _labels, index=0)
-            _agent = _rev[_labels.index(_pick)]
-        st.caption(f"화물 `{_agent['cargo']}` · {_agent.get('brain', 'LLM')} 다중 도구 자율 설계 "
-                   f"(최대 {_agent['rounds']}스텝)")
-        _render_agent_summary(_agent["events"], _agent["cargo"])
-        with st.expander("중간 과정 기록 — 스텝별 추론·평가·검증 다시 보기"):
-            for ev in _agent["events"]:
-                if ev.kind not in ("plan", "reflection", "critique"):  # 위 요약에 이미 표시
-                    _emit_agent_event(ev)
-        st.caption("최적화 판단은 deepB3P·ToxinPred3 예측 기반입니다. 실제 합성·검증 필요.")
-    elif co:
-        st.divider()
-        st.subheader("링커·셔틀 공진화 — 최적화 결과")
-        st.caption(
-            f"화물 {len(co['cargo'])}aa · {co['rounds']}라운드 · "
-            f"링커·셔틀을 **동시에** 진화(멀티모듈 co-evolution) — 셔틀은 **검증 라이브러리 리간드에서 "
-            f"시드해 진화**(de-novo 생성 아님), 링커도 함께 진화"
-        )
-        if co["history"]:
-            st.markdown("##### 라운드별 BBB 개선")
-            _co_df = pd.DataFrame({
-                "라운드": list(range(1, len(co["history"]) + 1)),
-                "평균 BBB": [round(h["mean_bbb"] * 100) for h in co["history"]],
-                "최고 BBB": [round(h["best_bbb"] * 100) for h in co["history"]],
-            }).melt("라운드", var_name="구분", value_name="BBB 투과 점수")
-            _co_chart = (
-                alt.Chart(_co_df)
-                .mark_line(point=True)
-                .encode(
-                    x=alt.X("라운드:O", title="라운드"),
-                    y=alt.Y("BBB 투과 점수:Q", title="BBB 투과 점수",
-                            scale=alt.Scale(domain=[0, 100])),
-                    color=alt.Color("구분:N", title="",
-                                    scale=alt.Scale(domain=["최고 BBB", "평균 BBB"],
-                                                    range=["#30405c", "#8a929e"])),
-                )
-            )
-            st.altair_chart(_co_chart, use_container_width=True)
-            _first, _last = co["history"][0], co["history"][-1]
-            _c0, _c1 = _first.get("mean_charge"), _last.get("mean_charge")
-            _ctrend = (f" · 평균 순전하 `{_c0:+g}` → `{_c1:+g}`(양전하 편향 억제)"
-                       if _c0 is not None and _c1 is not None else "")
-            st.caption(
-                f"링커 다양성(마지막 라운드 고유 링커 수): {_last.get('n_uniq_linker', '—')} · "
-                f"베스트 링커: `{_last.get('best_linker', '—')}`{_ctrend}"
-            )
-        st.markdown("##### 공진화된 베스트 조합 (링커 + 셔틀)")
-        top = co["best"][:3]
-        if not top:
-            st.warning("비독성 후보를 찾지 못했습니다. 라운드를 늘려 다시 시도해 보세요.")
-        else:
-            cols = st.columns(len(top))
-            for i, b in enumerate(top):
-                with cols[i]:
-                    with st.container(border=True, key=f"coevo-card-{i}"):
-                        st.markdown(f"### 공진화 #{i+1}")
-                        st.caption(f"링커 ({b['linker_len']}aa)")
-                        st.code(b["linker"], language="text")
-                        st.caption("셔틀")
-                        st.code(b["shuttle"], language="text")
-                        m1, m2 = st.columns(2)
-                        m1.metric("BBB 투과 점수", f"{b['bbb']*100:.0f}")
-                        m2.metric("독성 위험", f"{b['tox']*100:.0f}%", delta="안전",
-                                  delta_color="off")
-                        st.caption(
-                            f"순전하 pH7.4 `{b.get('charge', 0):+g}` · 양친매성 μH "
-                            f"`{b.get('muH', '—')}` (양전하 편향 보정 선정)"
-                        )
-                        st.caption(f"전체 융합체({b['len']}aa): `{b['sequence']}`")
-        st.caption(
-            "셔틀은 **검증 라이브러리 리간드에서 시드해 진화**(de-novo 생성 아님), 링커는 함께 공진화한 "
-            "서열입니다. 선정은 deepB3P BBB에서 **과도한 양전하·비양친매성을 감점**해 보정한 적합도 "
-            "기준이며, 실제 합성·In Vitro 검증이 필요합니다(BBB/독성은 deepB3P·ToxinPred3 예측값)."
-        )
-    elif mo:
-        st.divider()
-        st.subheader("모듈별 최적화 → 조립 — 최적화 결과")
-        st.caption(
-            f"화물 {len(mo['cargo'])}aa · 셔틀 {mo['rounds']}라운드 · 각 모듈을 **자기 공간에서 따로** "
-            f"최적화 후 **{mo.get('n_grid', 0)}조합 조립 재순위**(셔틀=BBB·전하, 링커=개발성)"
-        )
-        _mc1, _mc2 = st.columns(2)
-        with _mc1:
-            st.markdown("##### ① 셔틀 공간 (BBB·전하)")
-            _sh = mo["shuttles"][:5]
-            if _sh:
-                st.dataframe(
-                    {"셔틀": [s["seq"] for s in _sh],
-                     "BBB": [f"{s['bbb']*100:.0f}" for s in _sh],
-                     "순전하": [f"{s.get('charge', 0):+g}" for s in _sh]},
-                    width='stretch', hide_index=True)
-        with _mc2:
-            st.markdown("##### ② 링커 공간 (개발성)")
-            _lk = mo["linkers"][:5]
-            if _lk:
-                st.dataframe(
-                    {"링커": [l["seq"] for l in _lk],
-                     "개발성": [f"{l['dev']:.2f}" for l in _lk],
-                     "순전하": [f"{l.get('charge', 0):+g}" for l in _lk]},
-                    width='stretch', hide_index=True)
-        st.markdown("##### ③ 조립 재순위 — 베스트 조합 (링커 + 셔틀)")
-        top = mo["best"][:3]
-        if not top:
-            st.warning("비독성 후보를 찾지 못했습니다. 라운드를 늘려 다시 시도해 보세요.")
-        else:
-            cols = st.columns(len(top))
-            for i, b in enumerate(top):
-                with cols[i]:
-                    with st.container(border=True, key=f"modular-card-{i}"):
-                        st.markdown(f"### 조립 #{i+1}")
-                        st.caption(f"링커 ({b['linker_len']}aa)")
-                        st.code(b["linker"], language="text")
-                        st.caption("셔틀")
-                        st.code(b["shuttle"], language="text")
-                        m1, m2 = st.columns(2)
-                        m1.metric("BBB 투과 점수", f"{b['bbb']*100:.0f}")
-                        m2.metric("독성 위험", f"{b['tox']*100:.0f}%", delta="안전",
-                                  delta_color="off")
-                        st.caption(
-                            f"순전하 pH7.4 `{b.get('charge', 0):+g}` · 양친매성 μH "
-                            f"`{b.get('muH', '—')}` (양전하 편향 보정 선정)"
-                        )
-                        st.caption(f"전체 융합체({b['len']}aa): `{b['sequence']}`")
-        st.caption(
-            "셔틀은 BBB·전하 공간, 링커는 개발성 공간에서 각각 최적화한 뒤 조립하고, 전체 융합체로 "
-            "**결합 재채점(BBB·독성·전하)**해 궁합까지 반영했습니다. 실제 합성·In Vitro 검증이 필요합니다."
-        )
+    if settings.use_gemini_agent:
+        event_source = get_gemini_agent(settings, max_rounds=agent_rounds).run(cargo)
+        brain = f"Gemini ({settings.gemini_model})"
     else:
-        if settings.use_gemini_agent:
-            with st.container(key="yy-more-input1"):
-                st.info("화물 펩타이드를 입력하고 ‘자율 설계 에이전트 실행’ 버튼을 누르세요.")
-        else:
-            with st.container(key="yy-more-input2"):
-                st.info(
-                    "화물 펩타이드를 입력하세요. 자율 설계 에이전트를 쓰려면 Gemini API 키가 "
-                    "필요합니다(위 안내 참고). 키 없이 확인하려면 ‘개별 도구 직접 실행’ 패널에서 "
-                    "각 도구를 수동으로 실행할 수 있습니다."
-                )
+        event_source = _demo_agent_events(cargo)   # API 키 없음 → 예시 데이터로 화면 미리보기
+        brain = "데모 모드 (예시 데이터)"
+    st.session_state["agent_analysis"] = {}  # 새 실행 → 이전 온디맨드 분석 초기화
+    st.divider()
+    st.subheader("자율 설계 에이전트")
+    st.caption(
+        f"화물 `{cargo}` · **{brain}**가 BBB·독성·구조·잔기 편집·서열 진화 도구를 자율 오케스트레이션해 "
+        f"최종 융합체를 탐색 (최대 {agent_rounds}스텝)"
+    )
+    events = []
+    with st.status("에이전트가 후보를 제안하고 평가 중...", expanded=True) as status:
+        for ev in event_source:
+            events.append(ev)
+            _emit_agent_event(ev)  # 라이브 스트리밍(완료 시 접힘 → 과정 기록)
+            if ev.kind == "error":
+                status.update(label="중단됨", state="error")
+        status.update(label="최적화 완료 · 위 status를 펼치면 과정 기록", state="complete",
+                      expanded=False)
+    _render_agent_summary(events, cargo)
+    if settings.use_gemini_agent:
+        st.caption("최적화 판단은 deepB3P·ToxinPred3 예측 기반입니다. 실제 합성·검증 필요.")
+    else:
+        st.caption("※ 예시(더미) 데이터입니다 — 실제 예측·설계 결과가 아니라 화면 미리보기용입니다.")
+    _rec = {"cargo": cargo, "events": events, "rounds": agent_rounds, "brain": brain}
+    _opt = (next((e.data for e in events if e.kind == "choice"), None)
+            or next((e.data for e in events if e.kind == "optimum"), None))
+    _sm = (f"{_opt.get('sequence', '')[:18]}… BBB {_opt.get('bbb', 0)*100:.0f}"
+           if _opt else "결과 없음")
+    _hist = st.session_state.setdefault("agent_runs", [])
+    _rec["label"] = f"#{len(_hist)+1} · 화물 {cargo[:9]} → {_sm}"
+    _hist.append(_rec)
+    del _hist[:-3]                       # 최근 3개만 유지
+    st.session_state["agent"] = _rec
+    st.session_state["view"] = "agent"
+    st.stop()
+
+_view = st.session_state.get("view")
+_agent = st.session_state.get("agent")
+if _view == "agent" and _agent:
+    # 이전 최적화 실행 결과 다시 렌더 (rerun 유지)
+    st.divider()
+    st.subheader("자율 설계 에이전트")
+    _runs = st.session_state.get("agent_runs", [])
+    if len(_runs) > 1:                    # 실행 기록 선택 (최근 3개, 최신 먼저)
+        _rev = _runs[::-1]
+        _labels = [r.get("label", "실행") for r in _rev]
+        _pick = st.selectbox("실행 기록 (최근 3개)", _labels, index=0)
+        _agent = _rev[_labels.index(_pick)]
+    st.caption(f"화물 `{_agent['cargo']}` · {_agent.get('brain', 'LLM')} 다중 도구 자율 설계 "
+               f"(최대 {_agent['rounds']}스텝)")
+    _render_agent_summary(_agent["events"], _agent["cargo"])
+    with st.expander("중간 과정 기록 — 스텝별 추론·평가·검증 다시 보기"):
+        for ev in _agent["events"]:
+            if ev.kind not in ("plan", "reflection", "critique"):  # 위 요약에 이미 표시
+                _emit_agent_event(ev)
+    st.caption("최적화 판단은 deepB3P·ToxinPred3 예측 기반입니다. 실제 합성·검증 필요.")
+else:
+    if settings.use_gemini_agent:
+        with st.container(key="yy-more-input1"):
+            st.info("화물 서열을 입력하고 ‘자율 설계 에이전트 실행’ 버튼을 누르세요.")
+    else:
+        with st.container(key="yy-more-input2"):
+            st.info(
+                "화물 서열을 입력하세요. 자율 설계 에이전트를 쓰려면 Gemini API 키가 "
+                "필요합니다(위 안내 참고). 데모 모드로도 예시 결과를 미리볼 수 있습니다."
+            )
