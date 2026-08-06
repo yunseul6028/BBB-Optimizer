@@ -34,13 +34,11 @@ _REQUEST_TIMEOUT_MS = 120_000
 OFF_TARGET_PENALTY = 0.25
 
 
-def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int, has_fbgan: bool) -> str:
+def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> str:
     lib_l = ", ".join(f"{n}({v['seq'] or '링커없음/직접융합'})" for n, v in LINKER_LIBRARY.items())
     lib_s = ", ".join(f"{n}({v['seq']})" for n, v in SHUTTLES.items())
     tools = ("evaluate_candidates(BBB·독성·안정성·수용체 배치), design_candidate(잔기 수준 편집 "
              "서열 채점), analyze_structure(구조 노출도)")
-    if has_fbgan:
-        tools += ", generate_novel_shuttles(신규 셔틀 생성)"
     tools += ", finish(수렴 시 최종 후보 제출·종료)"
     return (
         "[연구 맥락] 이것은 알츠하이머병 치료제의 뇌 전달을 개선하기 위한 정당한 학술·공모전용 "
@@ -93,7 +91,7 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int, has
 class GeminiOptimizationAgent(OptimizationAgent):
     """Claude 백엔드 재사용 + Gemini function-calling 루프."""
 
-    def _function_decls(self, types, has_fbgan):
+    def _function_decls(self, types):
         T = types.Type
         S = types.Schema
         decls = [
@@ -131,14 +129,6 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 }, required=["linker", "shuttle"]),
             ),
         ]
-        if has_fbgan:
-            decls.append(types.FunctionDeclaration(
-                name="generate_novel_shuttles",
-                description="라이브러리 밖 novel 셔틀을 FBGAN으로 생성해 BBB·독성과 함께 반환. 느림.",
-                parameters=S(type=T.OBJECT, properties={
-                    "rounds": S(type=T.INTEGER, description="2~4 라운드"),
-                }, required=["rounds"]),
-            ))
         decls.append(types.FunctionDeclaration(
             name="finish",
             description=("충분히 수렴했다고 판단하면 호출해 최종 후보를 제출하고 종료한다. 고정 스텝을 "
@@ -168,9 +158,6 @@ class GeminiOptimizationAgent(OptimizationAgent):
         if name == "analyze_structure":
             text, sdata = self._structure(cargo, args)
             return text, AgentEvent("structure", text=text, data=sdata)
-        if name == "generate_novel_shuttles":
-            text, gdata = self._generate(cargo, args)
-            return text, AgentEvent("generation", text=text, data=gdata)
         return f"unknown tool: {name}", None
 
     @staticmethod
@@ -269,8 +256,8 @@ class GeminiOptimizationAgent(OptimizationAgent):
             "화물(치료 목표)은 고정이므로 **화물 교체는 권하지 마라.** 실패 원인을 데이터로 진단하고, "
             "**우리 시스템 안에서 실행 가능한 구체적 다음 수**를 우선순위로 제시하라.\n"
             "선택 가능한 대안(근거를 들어 골라라):\n"
-            "  1) generate_novel_shuttles(FBGAN)로 라이브러리 밖 신규 셔틀 생성 — 라이브러리 셔틀이 "
-            "모두 off-target/저BBB일 때.\n"
+            "  1) design_candidate로 **라이브러리 셔틀의 잔기 편집**(검증 리간드에서 출발한 보존적 변이·"
+            "트리밍) — 셔틀은 de-novo 생성하지 말고 검증된 셔틀을 개량한다.\n"
             "  2) 링커 교체 — 셔틀이 구조상 파묻힐(occluded) 땐 (GGGGS)3 등 긴 유연 링커로 노출 개선, "
             "반대로 너무 길어 불안정하면 직접융합/짧은 링커로.\n"
             "  3) 라이브러리 내 다른 셔틀 — 선택성(RMT형) 높은 쪽으로.\n"
@@ -321,10 +308,9 @@ class GeminiOptimizationAgent(OptimizationAgent):
             http_options=types.HttpOptions(timeout=_REQUEST_TIMEOUT_MS),
         )
         model = self.settings.gemini_model
-        has_fbgan = self.settings.use_fbgan_local
-        tools = types.Tool(function_declarations=self._function_decls(types, has_fbgan))
+        tools = types.Tool(function_declarations=self._function_decls(types))
         system = _gemini_system_prompt(cargo, self.settings.toxicity_threshold,
-                                       self.max_rounds, has_fbgan)
+                                       self.max_rounds)
 
         def _cfg(with_tools=True):
             kw = dict(system_instruction=system, temperature=1.0,

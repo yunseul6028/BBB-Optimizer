@@ -4,7 +4,8 @@
 co-evolution(개체=(셔틀,링커) 동시 진화)의 대안. 각 모듈을 **자기 목적함수가 유효한
 자기 공간**에서 따로 최적화한 뒤 조립하고, 마지막에 결합 재채점으로 궁합(상호작용)을 회수한다.
 
-  ① 셔틀 공간: 잠재 z 진화 → BBB↑·전하 억제 상위 N개  (deepB3P in-process, 독성은 조립에서)
+  ① 셔틀 공간: **검증 리간드 서열의 directed evolution** → BBB↑·전하 억제 상위 N개
+       (de-novo 생성 금지 — 라이브러리 시드에서 point-mutation/crossover. deepB3P in-process)
   ② 링커 공간: 링커 유전자 진화 → **개발성** 상위 M개
        개발성 = 유연성(G/S/A/P)↑ · 프로테아제부위(KR/RR/RK/KK)↓ · 저전하 · 저응집 · 컴팩트
        (링커는 BBB가 없으므로 deepB3P 아님 — 규칙 기반, 순수 파이썬)
@@ -15,21 +16,17 @@ co-evolution(개체=(셔틀,링커) 동시 진화)의 대안. 각 모듈을 **�
 
 Usage:
   python _run_modular.py <cargo> <s_rounds> <pop> <elite> <topN> <l_rounds> <topM> <tox_thr> \
-      <toxpy> <toxrepo> <toxscript> <out.json>
+      <toxpy> <toxrepo> <toxscript> <out.json> <shuttle_seeds_csv>
 """
 import json
 import sys
 
 import numpy as np
-import functools
-import torch
 
-torch.load = functools.partial(torch.load, map_location="cpu")
-
-from _run_fbgan import HIDDEN, N_CHARS, SEQ_LEN, BBBScorer, bbb_region, decode, score_tox
-from _run_coevo import LINK_SEEDS, cross_linker, mutate_linker
+from _run_fbgan import BBBScorer, bbb_region, score_tox
+from _run_coevo import (LINK_SEEDS, cross_linker, mutate_linker,
+                        cross_shuttle, mutate_shuttle, _clip_sh)
 from _physchem import charge_guardrail, net_charge_ph74
-from fbgan.models import Generator
 
 _HYDROPHOBIC = set("FILVWYM")
 
@@ -52,14 +49,14 @@ def linker_dev_fitness(lk: str) -> float:
             - 0.02 * n)
 
 
-# ---------------- ① 셔틀 공간 진화 (BBB·전하, 독성은 조립에서) ----------------
-def evolve_shuttles(G, bbb, rounds, pop, elite, topN):
+# ---------------- ① 셔틀 공간 진화 (검증 리간드 서열 directed evolution) ----------------
+def evolve_shuttles(bbb, sh_seeds, rounds, pop, elite, topN):
+    """셔틀을 **라이브러리 시드 서열**에서 보존적으로 진화(BBB↑·전하 억제). 독성은 조립에서."""
     rng = np.random.RandomState(2022)
-    z = rng.randn(pop, 128)
-    sigma = 0.6
+    S = [sh_seeds[i % len(sh_seeds)] for i in range(pop)]   # 라이브러리 시드(de-novo 아님)
     best = {}   # seq -> (fit, bbb, charge, muH)
     for _ in range(rounds):
-        shuttles = decode(G, z)
+        shuttles = [_clip_sh(s) for s in S]
         bscore = bbb.score(shuttles)                   # 셔틀 단독 BBB
         guards = [charge_guardrail(s) for s in shuttles]
         fit = np.array([b - g[0] for b, g in zip(bscore, guards)])
@@ -68,12 +65,12 @@ def evolve_shuttles(G, bbb, rounds, pop, elite, topN):
             if prev is None or fit[i] > prev[0]:
                 best[s] = (float(fit[i]), float(bscore[i]), guards[i][1], guards[i][2])
         order = np.argsort(fit)[::-1]
-        elites = z[order[:elite]]
+        elites = [S[i] for i in order[:elite]]
         children = []
         while len(children) < pop - elite - 2:
-            children.append(elites[rng.randint(elite)] + sigma * rng.randn(128))
-        z = np.vstack([elites, np.array(children), rng.randn(2, 128)])
-        sigma *= 0.85
+            a, b = elites[rng.randint(elite)], elites[rng.randint(elite)]
+            children.append(mutate_shuttle(cross_shuttle(a, b, rng), rng))
+        S = elites + children + [sh_seeds[rng.randint(len(sh_seeds))] for _ in range(2)]
     top = sorted(best.items(), key=lambda kv: kv[1][0], reverse=True)[:topN]
     return [{"seq": s, "bbb": round(v[1], 4), "charge": v[2], "muH": v[3]} for s, v in top]
 
@@ -101,13 +98,12 @@ def evolve_linkers(rounds, pop, elite, topM):
 
 
 def main(cargo, s_rounds, pop, elite, topN, l_rounds, topM, tox_thr,
-         toxpy, toxrepo, toxscript, out_path):
-    G = Generator(n_chars=N_CHARS, seq_len=SEQ_LEN, bs=pop, hidden=HIDDEN)
-    G.load_state_dict(torch.load("fbgan/checkpoint/G_weights_1000.pth"))
+         toxpy, toxrepo, toxscript, out_path, sh_seeds_csv):
     bbb = BBBScorer()
+    sh_seeds = [_clip_sh(s) for s in sh_seeds_csv.split(",") if s] or ["GGGGS"]
 
-    shuttles = evolve_shuttles(G, bbb, s_rounds, pop, elite, topN)   # ①
-    linkers = evolve_linkers(l_rounds, pop, elite, topM)             # ②
+    shuttles = evolve_shuttles(bbb, sh_seeds, s_rounds, pop, elite, topN)   # ①
+    linkers = evolve_linkers(l_rounds, pop, elite, topM)                    # ②
 
     # ③ 조립: N×M → 결합 재채점 (BBB 연결부위 · 독성 전체 · 전하 가드레일)
     meta, constructs, regions = [], [], []
@@ -142,4 +138,4 @@ def main(cargo, s_rounds, pop, elite, topN, l_rounds, topM, tox_thr,
 if __name__ == "__main__":
     a = sys.argv
     main(a[1], int(a[2]), int(a[3]), int(a[4]), int(a[5]), int(a[6]), int(a[7]),
-         float(a[8]), a[9], a[10], a[11], a[12])
+         float(a[8]), a[9], a[10], a[11], a[12], a[13])

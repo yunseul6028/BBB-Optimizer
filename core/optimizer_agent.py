@@ -1,12 +1,14 @@
 """자율 설계 에이전트 — 공용 도구 백엔드 베이스.
 
-에이전트의 **실제 생물학 계산 도구**(evaluate/structure/generate)를 담는 베이스 클래스.
+에이전트의 **실제 생물학 계산 도구**(evaluate/structure)를 담는 베이스 클래스.
 브레인(LLM) 루프는 `optimizer_agent_gemini.py`의 `GeminiOptimizationAgent`가 이 클래스를
 상속해 구현한다. (Claude 브레인 버전은 `with-claude` 브랜치에 보존 — main은 Gemini 전용.)
 
   - evaluate  : deepB3P(BBB) + ToxinPred3(독성) + 안정성 + 수용체유사 + 개발성 + 선택성 + 용해도 배치 채점
   - structure : ESMFold 폴딩 → 셔틀 구조 노출도 (느림 ~10초, 최종 후보에만)
-  - generate  : FBGAN으로 라이브러리 밖 셔틀 생성 (느림, 필요 시)
+
+셔틀은 **de-novo 생성하지 않는다**(검증 리간드만). 라이브러리 밖 탐색은 잔기 편집(design_candidate)
+또는 링커·셔틀 co-evolution(라이브러리 시드 진화)로 수행한다.
 """
 
 from __future__ import annotations
@@ -14,8 +16,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .config import (
-    LINKER_LIBRARY,
-    STANDARD_LINKER_NAME,
     Settings,
     bbb_scoring_seq,
 )
@@ -118,17 +118,3 @@ class OptimizationAgent:
         return text, {"linker": lk, "shuttle": sh, "exposure": sr.shuttle_exposure,
                       "shuttle_plddt": sr.shuttle_plddt, "mean_plddt": sr.mean_plddt,
                       "verdict": sr.verdict, "exposed": sr.exposed}
-
-    def _generate(self, cargo, tool_input):
-        from .generative import get_fbgan
-        fb = get_fbgan(self.settings)
-        if fb is None:
-            return "propose unavailable (no local generator).", {"novel": []}
-        rounds = max(2, min(4, int(tool_input.get("rounds", 3))))
-        linker = LINKER_LIBRARY[STANDARD_LINKER_NAME]["seq"]
-        fres = fb.run(cargo, linker, rounds=rounds, tox_threshold=self.settings.toxicity_threshold)
-        best = fres.best[:5]
-        lines = ["novel suffixes (with standard prefix):", "suffix | primary | penalty"]
-        for b in best:
-            lines.append(f"{b['shuttle']} | {b['bbb']:.3f} | {b['tox']:.3f}")
-        return "\n".join(lines), {"novel": best}

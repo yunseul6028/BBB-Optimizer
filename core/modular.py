@@ -17,10 +17,14 @@ from .config import (
     DEEPB3P_PYTHON,
     DEEPB3P_REPO,
     MODULAR_RUNNER,
+    SHUTTLES,
     TOXINPRED3_PYTHON,
     TOXINPRED3_REPO,
     Settings,
 )
+
+# 셔틀 진화 시드 — 검증된 라이브러리 리간드 서열(de-novo 생성 금지, 여기서 시드해 진화).
+_SHUTTLE_SEEDS = ",".join(v["seq"] for v in SHUTTLES.values() if v.get("seq"))
 
 
 @dataclass
@@ -46,7 +50,7 @@ class ModularOptimizer:
                 cargo.upper(), str(s_rounds), str(pop), str(elite), str(top_shuttles),
                 str(l_rounds), str(top_linkers), str(tox_threshold),
                 str(TOXINPRED3_PYTHON), str(TOXINPRED3_REPO), "toxinpred3.py",
-                str(out),
+                str(out), _SHUTTLE_SEEDS,
             ]
             proc = subprocess.run(cmd, cwd=str(DEEPB3P_REPO), capture_output=True,
                                   text=True, timeout=self.timeout)

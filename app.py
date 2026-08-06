@@ -29,7 +29,6 @@ from core.config import (
     VALID_AMINO_ACIDS,
     bbb_scoring_seq,
 )
-from core.generative import get_fbgan
 from core.coevolution import get_coevolution
 from core.modular import get_modular
 from core.optimizer_agent_gemini import get_gemini_agent, OFF_TARGET_PENALTY
@@ -88,7 +87,7 @@ st.caption(
 )
 with st.expander("동작 방식 · 지표 안내"):
     st.markdown(
-        "- **설계 에이전트**가 평가·구조·생성 도구로 후보를 만들고, **심사 에이전트**가 적대적으로 검증합니다.\n"
+        "- **설계 에이전트**가 평가·잔기 편집·구조 도구로 후보를 만들고, **심사 에이전트**가 적대적으로 검증합니다.\n"
         "- **BBB 점수**는 deepB3P 예측 확률(0–100)로 후보 비교용이며, 실제 투과율은 실험(Papp/logBB)이 필요합니다.\n"
         "- `융합체 = 화물 + 링커 + 셔틀`"
     )
@@ -109,8 +108,8 @@ with _hero:
     _seq = _clean_cargo(cargo_input)
 
     # 실행 플래그·기본값
-    agent_run = run = fbgan_run = struct_run = coevo_run = modular_run = False
-    agent_rounds, fbgan_rounds, coevo_rounds, modular_rounds = 8, 4, 4, 4
+    agent_run = run = struct_run = coevo_run = modular_run = False
+    agent_rounds, coevo_rounds, modular_rounds = 8, 4, 4
     struct_linker_name, struct_shuttle_name = STANDARD_LINKER_NAME, list(SHUTTLES)[0]
 
     # === 자율 설계 에이전트 (입력은 항상 화물) ===
@@ -121,7 +120,7 @@ with _hero:
     else:
         st.caption("데모 모드 — API 키 없이 예시 결과로 화면을 미리봅니다.")
     agent_run = st.button("자율 설계 에이전트 실행", type="primary", width='stretch')
-    st.caption("에이전트가 BBB·독성·구조·수용체·생성 도구를 스스로 오케스트레이션해 "
+    st.caption("에이전트가 BBB·독성·구조·수용체·잔기 편집 도구를 스스로 오케스트레이션해 "
                "최종 융합체를 설계합니다.")
     with st.expander("개별 도구 직접 실행 (에이전트 없이 · 무료)"):
         st.caption("에이전트가 자율적으로 호출하는 도구들을 수동으로도 실행할 수 있습니다.")
@@ -134,13 +133,9 @@ with _hero:
         struct_shuttle_name = _sc2.selectbox("셔틀", list(SHUTTLES), index=0)
         struct_run = st.button("구조 분석 실행 (~10초)", width='stretch')
 
-        if settings.use_fbgan_local:
-            st.markdown("**신규 셔틀 생성 (FBGAN)**")
-            fbgan_rounds = st.slider("생성 라운드 수", 2, 8, 4)
-            fbgan_run = st.button("생성 실행", width='stretch')
-
         if settings.use_coevo_local:
             st.markdown("**링커·셔틀 동시 진화 (co-evolution)**")
+            st.caption("셔틀은 검증 라이브러리 리간드에서 시드해 진화(de-novo 생성 아님) · 링커도 함께 진화")
             coevo_rounds = st.slider("공진화 라운드 수", 2, 8, 4, key="coevo_rounds")
             coevo_run = st.button("공진화 실행", width='stretch')
 
@@ -283,7 +278,8 @@ def _demo_agent_events(cargo):
         "BBB·독성·선택성 근거가 일관되고 임계값을 만족합니다. 최종 선택을 승인합니다."),
         data={"approve": True})
     yield _Ev("reflection", text=(
-        "추가로 FBGAN 생성 셔틀을 탐색하면 라이브러리 밖에서 더 나은 후보를 얻을 수 있습니다."))
+        "추가로 검증 셔틀의 잔기 편집(design_candidate)이나 링커·셔틀 co-evolution으로 "
+        "라이브러리 시드에서 더 나은 후보를 탐색할 수 있습니다."))
 
 
 def _emit_agent_event(ev):
@@ -334,16 +330,6 @@ def _emit_agent_event(ev):
         d = ev.data
         icon = "노출" if d.get("exposed") else "가림 우려"
         st.markdown(f"**도구 — 구조 검증 (ESMFold)** · {icon} — {ev.text}")
-    elif ev.kind == "generation":
-        st.markdown("**도구 — 신규 셔틀 생성 (FBGAN)**")
-        novel = ev.data.get("novel", [])
-        if novel:
-            st.dataframe(
-                {"생성 셔틀": [b["shuttle"] for b in novel],
-                 "BBB": [f"{b['bbb']*100:.0f}" for b in novel],
-                 "독성": [f"{b['tox']*100:.0f}%" for b in novel]},
-                width='stretch', hide_index=True,
-            )
     elif ev.kind == "error":
         st.error(ev.text)
 
@@ -708,7 +694,7 @@ else:
         st.divider()
         st.subheader("자율 설계 에이전트")
         st.caption(
-            f"화물 `{cargo}` · **{brain}**가 BBB·독성·구조·생성 도구를 자율 오케스트레이션해 "
+            f"화물 `{cargo}` · **{brain}**가 BBB·독성·구조·잔기 편집 도구를 자율 오케스트레이션해 "
             f"최종 융합체를 탐색 (최대 {agent_rounds}스텝)"
         )
         events = []
@@ -766,32 +752,6 @@ else:
         st.session_state["view"] = "struct"
         st.stop()
 
-    # FBGAN 실행(버튼) → 결과를 session_state에 저장 (rerun에도 유지)
-    if fbgan_run:
-        st.session_state["view"] = "fbgan"
-        cargo = _clean_cargo(cargo_input)
-        _err = _cargo_error(cargo)
-        if _err:
-            st.error(_err)
-            st.stop()
-        linker = LINKER_LIBRARY[STANDARD_LINKER_NAME]["seq"]
-        with st.status(f"생성 최적화 루프 실행 중... ({fbgan_rounds}라운드: 생성→평가→피드백)",
-                       expanded=True) as status:
-            st.write("사전학습 생성기로 novel 셔틀 생성 → deepB3P·ToxinPred3 채점 → latent 진화")
-            try:
-                fres = get_fbgan(settings).run(
-                    cargo, linker, rounds=fbgan_rounds,
-                    tox_threshold=settings.toxicity_threshold)
-                st.session_state["fbgan"] = {
-                    "history": fres.history, "best": fres.best,
-                    "cargo": cargo, "linker": linker, "rounds": fbgan_rounds,
-                }
-            except Exception as exc:  # noqa: BLE001
-                status.update(label="생성 최적화 실패", state="error")
-                st.error(f"실행 오류: {exc}")
-                st.stop()
-            status.update(label="생성 최적화 완료!", state="complete", expanded=False)
-
     # 링커·셔틀 co-evolution(버튼) → 결과를 session_state에 저장
     if coevo_run:
         st.session_state["view"] = "coevo"
@@ -845,7 +805,6 @@ else:
     _view = st.session_state.get("view")
     _agent = st.session_state.get("agent")
     _struct = st.session_state.get("struct")
-    fb = st.session_state.get("fbgan")
     co = st.session_state.get("coevo")
     mo = st.session_state.get("modular")
     if _view == "struct" and _struct:
@@ -870,67 +829,13 @@ else:
                 if ev.kind not in ("plan", "reflection", "critique"):  # 위 요약에 이미 표시
                     _emit_agent_event(ev)
         st.caption("최적화 판단은 deepB3P·ToxinPred3 예측 기반입니다. 실제 합성·검증 필요.")
-    elif fb:
-        st.divider()
-        st.subheader("AI 생성 셔틀 — 최적화 결과")
-        st.caption(
-            f"화물 {len(fb['cargo'])}aa · 링커 `{fb['linker']}` 고정 · {fb['rounds']}라운드 진화 · "
-            f"셔틀은 **AI가 새로 생성**한 서열(라이브러리 밖)"
-        )
-        if fb["history"]:
-            st.markdown("##### 라운드별 BBB 개선")
-            _hist_df = pd.DataFrame({
-                "라운드": list(range(1, len(fb["history"]) + 1)),
-                "평균 BBB": [round(h["mean_bbb"] * 100) for h in fb["history"]],
-                "최고 BBB": [round(h["best_bbb"] * 100) for h in fb["history"]],
-            }).melt("라운드", var_name="구분", value_name="BBB 투과 점수")
-            _hist_chart = (
-                alt.Chart(_hist_df)
-                .mark_line(point=True)
-                .encode(
-                    x=alt.X("라운드:O", title="라운드"),
-                    y=alt.Y("BBB 투과 점수:Q", title="BBB 투과 점수",
-                            scale=alt.Scale(domain=[0, 100])),  # 0~100 고정, 음수 제거
-                    color=alt.Color("구분:N", title="",
-                                    scale=alt.Scale(domain=["최고 BBB", "평균 BBB"],
-                                                    range=["#30405c", "#8a929e"])),
-                )
-            )
-            st.altair_chart(_hist_chart, use_container_width=True)
-            _c0, _c1 = fb["history"][0].get("mean_charge"), fb["history"][-1].get("mean_charge")
-            if _c0 is not None and _c1 is not None:
-                st.caption(f"평균 순전하 pH7.4 `{_c0:+g}` → `{_c1:+g}` (양전하 편향 억제)")
-        st.markdown("##### 생성된 베스트 셔틀")
-        top = fb["best"][:3]
-        if not top:
-            st.warning("비독성 후보를 찾지 못했습니다. 라운드를 늘려 다시 시도해 보세요.")
-        else:
-            cols = st.columns(len(top))
-            for i, b in enumerate(top):
-                with cols[i]:
-                    with st.container(border=True, key=f"gen-card-{i}"):
-                        st.markdown(f"### 생성 셔틀 #{i+1}")
-                        st.code(b["shuttle"], language="text")
-                        m1, m2 = st.columns(2)
-                        m1.metric("BBB 투과 점수", f"{b['bbb']*100:.0f}")
-                        m2.metric("독성 위험", f"{b['tox']*100:.0f}%", delta="안전",
-                                  delta_color="off")
-                        st.caption(
-                            f"순전하 pH7.4 `{b.get('charge', 0):+g}` · 양친매성 μH "
-                            f"`{b.get('muH', '—')}` (양전하 편향 보정 선정)"
-                        )
-                        st.caption(f"전체 융합체({b['len']}aa): `{b['sequence']}`")
-        st.caption(
-            "이 셔틀들은 AI가 새로 생성한 서열로, 자연·검증된 펩타이드가 아닙니다. 선정은 "
-            "deepB3P BBB에서 **과도한 양전하·비양친매성을 감점**해 보정한 적합도 기준이며, "
-            "실제 합성·In Vitro 검증이 필요합니다(BBB/독성은 deepB3P·ToxinPred3 예측값)."
-        )
     elif co:
         st.divider()
         st.subheader("링커·셔틀 공진화 — 최적화 결과")
         st.caption(
             f"화물 {len(co['cargo'])}aa · {co['rounds']}라운드 · "
-            f"링커·셔틀을 **동시에** 진화(멀티모듈 co-evolution) — 링커·셔틀 모두 **AI가 새로 생성**"
+            f"링커·셔틀을 **동시에** 진화(멀티모듈 co-evolution) — 셔틀은 **검증 라이브러리 리간드에서 "
+            f"시드해 진화**(de-novo 생성 아님), 링커도 함께 진화"
         )
         if co["history"]:
             st.markdown("##### 라운드별 BBB 개선")
@@ -984,9 +889,9 @@ else:
                         )
                         st.caption(f"전체 융합체({b['len']}aa): `{b['sequence']}`")
         st.caption(
-            "링커·셔틀 모두 AI가 새로 생성·공진화한 서열입니다. 선정은 deepB3P BBB에서 "
-            "**과도한 양전하·비양친매성을 감점**해 보정한 적합도 기준이며, 실제 합성·In Vitro "
-            "검증이 필요합니다(BBB/독성은 deepB3P·ToxinPred3 예측값)."
+            "셔틀은 **검증 라이브러리 리간드에서 시드해 진화**(de-novo 생성 아님), 링커는 함께 공진화한 "
+            "서열입니다. 선정은 deepB3P BBB에서 **과도한 양전하·비양친매성을 감점**해 보정한 적합도 "
+            "기준이며, 실제 합성·In Vitro 검증이 필요합니다(BBB/독성은 deepB3P·ToxinPred3 예측값)."
         )
     elif mo:
         st.divider()

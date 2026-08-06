@@ -17,3 +17,7 @@ vendor/
 # --- OS / IDE ---
 .DS_Store
 .claude/
+
+# 공모전 배포 자료(공고/제안서 양식) — repo 제외
+*경진대회*
+*.hwpx
