@@ -16,7 +16,7 @@ from __future__ import annotations
 import time
 from typing import Generator
 
-from .config import LINKER_LIBRARY, MODEL_MAX_LEN, SHUTTLES, Settings
+from .config import LINKER_LIBRARY, MIN_BBB_SIGNAL, MODEL_MAX_LEN, SHUTTLES, Settings
 from .optimizer_agent import AgentEvent, OptimizationAgent
 
 # 일시적 오류(모델 과부하·분당 레이트리밋·응답 지연) — 백오프 재시도 대상
@@ -66,7 +66,13 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int, has
         "펩타이드의 막투과를 학습했으므로 **CPP 셔틀엔 비교적 유효하지만, RMT(수용체 매개) 셔틀엔 약한 "
         "프록시**다(실제 전달 병목은 수용체 결합·avidity). 따라서 **RMT형은 primary 절대값만으로 줄 "
         "세우지 말고 mech=RMT·preserv(셔틀 신호가 보존됐나)·구조 노출(analyze_structure)을 함께 근거로 "
-        "삼아라.** 최종 보고서엔 '이 셔틀의 전달은 무슨 메커니즘이고 deepB3P를 어느 정도 믿는지'를 밝혀라.\n\n"
+        "삼아라. 최종 보고서엔 '이 셔틀의 전달은 무슨 메커니즘이고 deepB3P를 어느 정도 믿는지'를 밝혀라.\n"
+        f"  **[최종 확정 하한 — 필수]** 단, 선택성이 아무리 좋아도 **융합 BBB(primary)가 near-zero"
+        f"(< {MIN_BBB_SIGNAL})인 후보는 finish로 확정하지 마라** — 효능 신호 자체가 없으면 선택적이어도 "
+        "무의미하다(심사가 자동 미승인). RMT 셔틀의 융합 BBB가 바닥이면: (a) **셔틀 단독(shuttleBBB)은 "
+        "높은데 융합이 뭉갠 경우(preserv 낮음)면 링커 교체·design_candidate로 보존도를 먼저 회복**해 BBB를 "
+        "끌어올리고, (b) 회복이 안 되면 **BBB 신호가 있으면서 선택성도 괜찮은 후보(유효점수 상위)**를 택하라. "
+        f"요컨대 **BBB 하한({MIN_BBB_SIGNAL})을 넘는 것들 중에서 선택성으로 저울질**하는 게 최종 기준이다.\n\n"
         f"사용 가능한 도구: {tools}\n"
         "권장 워크플로우(자율 판단): evaluate_candidates로 라이브러리 조합(**링커 유무 — 직접융합"
         "(링커 빈칸)도 포함**)을 폭넓게 스크리닝 → "
@@ -198,7 +204,8 @@ class GeminiOptimizationAgent(OptimizationAgent):
             "③ BBB 점수 신뢰도 — deepB3P는 짧은 펩타이드 막투과 학습 모델. **RMT(수용체 매개) 셔틀이면 "
             "deepB3P는 약한 프록시**(전달 병목은 수용체 결합·avidity)이므로 primary 절대값에 기댔는지, "
             "메커니즘(mech)·융합 보존(preserv)·구조 노출로 뒷받침했는지 따져라. CPP형이면 비특이 흡수를 "
-            "경계하라.\n"
+            f"경계하라. 단 **융합 BBB가 near-zero(< {MIN_BBB_SIGNAL})면 효능 신호 부재**이므로 선택성이 "
+            "좋아도 REVISE 사유다(선택성만으론 확정 불가).\n"
             "④ 구조 근거 — 셔틀이 표면 노출됐다는 ESMFold 검증을 실제로 거쳤는가.\n"
             "⑤ 개발성 리스크 — 과도한 Arg/Lys(양이온)는 비특이 결합·독성·응집 위험. 서열 liability.\n"
             "⑥ off-target/선택성 — 양전하·친유성 주도(CPP형)면 여러 조직에 비특이 흡수돼 off-target "
@@ -236,6 +243,13 @@ class GeminiOptimizationAgent(OptimizationAgent):
         text = "\n\n".join(p.text for p in parts
                            if getattr(p, "text", None) and not getattr(p, "thought", False))
         approve = "APPROVE" in (text or "").upper().rsplit("VERDICT:", 1)[-1]
+        # 결정론적 하한 게이트: 융합 BBB가 near-zero면 효능 신호 부재 → 선택성이 좋아도 무조건 미승인.
+        if choice.get("bbb", 0.0) < MIN_BBB_SIGNAL:
+            text = (text or "") + (
+                f"\n\n[시스템 게이트] 융합 BBB {choice.get('bbb', 0.0):.3f} < 최소 효능 신호 "
+                f"{MIN_BBB_SIGNAL} → 선택성이 좋아도 **효능 신호 부재**로 자동 미승인(REVISE). "
+                "링커/정밀설계로 BBB를 하한 위로 끌어올리거나, BBB 신호가 있으면서 선택성도 괜찮은 후보로 교체 필요.")
+            approve = False
         return approve, text
 
     def _recommend_on_failure(self, client, model, types, cargo, choice, critique_text):

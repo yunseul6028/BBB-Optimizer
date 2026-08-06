@@ -68,6 +68,8 @@ TOXINPRED3_MODEL_ARG = 1   # 1: ML-only(AAC+DPC, 외부도구 불필요), 2: Hyb
 # ---------------------------------------------------------------------------
 VALID_AMINO_ACIDS = set("ACDEFGHIKLMNPQRSTVWY")
 TOXICITY_THRESHOLD = 0.38          # 부작용 탈락 기준선 (ToxinPred3 기본 임계값에 맞춤)
+MIN_BBB_SIGNAL = 0.15              # 최종 확정 최소 효능 신호(deepB3P 융합 점수). near-zero(<이 값)는
+                                   # 선택성이 좋아도 효능 신호 부재로 확정 불가 → 심사 자동 미승인.
 MODEL_MAX_LEN = 50                 # deepB3P seq_len — 초과분은 잘림(truncate)
 TOP_N = 3                          # 상위 몇 개 조합을 최종 추천으로 보여줄지
 
