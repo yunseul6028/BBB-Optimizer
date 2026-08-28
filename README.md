@@ -6,7 +6,7 @@
 에이전트가 적대적으로 검증**해 BBB 투과·독성·off-target·안정성·개발성·용해도를 저울질한 최종
 후보로 수렴한다.
 
-> **동기** — 항체(~150 kDa)는 BBB에 막혀 투여량의 **0.1~0.2%만 뇌에 도달**한다. 셔틀이 수용체매개
+> **동기** — 항체(약 150 kDa)는 BBB에 막혀 투여량의 **0.1–0.2%만 뇌에 도달**한다. 셔틀이 수용체매개
 > 수송(RMT)을 편승(hitchhike)해 화물을 넘긴다. 산업 선례: Roche *Brain Shuttle* · Denali *Transport
 > Vehicle* · **임상 3상 진입한 로슈 *Trontinemab***(TfR·monovalent).
 
