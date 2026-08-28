@@ -14,7 +14,7 @@ M5) 심사(Critic) 효과:
 
 from __future__ import annotations
 
-from core.config import DEFAULT_CARGO, TOXICITY_THRESHOLD, get_settings
+from core.config import TOXICITY_THRESHOLD, get_settings
 from core.predictors import get_predictor
 from core.toxicity import get_toxicity_predictor
 from core.optimizer_agent_gemini import get_gemini_agent

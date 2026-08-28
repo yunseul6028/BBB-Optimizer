@@ -104,7 +104,7 @@ def m1_discrimination(predictor):
     rng = random.Random(SEED)
     pos_names, pos_seqs = list(POSITIVES), list(POSITIVES.values())
     scr_seqs = [_scramble(s, rng) for s in pos_seqs]          # 조성 동일·순서 파괴
-    rnd_names, rnd_seqs = list(NEGATIVES_RANDOM), list(NEGATIVES_RANDOM.values())
+    rnd_seqs = list(NEGATIVES_RANDOM.values())
 
     pos = _bbb_scores(predictor, pos_seqs)
     scr = _bbb_scores(predictor, scr_seqs)

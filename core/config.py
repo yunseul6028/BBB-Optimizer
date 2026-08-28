@@ -66,10 +66,8 @@ TOXICITY_THRESHOLD = 0.38          # 부작용 탈락 기준선 (ToxinPred3 기�
 MIN_BBB_SIGNAL = 0.15              # 최종 확정 최소 효능 신호(deepB3P 융합 점수). near-zero(<이 값)는
                                    # 선택성이 좋아도 효능 신호 부재로 확정 불가 → 심사 자동 미승인.
 MODEL_MAX_LEN = 50                 # deepB3P seq_len — 초과분은 잘림(truncate)
-TOP_N = 3                          # 상위 몇 개 조합을 최종 추천으로 보여줄지
 
-# --- 링커 라이브러리 (융합체의 링커 축, 전수 탐색) ---
-STANDARD_LINKER_NAME = "GGGGGS"
+# --- 링커 라이브러리 (융합체의 링커 축) ---
 LINKER_LIBRARY = {
     "직접융합":    {"seq": "",               "kind": "none",        "note": "링커 없이 화물-셔틀 직접 연결(0aa, direct fusion)"},
     "GGS":        {"seq": "GGS",             "kind": "flexible",    "note": "짧은 유연 링커(3aa)"},
@@ -137,7 +135,6 @@ class Settings:
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3-flash-preview"
     toxicity_threshold: float = TOXICITY_THRESHOLD
-    top_n: int = TOP_N
 
     @property
     def use_deepb3p_local(self) -> bool:
