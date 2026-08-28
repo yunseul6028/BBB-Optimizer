@@ -199,7 +199,7 @@ core/
   coevolution.py            링커·셔틀 서열 directed co-evolution 오케스트레이터
 scripts/deepb3p/            deepB3P venv에서 도는 러너 (설치 시 vendor/deepB3P/ 로 복사)
 scripts/prewarm_esmfold.py  발표용 ESMFold 구조 캐시 프리워밍
-assets/theme.css            디자인 시스템(YumYum) 테마
+assets/theme.css            디자인 시스템 테마
 ```
 
 ## 📜 라이선스 주의
