@@ -52,36 +52,40 @@ streamlit run app.py
 
 ## 🧱 아키텍처 & 설계도
 
-### 4계층 구조 (UI · 오케스트레이션 · 도구·엔진 · 격리 실행)
+### 4계층 구조
 
 ```mermaid
-flowchart TB
-  U["화물 서열"] --> UI["① UI (app.py)<br/>실시간 스트리밍 · 결과 카드"]
-  UI --> ORCH["② 오케스트레이션<br/>Designer–Critic 자율 에이전트"]
-  ORCH --> TOOLS["③ 도구·엔진 — 8축 + 전하 가드레일"]
-  TOOLS --> E1["deepB3P · BBB"] & E2["ToxinPred3 · 독성"] & E3["ProtParam · 안정성"] & E4["BLOSUM62 · 수용체"]
-  TOOLS --> E5["개발성"] & E6["ESMFold+SASA · 구조"] & E7["선택성 / off-target"] & E8["용해도"]
-  E1 --> DV["④ 격리 .venv-deepb3p (CPU)"]
-  E2 --> TV["④ 격리 .venv-toxinpred3"]
-  E6 --> API["ESMFold 공개 API"]
-  ORCH -->|finish| CR{"심사 Critic<br/>독립 컨텍스트"}
-  CR -->|APPROVE| OUT["최종 융합체 · 상위 N 랭킹"]
-  CR -->|REVISE| ORCH
-  CR -->|미승인| REC["실패 진단 + 대안 권고"]
+flowchart TD
+  U(["화물 서열"]) --> UI["① UI · app.py — 실시간 스트리밍·결과 카드"]
+  UI --> AG["② 오케스트레이션 · Designer–Critic 자율 에이전트"]
+  AG --> TL["③ 도구·엔진 · 8축 평가<br/>BBB · 독성 · 안정성 · 수용체 · 개발성 · 구조 · 선택성 · 용해도"]
+  TL --> IZ["④ 격리 실행 · deepB3P·ToxinPred3 (venv·CPU) / ESMFold (API)"]
+  AG -.->|finish| CR{"심사 Critic"}
+  CR -->|APPROVE| OK(["최종 융합체 · 랭킹"])
+  CR -.->|REVISE| AG
+  CR -->|미승인| NG(["실패 진단 + 대안"])
+  classDef layer fill:#eef2ff,stroke:#6366f1,color:#1e1b4b;
+  classDef ok fill:#ecfdf5,stroke:#10b981,color:#064e3b;
+  classDef bad fill:#fff7ed,stroke:#f59e0b,color:#7c2d12;
+  class UI,AG,TL,IZ layer
+  class U,OK ok
+  class NG bad
 ```
 
 ### 에이전트 제어 흐름 (`run()`)
 
 ```mermaid
-flowchart TD
-  P["PLAN · 전략 선언"] --> LOOP{"ACT 루프<br/>turn < max_rounds + grace"}
-  LOOP --> DISP["도구 dispatch"]
-  DISP -->|"evaluate/design/structure/evolve"| T["실행 → best 갱신<br/>eff = BBB − λ·off_target"]
-  T --> LOOP
-  DISP -->|"finish"| SC["최종 후보 채점"]
-  SC --> CRITIC{"CRITIC · VERDICT"}
-  CRITIC -->|"REVISE"| REV["재설계 (여분 턴 +1 보장)"] --> LOOP
-  CRITIC -->|"APPROVE / 소진"| OUT["최종 융합체 · 8축 카드 · 랭킹"]
+flowchart LR
+  P(["PLAN"]) --> L{"ACT 루프"}
+  L -->|도구 호출| T["평가·잔기편집·구조·진화<br/>best 갱신 = BBB − λ·off_target"]
+  T --> L
+  L -->|finish| C{"CRITIC<br/>적대 검증"}
+  C -.->|REVISE 재설계| L
+  C ==>|APPROVE| O(["최종 융합체 · 8축 카드"])
+  classDef step fill:#eef2ff,stroke:#6366f1,color:#1e1b4b;
+  classDef ok fill:#ecfdf5,stroke:#10b981,color:#064e3b;
+  class P,T step
+  class O ok
 ```
 
 **라이브러리**: **링커 13 × 셔틀 10 = 130 조합**
