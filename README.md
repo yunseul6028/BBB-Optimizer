@@ -83,7 +83,7 @@ flowchart TD
   T --> LOOP
   DISP -->|"finish"| SC["최종 후보 채점"]
   SC --> CRITIC{"CRITIC · VERDICT"}
-  CRITIC -->|"REVISE"| REV["grace += 1 · 재설계"] --> LOOP
+  CRITIC -->|"REVISE"| REV["재설계 (여분 턴 +1 보장)"] --> LOOP
   CRITIC -->|"APPROVE / 소진"| OUT["최종 융합체 · 8축 카드 · 랭킹"]
 ```
 
