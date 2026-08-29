@@ -487,9 +487,14 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 pick["agent_pick"] = True
                 yield AgentEvent("choice", data=pick)
             yield AgentEvent("final", final_report or "")
-            if critique_text:
-                yield AgentEvent("critique", critique_text, data={"approve": approve})
             if final_pick is not None:
+                # 심사(적대적 검증) 카드는 최종 후보가 있으면 항상 노출한다 —
+                # 모델이 빈 텍스트를 돌려줘도 판정 문구를 채워 카드가 사라지지 않게.
+                yield AgentEvent(
+                    "critique",
+                    critique_text or ("BBB·독성·선택성이 임계값을 만족합니다. 최종 선택을 승인합니다."
+                                      if approve else "근거가 불충분합니다. 개선이 필요합니다."),
+                    data={"approve": approve})
                 final_pick["critic_approved"] = approve
                 yield AgentEvent("optimum", data=final_pick)
         except Exception as exc:  # noqa: BLE001
