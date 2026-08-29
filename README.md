@@ -50,15 +50,31 @@ streamlit run app.py
 
 ### 실행 화면
 
-**① 입력** — 화물 서열을 넣고 실행 (로컬 deepB3P·ToxinPred3 + Gemini 브레인 연동)
+실제 세션 캡처 — **항체 VH 도메인(118aa)** 을 화물로 넣고 에이전트가 자율 오케스트레이션으로 설계하는 전 과정.
+
+**① 입력** — 화물 서열 입력 (로컬 deepB3P·ToxinPred3 + Gemini 브레인 연동)
 
 ![입력 화면](docs/screenshots/01-landing.png)
 
-**② 결과** — 라운드별 최적화 궤적 + 상위 후보 카드. 각 후보에 **전달 축 분해**(셔틀 내재 × 융합 보존 ×
-메커니즘 RMT/CPP)·**선택성/off-target**·8축 세부가 병기되고, 랭킹은 **유효점수(BBB − off-target 감점)**
-순이라 raw BBB가 높아도 비특이 CPP는 밀린다(예: 3위 = T7 기반 **RMT** 후보).
+**② 계획 (PLAN)** — 에이전트가 목표·제약(RMT 우선·off-target 최소화·유효점수 `BBB − 0.25·off_target`)을 스스로 세우고 도구 사용 순서를 설계
 
-![결과 화면 — 최적화 궤적 · 상위 후보](docs/screenshots/03-podium.png)
+![계획 단계](docs/screenshots/02-plan.png)
+
+**③ 후보 평가 (도구 호출)** — 링커 × 셔틀(Angiopep-2·ApoE·Leptin30…) 조합을 실측 엔진으로 스크리닝해 8축 표로 반환
+
+![후보 평가표](docs/screenshots/03-eval.png)
+
+**④ 구조 검증 + 서열 진화** — ESMFold로 셔틀 노출을 확인하고, 라이브러리 시드 directed evolution(셔틀·링커 공진화)으로 신규 변이체를 생성 (예: T7 진화체)
+
+![구조 검증·directed evolution](docs/screenshots/04-evolve.png)
+
+**⑤ 결과 — 최적화 궤적 + 상위 후보** — 라운드별 개선 곡선과 포디움. 랭킹은 **유효점수(BBB − off-target 감점)** 순이라 raw BBB가 높아도 비특이 CPP는 밀린다
+
+![결과 — 궤적·포디움](docs/screenshots/05-result.png)
+
+**⑥ 포디움 상세** — 각 후보에 **전달 축 분해**(셔틀 내재 × 융합 보존 × 메커니즘)·**선택성/off-target**·8축·개발성이 병기됨. 선택된 후보는 **RMT형(T7)** 셔틀
+
+![포디움 상세](docs/screenshots/06-podium.png)
 
 ---
 
