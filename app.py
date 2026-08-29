@@ -97,12 +97,13 @@ with _hero:
 
     # 실행 플래그·기본값
     agent_run = False
-    agent_rounds = 8
+    agent_rounds = 10
 
     # === 자율 설계 에이전트 (입력은 항상 화물) ===
     if settings.use_gemini_agent:
-        agent_rounds = st.slider("최대 스텝 수", 4, 12, 8,
-                                 help="에이전트가 도구를 호출하는 최대 횟수. 낮추면 빠르고 저렴합니다.")
+        agent_rounds = st.slider("최대 스텝 수", 4, 12, 10,
+                                 help="에이전트가 도구를 호출하는 최대 횟수. 낮추면 빠르고 저렴하지만, "
+                                      "너무 낮으면 finish 전에 예산이 소진돼 심사가 축약될 수 있습니다.")
         st.caption(f"모델 — Gemini ({settings.gemini_model})")
     else:
         st.caption("데모 모드 — API 키 없이 예시 결과로 화면을 미리봅니다.")
@@ -357,7 +358,7 @@ def _render_agent_summary(events, cargo):
         st.altair_chart(_chart, use_container_width=True)
     if podium:
         st.markdown("##### 상위 후보")
-        st.caption("에이전트가 finish로 고른 최종 선택이 1위이고, 나머지는 **유효점수"
+        st.caption("에이전트가 고른 최종 선택(심사 판정 포함)이 1위이고, 나머지는 **유효점수"
                    "(BBB − off-target 감점) 순** 차순위입니다 — raw BBB 최고여도 비특이(off-target) "
                    "CPP는 밀립니다(에이전트 결정축과 동일).")
         cols = st.columns(len(podium))

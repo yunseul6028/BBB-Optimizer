@@ -420,6 +420,12 @@ class GeminiOptimizationAgent(OptimizationAgent):
                         name=fc.name, response={"result": text}))
 
                 if finish_fc is None:
+                    # 예산이 거의 소진됐는데 아직 finish를 안 했으면 → 다음 턴에 finish 유도
+                    # (제출해야 독립 심사를 받으므로, 마지막에라도 최적 후보를 내게 한다).
+                    if (self.max_rounds + grace) - turn <= 1:
+                        fr_parts.append(types.Part.from_text(
+                            text="⚠️ 행동 예산이 거의 소진됐다. 다음 호출에서 반드시 `finish`를 불러 "
+                                 "지금까지의 최적 후보를 제출하라 — 제출해야 독립 심사(Critic)를 받고 확정된다."))
                     contents.append(types.Content(role="user", parts=fr_parts))
                     if best:
                         yield AgentEvent("progress", data={"round": turn, "best_bbb": best["bbb"]})
@@ -473,13 +479,17 @@ class GeminiOptimizationAgent(OptimizationAgent):
 
             # ── 결과 방출 (한 번씩): 설계자 결론 + 심사 판정 ──
             # 심사 최종 판정을 최종 후보에 각인 → UI가 "승인/미승인"을 정직하게 표시한다.
-            if choice is not None:
-                choice["critic_approved"] = approve
-                yield AgentEvent("choice", data=choice)
+            # finish로 고른 choice가 있으면 그것을, 없으면(예산 소진) best를 최종 선택으로
+            # 승격한다 → 심사 판정이 항상 포디움 1위 + 하단 심사 카드에 노출된다.
+            pick = choice if choice is not None else final_pick
+            if pick is not None:
+                pick["critic_approved"] = approve
+                pick["agent_pick"] = True
+                yield AgentEvent("choice", data=pick)
             yield AgentEvent("final", final_report or "")
             if critique_text:
                 yield AgentEvent("critique", critique_text, data={"approve": approve})
-            if final_pick:
+            if final_pick is not None:
                 final_pick["critic_approved"] = approve
                 yield AgentEvent("optimum", data=final_pick)
         except Exception as exc:  # noqa: BLE001
