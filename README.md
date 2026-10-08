@@ -27,7 +27,11 @@
   투과 × 융합 보존 × 메커니즘(RMT/CPP) 타당도 + avidity**로 분해해 "펩타이드 투과 점수 ↔ 항체 전달"의
   개념 혼동 없이 정직하게 해석.
 - **🧬 서열 directed evolution** — 셔틀은 무작위 de-novo 생성 없이 **검증 리간드에서 시드**해
-  point-mutation·crossover로 진화(링커와 **쌍째 co-evolution**). 진화물도 실제 리간드의 변이체.
+  point-mutation·crossover로 진화. 진화물도 실제 리간드의 변이체.
+- **🛠 잔기 편집 = 개발성 스크러빙** — 잔기 수준 편집은 **BBB 개선(오라클 약함)이 아니라
+  개발성 liability 스크러빙**으로 재조준(`core/developability_opt.py`). **기존 오라클**(규칙 기반
+  developability·AGGRESCAN·rmt_sim — 새 모델 없음, 게임 불가)로, **검증 기능을 보존(rmt_sim≥floor)**
+  하며 liability를 제거. 검증: Angiopep-2 liability 3→0, 기능 보존(→ [docs/experiments.md](docs/experiments.md)).
 - **📐 8축 평가** — BBB · 독성 · 안정성 · 수용체 유사도 · 개발성 · 구조 노출 · **선택성(off-target)** · 용해도.
 - **✅ 정직한 미승인** — 전 후보 실패 시 결과를 위장하지 않고 **실패 진단 + 시스템 내 대안 권고**.
 
@@ -220,8 +224,9 @@ core/
   binding.py                수용체 유사도 (BLOSUM62, RMT/CPP 참조 세트)
   selectivity.py            선택성 / off-target (reward-hacking 회피 축)
   developability.py         개발성 liability·응집·전하
+  developability_opt.py     개발성 liability 스크러빙 (기능 보존 잔기 편집·기존 오라클 재사용)
   stability.py              ProtParam 안정성
-  solubility.py             용해도
+  solubility.py             용해도 (AGGRESCAN a3v 응집 척도)
   structure.py              ESMFold 구조 + 셔틀 노출도 (빠른 실패·캐싱)
   coevolution.py            링커·셔틀 서열 directed co-evolution 오케스트레이터
 scripts/deepb3p/            deepB3P venv에서 도는 러너 (설치 시 vendor/deepB3P/ 로 복사)
