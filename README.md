@@ -170,7 +170,8 @@ python benchmark_agent.py   # M4 에이전트 효율 · M5 심사 효과 (LLM �
 | 브레인(추론) | **Google Gemini**(기본) | 자율 최적화 에이전트 (Claude는 `with-claude` 브랜치) |
 
 **에이전트 도구**: `evaluate_candidates`(8축 배치) · `design_candidate`(잔기 편집) ·
-`analyze_structure`(ESMFold 노출도) · `evolve_from_library`(서열 진화 → 8축 재평가) · `finish`(자기 종료).
+`analyze_structure`(ESMFold 노출도) · `evolve_from_library`(서열 진화 → 8축 재평가) ·
+`optimize_developability`(셔틀 개발성 다목적 Pareto 최적화 — 기능 보존) · `finish`(자기 종료).
 
 **자원 경량**: deepB3P·독성·진화는 **CPU 완결**, 구조는 ESMFold **공개 API** → 프런티어 GPU 불필요.
 

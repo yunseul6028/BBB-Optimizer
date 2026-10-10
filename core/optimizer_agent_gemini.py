@@ -39,7 +39,8 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
     lib_s = ", ".join(f"{n}({v['seq']})" for n, v in SHUTTLES.items())
     tools = ("evaluate_candidates(BBB·독성·안정성·수용체 배치), design_candidate(잔기 수준 편집 "
              "서열 채점), analyze_structure(구조 노출도), evolve_from_library(검증 셔틀·링커 서열 "
-             "directed evolution — 라이브러리 밖 탐색)")
+             "directed evolution — 라이브러리 밖 탐색), optimize_developability(셔틀 개발성 다목적 "
+             "Pareto 최적화 — 기능 보존 잔기 편집)")
     tools += ", finish(수렴 시 최종 후보 제출·종료)"
     return (
         "[연구 맥락] 이것은 알츠하이머병 치료제의 뇌 전달을 개선하기 위한 정당한 학술·공모전용 "
@@ -80,6 +81,10 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
         "판단하면 스스로 finish**를 호출해 최종 융합체 1개(라벨·링커·셔틀·전체 근거)를 제출하라.\n"
         "- design_candidate: 라이브러리에 얽매이지 말고 셔틀/링커의 특정 잔기를 자유롭게 편집한 서열을 "
         "제안·채점할 수 있다(진짜 설계). 왜 그렇게 편집했는지 edit_note에 남겨라.\n"
+        "- optimize_developability: 최종 셔틀을 확정하기 전에 **개발성(liability·응집·불안정성)을 신뢰 "
+        "오라클로 다목적 Pareto 최적화**하고 싶을 때. 기능(rmt_sim)을 보존하는 변이체 전선을 받아, "
+        "개발성이 개선된 셔틀 하나를 골라 design_candidate/finish에 쓰라. 이는 **BBB 효능이 아니라 "
+        "'만들 수 있게(제조·안정성)' 다듬는 축** — BBB는 검증 라이브러리 셔틀 선택이 담당한다.\n"
         "- finish: 고정 스텝을 다 쓸 필요 없다. 목적을 충분히 만족했다고 판단하면 언제든 finish로 최종 "
         "후보를 제출하라. 제출하면 **독립 심사(비평) 에이전트가 적대적으로 검증**한다 — 심사가 REVISE(개선 "
         "요구)를 내면 그 지적을 반영해 개선하고 다시 finish하라. APPROVE(승인)가 나오면 확정된다.\n\n"
@@ -142,6 +147,17 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 }, required=["rounds"]),
             ))
         decls.append(types.FunctionDeclaration(
+            name="optimize_developability",
+            description=("한 셔틀 서열의 **개발성**(liability·응집·불안정성)을 신뢰 가능한 규칙/척도 "
+                         "오라클로 **다목적(Pareto) 최적화**한다. 검증 기능을 보존(rmt_sim 하한)하는 "
+                         "보존적 잔기 치환으로, 서로 상충하는 세 축을 동시에 줄인 변이체들의 트레이드오프 "
+                         "전선을 반환. **BBB 효능이 아니라 '만들 수 있게(제조·안정성)' 다듬는 용도** — "
+                         "최종 후보 셔틀을 확정 전에 개발성으로 다듬을 때 호출."),
+            parameters=S(type=T.OBJECT, properties={
+                "shuttle": S(type=T.STRING, description="개발성을 다듬을 셔틀 서열"),
+            }, required=["shuttle"]),
+        ))
+        decls.append(types.FunctionDeclaration(
             name="finish",
             description=("충분히 수렴했다고 판단하면 호출해 최종 후보를 제출하고 종료한다. 고정 스텝을 "
                          "다 쓸 필요 없다."),
@@ -175,7 +191,38 @@ class GeminiOptimizationAgent(OptimizationAgent):
             return text, AgentEvent("evaluation",
                                     text="🧬 라이브러리 시드 directed evolution (셔틀·링커 공진화)",
                                     data={"rows": rows})
+        if name == "optimize_developability":
+            return self._optimize_developability(args)
         return f"unknown tool: {name}", None
+
+    def _optimize_developability(self, args):
+        """셔틀의 개발성(liability·응집·불안정성)을 다목적 Pareto로 최적화 — 기능 보존.
+        BBB가 아니라 '제조·안정성' 다듬기. 신뢰 오라클만 사용(규칙·AGGRESCAN·Guruprasad)."""
+        from .developability_opt import objectives, pareto_scrub
+        sh = "".join(ch for ch in (args.get("shuttle", "") or "").upper() if ch.isalpha())
+        if len(sh) < 5:
+            return ("셔틀 서열이 너무 짧아 개발성 최적화 불가.",
+                    AgentEvent("text", text="🧪 개발성 최적화: 셔틀 서열 부족"))
+        try:
+            front = pareto_scrub(sh, rounds=25, pop=24, rmt_floor=0.85, seed=2022)
+        except Exception as exc:  # noqa: BLE001
+            return (f"개발성 최적화 실패: {type(exc).__name__}",
+                    AgentEvent("text", text="🧪 개발성 최적화 실패"))
+        seed = objectives(sh)
+
+        def _fmt(o):
+            return f"liability {o['liability']}·응집 {o['aggregation']}·불안정 {o['instability']}"
+        rows = [f"- `{m['seq']}` — {_fmt(m['objectives'])} · rmt_sim {m['rmt_sim']} · 편집 {m['n_edits']}"
+                for m in front[:6]]
+        body = "\n".join(rows)
+        md = (f"**🧪 개발성 다목적(Pareto) 최적화** — 셔틀 `{sh}`\n"
+              f"시드: liability {seed[0]}·응집 {seed[1]}·불안정 {seed[2]}. 기능 보존(rmt_sim≥0.85)하며 "
+              f"liability·응집·불안정성 동시 최소화 → 비지배 전선 {len(front)}개:\n{body}")
+        llm = (f"셔틀 {sh}의 개발성 Pareto 전선 {len(front)}개(rmt_sim≥0.85 보존, 시드=liability {seed[0]}·"
+               f"응집 {seed[1]}·불안정 {seed[2]}). 트레이드오프 변이체:\n{body}\n"
+               "하나를 골라 design_candidate/finish의 셔틀로 쓰면 개발성(제조·안정성)이 개선된다. "
+               "단 이는 개발성 축이며 BBB 효능은 라이브러리 셔틀 선택이 담당한다(결합 보존은 프록시).")
+        return llm, AgentEvent("text", text=md)
 
     @staticmethod
     def _eff_bbb(r):
