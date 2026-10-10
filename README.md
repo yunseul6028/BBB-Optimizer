@@ -31,7 +31,8 @@
 - **🛠 잔기 편집 = 개발성 스크러빙** — 잔기 수준 편집은 **BBB 개선(오라클 약함)이 아니라
   개발성 liability 스크러빙**으로 재조준(`core/developability_opt.py`). **기존 오라클**(규칙 기반
   developability·AGGRESCAN·rmt_sim — 새 모델 없음, 게임 불가)로, **검증 기능을 보존(rmt_sim≥floor)**
-  하며 liability를 제거. 검증: Angiopep-2 liability 3→0, 기능 보존(→ [docs/experiments.md](docs/experiments.md)).
+  하며 liability를 제거. **다목적(Pareto) 동시 최적화**(liability·응집·불안정성 상충 축의 트레이드오프
+  전선, `pareto_scrub`)까지. 검증: Angiopep-2 liability 3→0·Pareto 전선 12개, 기능 보존(→ [docs/experiments.md](docs/experiments.md)).
 - **📐 8축 평가** — BBB · 독성 · 안정성 · 수용체 유사도 · 개발성 · 구조 노출 · **선택성(off-target)** · 용해도.
 - **✅ 정직한 미승인** — 전 후보 실패 시 결과를 위장하지 않고 **실패 진단 + 시스템 내 대안 권고**.
 
@@ -149,6 +150,7 @@ python benchmark_agent.py   # M4 에이전트 효율 · M5 심사 효과 (LLM �
 | **용해도 축** (아밀로이드 vs 가용성) | AUC **0.96**, 가중치 섭동에 둔감(Spearman ≥ 0.95) |
 | **Angiopep-2 vs Angiopep-7** | deepB3P가 85%↓ 변이체를 **더 높게**(0.98 vs 0.87) = BBB 편집 비신뢰 |
 | **개발성 잔기 편집** | liability 평균 **1.5개↓ + 기능 보존 6/6**(무제약은 기능 파괴) |
+| **다목적(Pareto) 개발성** | liability·응집·불안정성 **동시 최적화** — Pareto 전선(RVG29 17·Angiopep-2 12개)이 시드 지배, 진짜 트레이드오프 |
 | **공진화 vs 분리** | 무승부·구조노출도 가산적(비 0.18–0.19) → 분리 최적화 적합 |
 
 > ⚠️ deepB3P는 짧은 펩타이드 학습 모델 — 긴 융합체는 조합 간 **상대 비교**로 해석하며 절대 투과율이
@@ -234,7 +236,7 @@ core/
   binding.py                수용체 유사도 (BLOSUM62, RMT/CPP 참조 세트)
   selectivity.py            선택성 / off-target (reward-hacking 회피 축)
   developability.py         개발성 liability·응집·전하
-  developability_opt.py     개발성 liability 스크러빙 (기능 보존 잔기 편집·기존 오라클 재사용)
+  developability_opt.py     개발성 liability 스크러빙 + 다목적(Pareto) 최적화 (기능 보존·기존 오라클)
   stability.py              ProtParam 안정성
   solubility.py             용해도 (AGGRESCAN a3v 응집 척도)
   structure.py              ESMFold 구조 + 셔틀 노출도 (빠른 실패·캐싱)

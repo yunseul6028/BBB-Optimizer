@@ -91,3 +91,72 @@ def scrub_liabilities(shuttle: str, rounds: int = 25, pop: int = 24,
         start_liabilities=dev0.liabilities, best_liabilities=devb.liabilities,
         start_agg=agg0, best_agg=assess_solubility(best_seq).agg_a3v,
         start_rmt=sim0, best_rmt=best_sim, n_edits=n_edits)
+
+
+# ---------------------------------------------------------------------------
+# 다목적(Pareto) 개발성 최적화 — "동시 최적화"를 진짜로 (상충하는 신뢰 오라클 축)
+# ---------------------------------------------------------------------------
+# 목표(모두 최소화·전부 신뢰 가능한 오라클): liability 개수(규칙=사실) · 응집(AGGRESCAN)
+# · 불안정성(Guruprasad). 서로 상충하므로 단일 최적해가 아니라 Pareto 전선을 찾는다.
+OBJECTIVE_NAMES = ("liability", "aggregation", "instability")
+
+
+def _instability(seq: str) -> float:
+    try:
+        from Bio.SeqUtils.ProtParam import ProteinAnalysis
+        return round(float(ProteinAnalysis(seq).instability_index()), 1)
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def objectives(seq: str) -> tuple:
+    """개발성 다목적 벡터 (모두 ↓ 좋음): (liability 개수, 응집 a3v, 불안정성지수)."""
+    dev = assess_developability(seq)
+    agg = round(assess_solubility(seq).agg_a3v, 3)
+    return (dev.n_liabilities, agg, _instability(seq))
+
+
+def _dominates(a: tuple, b: tuple) -> bool:
+    """a가 b를 지배: 모든 목표에서 a ≤ b, 적어도 하나는 a < b."""
+    return all(x <= y for x, y in zip(a, b)) and any(x < y for x, y in zip(a, b))
+
+
+def pareto_scrub(shuttle: str, rounds: int = 40, pop: int = 30,
+                 rmt_floor: float = 0.85, seed: int = 0, max_archive: int = 40):
+    """다목적 개발성 최적화 — 기능(rmt_sim≥floor) 보존하며 Pareto 전선을 반환.
+
+    반환: [{seq, objectives, rmt_sim, n_edits}] — 비지배(non-dominated) 후보 집합.
+    상충하는 목표(liability↓가 응집↑을 부를 수 있음)를 동시에 다루므로 단일 '정답'이
+    아니라 **트레이드오프 전선**을 제시한다.
+    """
+    rng = random.Random(seed)
+    sim0 = shuttle_similarity(shuttle).score
+    # (seq, objvec, rmt_sim)
+    archive = [(shuttle, objectives(shuttle), sim0)]
+
+    def _try_insert(s):
+        sim = shuttle_similarity(s).score
+        if sim < rmt_floor:
+            return
+        obj = objectives(s)
+        if any(_dominates(a[1], obj) for a in archive):
+            return                                   # 기존에 지배당함
+        archive[:] = [a for a in archive if not _dominates(obj, a[1])]  # 지배되는 것 제거
+        if all(a[0] != s for a in archive):
+            archive.append((s, obj, sim))
+
+    population = [shuttle] * pop
+    for _ in range(rounds):
+        for s in population:
+            _try_insert(s)
+        parents = [a[0] for a in archive] or [shuttle]
+        population = [_mutate(rng.choice(parents), rng) for _ in range(pop)]
+        if len(archive) > max_archive:               # 과대 시 다양성 유지하며 절삭
+            archive.sort(key=lambda a: a[1])
+            del archive[max_archive:]
+
+    front = sorted(archive, key=lambda a: a[1])
+    return [{"seq": s, "objectives": dict(zip(OBJECTIVE_NAMES, obj)),
+             "rmt_sim": round(sim, 2),
+             "n_edits": sum(1 for a, b in zip(shuttle, s) if a != b)}
+            for s, obj, sim in front]
