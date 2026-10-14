@@ -4,7 +4,7 @@
 브레인(LLM) 루프는 `optimizer_agent_gemini.py`의 `GeminiOptimizationAgent`가 이 클래스를
 상속해 구현한다. (Claude 브레인 버전은 `with-claude` 브랜치에 보존 — main은 Gemini 전용.)
 
-  - evaluate  : deepB3P(BBB) + ToxinPred3(독성) + 안정성 + 수용체유사 + 개발성 + 선택성 + 용해도 배치 채점
+  - evaluate  : deepB3P(BBB) + ToxinPred3(독성) + 안정성 + 수용체유사 + 개발성(용해도·응집 포함) + 선택성 배치 채점
   - structure : ESMFold 폴딩 → 셔틀 구조 노출도 (느림 ~10초, 최종 후보에만)
 
 셔틀은 **de-novo 생성하지 않는다**(검증 리간드만). 라이브러리 밖 탐색은 잔기 편집(design_candidate)
@@ -54,7 +54,6 @@ class OptimizationAgent:
         from .stability import assess_stability
         from .developability import assess_developability
         from .selectivity import assess_selectivity
-        from .solubility import assess_solubility
         from .delivery import assess_delivery
         # 융합 연결부위 deepB3P + 셔틀 단독 deepB3P를 **한 배치**로 추론(전달 축 분해용).
         junction_seqs = [bbb_scoring_seq(cargo, c["linker"], c["shuttle"]) for c in clean]
@@ -74,7 +73,6 @@ class OptimizationAgent:
             stab = assess_stability(c["sequence"])
             dev = assess_developability(c["sequence"])
             selr = assess_selectivity(c["shuttle"])   # off-target은 셔틀이 주도
-            solr = assess_solubility(c["sequence"])   # 용해도는 전체 융합체
             # 전달 축 분해 — deepB3P를 '셔틀 내재 × 융합 보존 × 메커니즘 타당도'로 나눈다.
             si = shuttle_bbb.get(c["shuttle"], 0.0)
             dax = assess_delivery(si, p.bbb_permeability, target=bind.target, mechanism=bind.mechanism)
@@ -89,7 +87,7 @@ class OptimizationAgent:
                          "sel_off": selr.off_target_risk, "selectivity": selr.selectivity,
                          "sel_level": selr.risk_level, "sel_mech": selr.mechanism,
                          "sel_drivers": selr.drivers,
-                         "sol_score": solr.score, "sol_level": solr.level,
+                         "sol_score": dev.sol_score, "sol_level": dev.sol_level,
                          "shuttle_bbb": round(si, 4), "mechanism": dax.mechanism,
                          "is_rmt": dax.is_rmt, "preservation": dax.preservation,
                          "avidity": dax.avidity, "deepb3p_valid": dax.deepb3p_validity,

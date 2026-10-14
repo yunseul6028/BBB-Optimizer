@@ -3,7 +3,7 @@
 혈액뇌장벽(BBB)을 넘겨야 하는 **화물(cargo)**에 검증된 **셔틀·링커**를 붙여 뇌 전달 융합체
 (`화물 + 링커 + 셔틀`)를 **자율 설계**하는 **Designer–Critic 멀티 에이전트**. 화물 서열을 넣으면
 **설계 에이전트가 평가·잔기 편집·구조·서열 진화 도구를 스스로 오케스트레이션**하고, **독립 심사
-에이전트가 적대적으로 검증**해 BBB 투과·독성·off-target·안정성·개발성·용해도를 저울질한 최종
+에이전트가 적대적으로 검증**해 BBB 투과·독성·off-target·안정성·개발성(용해도·응집 포함)을 저울질한 최종
 후보로 수렴한다.
 
 > **핵심 원리 — 규율 있는 범위 설정** — deepB3P가 양이온 CPP를 과대평가하는 편향(보상 해킹) 때문에,
@@ -37,8 +37,8 @@
   개발성 liability 스크러빙**으로 재조준(`core/developability_opt.py`). **기존 오라클**(규칙 기반
   developability·AGGRESCAN·rmt_sim — 새 모델 없음, 게임 불가)로, **검증 기능을 보존(rmt_sim≥floor)**
   하며 liability를 제거. **다목적(Pareto) 동시 최적화**(liability·응집·불안정성 상충 축의 트레이드오프
-  전선, `pareto_scrub`)까지. 검증: Angiopep-2 liability 3→0·Pareto 전선 12개, 기능 보존(→ [docs/experiments.md](docs/experiments.md)).
-- **📐 8축 평가** — BBB · 독성 · 안정성 · 수용체 유사도 · 개발성 · 구조 노출 · **선택성(off-target)** · 용해도.
+  전선, `pareto_scrub`)까지. 검증: 제약 편집 기능 보존 7/7(Angiopep-2 2→1·B6 2→0·RVG29 5→2)·Pareto 전선 12개(→ [docs/experiments.md](docs/experiments.md)).
+- **📐 7축 평가** — BBB · 독성 · 안정성 · 수용체 유사도 · **개발성(liability·응집·용해도 통합)** · 구조 노출 · **선택성(off-target)**.
 - **✅ 정직한 미승인** — 전 후보 실패 시 결과를 위장하지 않고 **실패 진단 + 시스템 내 대안 권고**.
 
 ---
@@ -56,7 +56,7 @@ streamlit run app.py
 3. **ACT 스트리밍** — 평가·잔기 편집·구조·서열 진화 도구 호출이 이벤트 카드로 차례로 등장.
 4. **[하이라이트] 지표 게이밍 간파** — 고BBB CPP off-target 후보 → 심사가 **REVISE** → 재설계 → APPROVE.
 5. **전달 축 분해 표시** — 후보별 셔틀 내재·융합 보존·메커니즘·avidity 병기("이 숫자는 RMT라 참고치").
-6. **최종 카드** — 8축 점수 + 순전하·μH + 전체 서열. 미승인 시 **실패 진단 + 대안 권고**까지 정직 표기.
+6. **최종 카드** — 7축 점수 + 순전하·μH + 전체 서열. 미승인 시 **실패 진단 + 대안 권고**까지 정직 표기.
 
 ### 실행 화면
 
@@ -70,7 +70,7 @@ streamlit run app.py
 
 ![계획 단계](docs/screenshots/02-plan.png)
 
-**③ 후보 평가 (도구 호출)** — 링커 × 셔틀(Angiopep-2·ApoE·Leptin30…) 조합을 실측 엔진으로 스크리닝해 8축 표로 반환
+**③ 후보 평가 (도구 호출)** — 링커 × 셔틀(Angiopep-2·ApoE·Leptin30…) 조합을 실측 엔진으로 스크리닝해 7축 표로 반환
 
 ![후보 평가표](docs/screenshots/03-eval.png)
 
@@ -82,7 +82,7 @@ streamlit run app.py
 
 ![결과 — 궤적·포디움](docs/screenshots/05-result.png)
 
-**⑥ 포디움 상세** — 각 후보에 **전달 축 분해**(셔틀 내재 × 융합 보존 × 메커니즘)·**선택성/off-target**·8축·개발성이 병기됨. 선택된 후보는 **RMT형(T7)** 셔틀
+**⑥ 포디움 상세** — 각 후보에 **전달 축 분해**(셔틀 내재 × 융합 보존 × 메커니즘)·**선택성/off-target**·7축·개발성이 병기됨. 선택된 후보는 **RMT형(T7)** 셔틀
 
 ![포디움 상세](docs/screenshots/06-podium.png)
 
@@ -96,9 +96,9 @@ streamlit run app.py
 flowchart TB
   U["화물 서열"] --> UI["① UI (app.py)<br/>실시간 스트리밍 · 결과 카드"]
   UI --> ORCH["② 오케스트레이션<br/>Designer–Critic 자율 에이전트"]
-  ORCH --> TOOLS["③ 도구·엔진 — 8축 + 전하 가드레일"]
+  ORCH --> TOOLS["③ 도구·엔진 — 7축 + 전하 가드레일"]
   TOOLS --> E1["deepB3P · BBB"] & E2["ToxinPred3 · 독성"] & E3["ProtParam · 안정성"] & E4["BLOSUM62 · 수용체"]
-  TOOLS --> E5["개발성"] & E6["ESMFold+SASA · 구조"] & E7["선택성 / off-target"] & E8["용해도"]
+  TOOLS --> E5["개발성 (liability·응집·용해도)"] & E6["ESMFold+SASA · 구조"] & E7["선택성 / off-target"]
   E1 --> DV["④ 격리 .venv-deepb3p (CPU)"]
   E2 --> TV["④ 격리 .venv-toxinpred3"]
   E6 --> API["ESMFold 공개 API"]
@@ -117,7 +117,7 @@ flowchart LR
   T --> L
   L -->|finish| C{"CRITIC<br/>적대 검증"}
   C -.->|REVISE 재설계| L
-  C ==>|APPROVE| O(["최종 융합체 · 8축 카드"])
+  C ==>|APPROVE| O(["최종 융합체 · 7축 카드"])
   classDef step fill:#eef2ff,stroke:#6366f1,color:#1e1b4b;
   classDef ok fill:#ecfdf5,stroke:#10b981,color:#064e3b;
   class P,T step
@@ -152,9 +152,9 @@ python benchmark_agent.py   # M4 에이전트 효율 · M5 심사 효과 (LLM �
 | 검증 | 결과 |
 |---|---|
 | **선택성 축** (RMT vs CPP) | AUC **1.0** — 반면 deepB3P 단독 **0.446**(양이온 CPP 고평가 = **보상해킹 실증**) |
-| **용해도 축** (아밀로이드 vs 가용성) | AUC **0.96**, 가중치 섭동에 둔감(Spearman ≥ 0.95) |
+| **개발성 — 응집·용해도 신호** (아밀로이드 vs 가용성) | AUC **0.96**, 가중치 섭동에 둔감(Spearman ≥ 0.95) |
 | **Angiopep-2 vs Angiopep-7** | deepB3P가 85%↓ 변이체를 **더 높게**(0.98 vs 0.87) = BBB 편집 비신뢰 |
-| **개발성 잔기 편집** | liability 평균 **1.5개↓ + 기능 보존 6/6**(무제약은 기능 파괴) |
+| **개발성 잔기 편집** | 제약 편집 **기능 보존 7/7**(liability 평균 0.86개↓) vs 무제약 **기능 파괴 7/7**(더 줄이나 rmt 붕괴) — 핵심은 "기능 보존하며 스크럽" |
 | **다목적(Pareto) 개발성** | liability·응집·불안정성 **동시 최적화** — Pareto 전선(RVG29 17·Angiopep-2 12개)이 시드 지배, 진짜 트레이드오프 |
 | **공진화 vs 분리** | 무승부·구조노출도 가산적(비 0.18–0.19) → 분리 최적화 적합 |
 
@@ -170,12 +170,12 @@ python benchmark_agent.py   # M4 에이전트 효율 · M5 심사 효과 (LLM �
 | BBB 투과 | [deepB3P](https://github.com/GreatChenLab/deepB3P) | 펩타이드 서열 딥러닝 5-fold (로컬 CPU) |
 | 독성 | [ToxinPred3](https://github.com/raghavagps/toxinpred3) | AAC+DPC → Extra-Trees (로컬, GPL-3.0) |
 | 구조 | [ESMFold](https://esmatlas.com/) | 공개 API 폴딩 + Shrake-Rupley SASA |
-| 수용체·선택성·개발성·용해도 | Biopython + 규칙 엔진 | BLOSUM62 정렬 · 서열 규칙 (로컬) |
+| 수용체·선택성·개발성(응집·용해도) | Biopython + 규칙 엔진 | BLOSUM62 정렬 · 서열 규칙 · AGGRESCAN a3v (로컬) |
 | 서열 진화 | co-evolution 러너 | 라이브러리 시드 directed evolution (deepB3P venv, CPU) |
 | 브레인(추론) | **Google Gemini**(기본) | 자율 최적화 에이전트 (Claude는 `with-claude` 브랜치) |
 
-**에이전트 도구**: `evaluate_candidates`(8축 배치) · `design_candidate`(잔기 편집) ·
-`analyze_structure`(ESMFold 노출도) · `evolve_from_library`(서열 진화 → 8축 재평가) ·
+**에이전트 도구**: `evaluate_candidates`(7축 배치) · `design_candidate`(잔기 편집) ·
+`analyze_structure`(ESMFold 노출도) · `evolve_from_library`(서열 진화 → 7축 재평가) ·
 `optimize_developability`(셔틀 개발성 다목적 Pareto 최적화 — 기능 보존) · `finish`(자기 종료).
 
 **자원 경량**: deepB3P·독성·진화는 **CPU 완결**, 구조는 ESMFold **공개 API** → 프런티어 GPU 불필요.
@@ -234,17 +234,16 @@ app.py                      Streamlit UI (얇은 표시·스트리밍 계층)
 core/
   config.py                 상수·경로 자동감지, 셔틀·링커 라이브러리, 연결부위 윈도우
   schemas.py                데이터 구조 (Verdict·PredictionResult·ToxicityResult)
-  optimizer_agent.py        도구 백엔드(_evaluate 8축 · _structure · _coevolve)
+  optimizer_agent.py        도구 백엔드(_evaluate 7축 · _structure · _coevolve)
   optimizer_agent_gemini.py 브레인 루프(PLAN→ACT→finish→CRITIC→REVISE)
   predictors.py             BBB 예측기 (deepB3P local / API / 폴백)
   toxicity.py               독성 예측기 (ToxinPred3 local / placeholder)
   delivery.py               전달 축 분해 (셔틀 내재 × 보존 × 메커니즘 + avidity)
   binding.py                수용체 유사도 (BLOSUM62, RMT/CPP 참조 세트)
   selectivity.py            선택성 / off-target (reward-hacking 회피 축)
-  developability.py         개발성 liability·응집·전하
+  developability.py         개발성 liability·응집(AGGRESCAN a3v)·용해도·전하 (용해도 축 통합)
   developability_opt.py     개발성 liability 스크러빙 + 다목적(Pareto) 최적화 (기능 보존·기존 오라클)
   stability.py              ProtParam 안정성
-  solubility.py             용해도 (AGGRESCAN a3v 응집 척도)
   structure.py              ESMFold 구조 + 셔틀 노출도 (빠른 실패·캐싱)
   coevolution.py            링커·셔틀 서열 directed co-evolution 오케스트레이터
 scripts/deepb3p/            deepB3P venv에서 도는 러너 (설치 시 vendor/deepB3P/ 로 복사)
