@@ -73,3 +73,45 @@ Bayer 계열 분석(119개 약물·108개 후보): BBB 투과를 높이려 **친
 - BIO/Biomedtracker/QLS. *Clinical Development Success Rates.* — [go.bio.org](https://go.bio.org/clinicaldevelopment) · [Amplion 요약(CNS 6.2%)](https://www.amplion.com/?p=833)
 - 신경영양인자 전달 실패 리뷰. *Front. Aging Neurosci.* 2021. — [fnagi.2021.645583](https://www.frontiersin.org/journals/aging-neuroscience/articles/10.3389/fnagi.2021.645583/full) · [GDNF (Michael J. Fox Foundation)](https://www.michaeljfox.org/news/nature-news-crossing-barrier)
 - CNS 소모율·개발기간: Leiden Univ. 학위논문; CNS PK 리뷰(Reichel 2009 등)
+
+---
+
+# BBB 셔틀 기술의 중요성 — "셔틀 유무" 비교
+
+## 실패한 전달들은 셔틀 기술이 **없었다**
+| 약물 | 전달 방식 | 셔틀 기술 | 결과 |
+|---|---|---|---|
+| GDNF (파킨슨) | 직접 뇌 주입(카테터) | ❌ 없음 | 실패 — 퍼타멘 2–9%만 도달 |
+| NGF (AD형) | 뇌실(ICV) 주입 | ❌ 없음 | 실패 — CSF→실질 확산 느림 |
+| BDNF (ALS) | 피하/척수강 | ❌ 없음 | 실패 — BBB 투과 불량·짧은 반감기 |
+
+→ 전부 **수용체 매개 셔틀 없이** 직접/전신 투여 → **전달에서 실패.**
+
+## 셔틀 기술이 들어간 약물 — 승인·후기 임상 도달
+| 약물 | 셔틀(수용체) | 모달리티 | 현황 |
+|---|---|---|---|
+| **Pabinafusp alfa** (IZCARGO, JCR) | 항TfR (J-Brain Cargo, RMT) | 항체-효소 융합 | **일본 승인(2021)** — IV로 BBB 통과한 첫 ERT, CSF 헤파란황산↓ |
+| **Tividenofusp alfa** (Avlayah, DNL310, Denali) | TfR (Enzyme Transport Vehicle, RMT) | Fc/항체-효소 | **FDA 가속승인** — CSF 헤파란황산 **91%↓**, NfL↓ |
+| **Trontinemab** (Roche) | TfR (Brainshuttle, 2+1) | 항체(항Aβ) | **Phase 3** (알츠하이머) |
+| **ANG1005** (Angiochem) | LRP1 (Angiopep-2) | **펩타이드 접합체** | Phase 2/3 (뇌전이) |
+
+→ 셔틀 기술은 **실제로 승인·후기 임상에 도달**하며, 특히 **CNS 바이오마커 개선**(비셔틀 실패와 정반대)을 보인다.
+
+## ⚠️ 정직한 한계 — "통과율 %" 통계 비교는 하지 않는다
+- 셔틀 약물은 **수가 적고(한 줌) 대부분 2015년 이후** → **"셔틀 X% vs 비셔틀 Y%" 같은 통계적 통과율
+  비교는 표본 부족으로 성립하지 않는다.** 위 표는 **정성적 패턴**(셔틀 없으면 전달 실패, 있으면 도달)이다.
+- 승인 다수가 **희귀질환 효소치료(MPS II)·바이오마커(대리지표) 기반** — 알츠하이머 효능 입증과는 다르다.
+- 모달리티: 승인 셔틀 약은 **항체-TfR**이 주류이며, **펩타이드 셔틀의 임상 선례는 ANG1005**(본 프로젝트
+  모달리티와 일치).
+
+## 본 에이전트 개발에의 함의
+1. **BBB는 검증된 #1 병목**(소분자 >98%·대분자 ~100% 미통과, AD 임상 99.6% 실패)
+2. **실패는 "셔틀 부재"가, 성공은 "셔틀 기술"이 갈랐다** — GDNF·NGF·BDNF(셔틀 X) 실패 ↔ pabinafusp·
+   tividenofusp(셔틀 O) 승인
+3. → **BBB 셔틀 융합체를 설계하는 AI 에이전트**는 *검증된 병목 × 검증된 해결 기술*을 정면으로 다룬다 =
+   문제 정의와 해결 방향 모두 **문헌으로 뒷받침되는** 강한 정당성
+4. 단 본 시스템은 **펩타이드 셔틀** 중심이라 **ANG1005**가 가장 가까운 선례다(항체-TfR 승인들은 모달리티 상이).
+
+## 참고문헌 추가
+- Pabinafusp alfa (IZCARGO, 일본 승인 2021): [JCR Pharma](https://jcrpharm.co.jp/en/news/002410.html) · [New Drug Approvals](https://newdrugapprovals.org/2021/04/05/pabinafusp-alfa/)
+- Tividenofusp alfa (DNL310, FDA): [Denali IR](https://investors.denalitherapeutics.com/node/11416/pdf) · [FDA 승인 보도](https://www.hmpgloballearningnetwork.com/site/neuro/fda-alerts/fda-approves-tividenofusp-alfa-eknm-neurologic-manifestations-hunter-syndrome)
