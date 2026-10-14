@@ -6,6 +6,11 @@
 에이전트가 적대적으로 검증**해 BBB 투과·독성·off-target·안정성·개발성·용해도를 저울질한 최종
 후보로 수렴한다.
 
+> **핵심 원리 — 규율 있는 범위 설정** — deepB3P가 양이온 CPP를 과대평가하는 편향(보상 해킹) 때문에,
+> **BBB 효능은 검증 라이브러리에서 "선택"**하고 **잔기 편집·최적화는 신뢰 가능한 오라클이 있는 축
+> (선택성·개발성)에만** 적용한다. "모든 지표 최적화"가 아니라 **"무엇을 최적화하고 무엇을 하지 않을지
+> 아는 것"**이 차별점. (검증: 선택성 AUC 1.0 vs deepB3P 0.446 → [docs/experiments.md](docs/experiments.md))
+
 > **동기** — 항체(약 150 kDa)는 BBB에 막혀 투여량의 **0.1–0.2%만 뇌에 도달**한다. 셔틀이 수용체매개
 > 수송(RMT)을 편승(hitchhike)해 화물을 넘긴다. 산업 선례: Roche *Brain Shuttle* · Denali *Transport
 > Vehicle* · **임상 3상 진입한 로슈 *Trontinemab***(TfR·monovalent).
