@@ -4,15 +4,15 @@
 > 기반이며 실측(wet-lab) 아님. 논문 "성능 평가" 섹션의 근거.
 
 ## 1. 선택성 축 — RMT vs CPP (핵심 주장)
-**방법**: RMT 리간드 8종 vs CPP 7종(홀드아웃 R9·Transportan·MAP·pVEC 포함)을 `assess_selectivity`로 채점.
+**방법**: RMT 리간드 **7종(라이브러리 RMT 전체)** vs CPP 7종(라이브러리 3 + 홀드아웃 R9·Transportan·MAP·pVEC)을 `assess_selectivity`(규칙)로, deepB3P는 실추론으로 채점. **재현**: `python scripts/bench_selectivity.py`(시드 고정·결정론).
 
 | 축 | RMT 평균 | CPP 평균 | AUC(RMT>CPP) |
 |---|---|---|---|
-| **선택성** | 0.851 | 0.147 | **1.0** |
-| **deepB3P BBB** | 0.793 | 0.707 | **0.446** |
+| **선택성(우리 메커니즘)** | 0.856 | 0.147 | **1.0** |
+| **deepB3P BBB(단독)** | 0.763 | 0.707 | **0.398** |
 
-- **선택성 축 AUC 1.0** — 라이브러리 밖 CPP도 전부 낮게 판정 → **비순환적 판별력**.
-- **deepB3P 단독 AUC 0.446** — RMT/CPP 구분 못 함, 양이온성 CPP를 ~1.0으로 고평가 → **보상 해킹 실증**. 유효점수(BBB−0.25·off_target)의 필요성·효과를 정량 입증.
+- **선택성 축 AUC 1.0** — 라이브러리 밖 홀드아웃 CPP도 전부 낮게 판정 → **비순환적 판별력**.
+- **deepB3P 단독 AUC 0.398(<0.5)** — RMT/CPP 구분 실패를 넘어 **CPP를 RMT보다 더 높게 랭킹**(TAT·R9·SynB1에 ~1.0, 정당한 RMT ApoE·CDX는 0.26·0.44) → **보상 해킹 실증**. 유효점수(BBB−0.25·off_target)의 필요성·효과를 정량 입증.
 - **한계**: 라이브러리와 비유사한 신규 RMT(THR 펩타이드)는 rmt_sim=0 → CPP로 오분류(인식 못 함).
 
 ## 2. Angiopep-2 vs Angiopep-7 — 보상 해킹 실사례
