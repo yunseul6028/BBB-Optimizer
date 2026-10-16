@@ -88,6 +88,20 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
         "- finish: 고정 스텝을 다 쓸 필요 없다. 목적을 충분히 만족했다고 판단하면 언제든 finish로 최종 "
         "후보를 제출하라. 제출하면 **독립 심사(비평) 에이전트가 적대적으로 검증**한다 — 심사가 REVISE(개선 "
         "요구)를 내면 그 지적을 반영해 개선하고 다시 finish하라. APPROVE(승인)가 나오면 확정된다.\n\n"
+        "[설계 방법 — 가설 주도 루프 (중요)] design_candidate로 편집할 때마다 **무작위 변이가 아니라 "
+        "근거 있는 가설**로 움직여라:\n"
+        "  ① 관찰: 직전 평가에서 무엇이 문제인가(어느 축이 약한가 — off_target·BBB·preserv·안정성 등).\n"
+        "  ② 가설(hypothesis): 그 문제를 **어떤 편집으로 왜** 고칠 수 있는가 (예: 'R10의 양전하가 "
+        "off_target을 올리니 R10→Q로 바꾸면 선택성↑, rmt_sim은 보존').\n"
+        "  ③ 예측(prediction): 그 편집이 **어느 축을 어떻게** 바꿀지 (방향·대략 수치).\n"
+        "  ④ 오라클 채점(자동) → ⑤ **반성**: 예측이 맞았는지 **실제 점수와 대조**하라. 틀렸으면 어느 "
+        "축에서 왜 빗나갔는지 말하고 **가설을 수정해 다음 설계**로 이어가라.\n"
+        "**오라클이 네 가설을 반증하면 솔직히 인정하고 방향을 바꿔라 — 점수를 우기거나 지어내지 마라.** "
+        "너의 가치는 '좋은 가설을 세우고 신뢰 오라클로 검증·교정하는 추론'에 있다(무작위 탐색이 아님).\n"
+        "**[필수] 유망한 후보를 찾으면 finish 전에 반드시 `design_candidate`로 가설 주도 편집을 "
+        "최소 1회 시도해 best를 개선하라** — 라이브러리 조합만으로 끝내지 마라. `evolve_from_library`(EA "
+        "자동 진화)는 네가 직접 설계(design_candidate)해도 부족할 때의 **보조 수단**이지, 네 손으로 "
+        "설계하는 단계를 건너뛰는 지름길이 아니다(먼저 네가 가설로 설계하라).\n\n"
         f"참고 라이브러리 — 링커: {lib_l}\n  셔틀: {lib_s}\n"
         f"주의: construct가 {MODEL_MAX_LEN}aa 초과면 BBB는 연결부위(링커+셔틀)로 계산된다. deepB3P는 "
         f"짧은 펩타이드 학습이라 절대값보다 상대 비교가 신뢰됨. 최대 {max_rounds}행동. 한국어로 간결히."
@@ -117,13 +131,18 @@ class GeminiOptimizationAgent(OptimizationAgent):
             types.FunctionDeclaration(
                 name="design_candidate",
                 description=("라이브러리에 없는, **직접 편집·설계한** 링커·셔틀 서열 하나를 채점한다. "
-                             "잔기 변이·트리밍·연장·하이브리드 등 자유 설계. evaluate와 동일한 4지표 반환."),
+                             "편집 전 **가설(무엇을 왜 바꾸나)·예측(어느 축이 어떻게 변할까)**을 반드시 제시하라 "
+                             "— 무작위 변이가 아니라 근거 있는 설계. 잔기 변이·트리밍·연장·하이브리드 등 "
+                             "자유 설계. evaluate와 동일 지표 반환(채점 뒤 예측과 대조해 반성할 것)."),
                 parameters=S(type=T.OBJECT, properties={
                     "label": S(type=T.STRING),
                     "linker": S(type=T.STRING),
                     "shuttle": S(type=T.STRING),
-                    "edit_note": S(type=T.STRING, description="어떻게·왜 편집했는지"),
-                }, required=["label", "linker", "shuttle"]),
+                    "hypothesis": S(type=T.STRING, description="무엇을 왜 편집하는가 — 직전 평가의 어느 "
+                                    "문제(축)를 어떤 편집으로 고치려는지"),
+                    "prediction": S(type=T.STRING, description="그 편집이 어느 축을 어떻게 바꿀지 예측(방향·대략치)"),
+                    "edit_note": S(type=T.STRING, description="구체적 편집 내용(어느 잔기를 어떻게)"),
+                }, required=["label", "linker", "shuttle", "hypothesis", "prediction"]),
             ),
             types.FunctionDeclaration(
                 name="analyze_structure",
@@ -140,8 +159,9 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 name="evolve_from_library",
                 description=("검증 라이브러리 셔틀·링커를 **서열 directed evolution**(라이브러리 시드 "
                              "point-mutation/crossover)으로 진화시켜 라이브러리 밖 후보를 제안하고 8축으로 "
-                             "재평가한다. 셔틀은 de-novo 생성이 아니라 검증 리간드에서 파생. 라이브러리 "
-                             "조합·잔기 편집으로 부족할 때만. 느림(수십 초~수 분)."),
+                             "재평가한다. 셔틀은 de-novo 생성이 아니라 검증 리간드에서 파생. **먼저 "
+                             "design_candidate로 가설 주도 직접 설계를 시도한 뒤, 그것으로도 부족할 때만** "
+                             "보조로 사용. 느림(수십 초~수 분)."),
                 parameters=S(type=T.OBJECT, properties={
                     "rounds": S(type=T.INTEGER, description="2~3 진화 라운드"),
                 }, required=["rounds"]),
@@ -179,9 +199,18 @@ class GeminiOptimizationAgent(OptimizationAgent):
             text, rows = self._evaluate(cargo, {"constructs": [{
                 "label": args.get("label", "설계"), "linker": args.get("linker", ""),
                 "shuttle": args.get("shuttle", "")}]})
+            hyp = args.get("hypothesis", "").strip()
+            pred = args.get("prediction", "").strip()
             note = args.get("edit_note", "").strip()
-            return text, AgentEvent("evaluation",
-                                    text="🎨 정밀 설계" + (f" — {note}" if note else ""),
+            detail = " · ".join(x for x in (
+                f"가설: {hyp}" if hyp else "",
+                f"예측: {pred}" if pred else "",
+                f"편집: {note}" if note else "") if x)
+            reflect = ("\n\n[반성 요구] 위 실제 점수를 네 **예측과 대조**하라: 예측이 맞았나? "
+                       "틀렸다면 어느 축에서 왜 빗나갔나? 그 교훈으로 다음 가설을 세워 설계를 "
+                       "이어가거나, 충분히 수렴했으면 finish하라. (점수를 우기지 말고 오라클 결과를 따르라.)")
+            return text + reflect, AgentEvent("evaluation",
+                                    text="🎨 정밀 설계" + (f" — {detail}" if detail else ""),
                                     data={"rows": rows})
         if name == "analyze_structure":
             text, sdata = self._structure(cargo, args)
