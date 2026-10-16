@@ -15,9 +15,6 @@
 > 수송(RMT)을 편승(hitchhike)해 화물을 넘긴다. 산업 선례: Roche *Brain Shuttle* · Denali *Transport
 > Vehicle* · **임상 3상 진입한 로슈 *Trontinemab***(TfR·monovalent).
 
-> **공모전 분야 매핑** — 핵심 **분야2**(도구 활용 분자 최적화 루프) + **분야4**(융합·멀티 에이전트)
-> + **분야1**(가설 생성·검증).
-
 ---
 
 ## ✨ 핵심 기능
