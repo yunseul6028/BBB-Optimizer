@@ -16,9 +16,9 @@
 - **한계**: 라이브러리와 비유사한 신규 RMT(THR 펩타이드)는 rmt_sim=0 → CPP로 오분류(인식 못 함).
 
 ## 2. Angiopep-2 vs Angiopep-7 — 보상 해킹 실사례
-Angiopep-7 = Angiopep-2의 K10R/K15R 변이체(문헌상 뇌 축적 **85%↓**).
+Angiopep-7 = Angiopep-2의 K10R/K15R 변이체 — 문헌상 **Angiopep-2가 뇌 흡수 ~9.5배 높고 Angiopep-7은 모세혈관에 갇혀 뇌 실질에 거의 못 넘어간다**(Demeule et al. 2008; in situ perfusion에서 Angiopep-7은 혈관 내 잔류). 즉 Angiopep-7은 **뚜렷하게 열등한 변이체**다.
 
-| | Angiopep-2 | Angiopep-7(85%↓) |
+| | Angiopep-2 | Angiopep-7(뇌전달 ~9.5× 낮음) |
 |---|---|---|
 | deepB3P | 0.867 | **0.978** (역전!) |
 | rmt_sim(BLOSUM) | 1.0 | 0.943 |
