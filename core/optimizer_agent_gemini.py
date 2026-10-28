@@ -38,8 +38,7 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
     lib_l = ", ".join(f"{n}({v['seq'] or '링커없음/직접융합'})" for n, v in LINKER_LIBRARY.items())
     lib_s = ", ".join(f"{n}({v['seq']})" for n, v in SHUTTLES.items())
     tools = ("evaluate_candidates(BBB·독성·안정성·수용체 배치), design_candidate(잔기 수준 편집 "
-             "서열 채점), analyze_structure(구조 노출도), evolve_from_library(검증 셔틀·링커 서열 "
-             "directed evolution — 라이브러리 밖 탐색), optimize_developability(셔틀 개발성 다목적 "
+             "서열 채점), analyze_structure(구조 노출도), optimize_developability(셔틀 개발성 다목적 "
              "Pareto 최적화 — 기능 보존 잔기 편집)")
     tools += ", finish(수렴 시 최종 후보 제출·종료)"
     return (
@@ -99,9 +98,7 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
         "**오라클이 네 가설을 반증하면 솔직히 인정하고 방향을 바꿔라 — 점수를 우기거나 지어내지 마라.** "
         "너의 가치는 '좋은 가설을 세우고 신뢰 오라클로 검증·교정하는 추론'에 있다(무작위 탐색이 아님).\n"
         "**[필수] 유망한 후보를 찾으면 finish 전에 반드시 `design_candidate`로 가설 주도 편집을 "
-        "최소 1회 시도해 best를 개선하라** — 라이브러리 조합만으로 끝내지 마라. `evolve_from_library`(EA "
-        "자동 진화)는 네가 직접 설계(design_candidate)해도 부족할 때의 **보조 수단**이지, 네 손으로 "
-        "설계하는 단계를 건너뛰는 지름길이 아니다(먼저 네가 가설로 설계하라).\n\n"
+        "최소 1회 시도해 best를 개선하라** — 라이브러리 조합만으로 끝내지 마라(네 손으로 가설을 세워 설계하라).\n\n"
         f"참고 라이브러리 — 링커: {lib_l}\n  셔틀: {lib_s}\n"
         f"주의: construct가 {MODEL_MAX_LEN}aa 초과면 BBB는 연결부위(링커+셔틀)로 계산된다. deepB3P는 "
         f"짧은 펩타이드 학습이라 절대값보다 상대 비교가 신뢰됨. 최대 {max_rounds}행동. 한국어로 간결히."
@@ -154,18 +151,6 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 }, required=["linker", "shuttle"]),
             ),
         ]
-        if self.settings.use_coevo_local:
-            decls.append(types.FunctionDeclaration(
-                name="evolve_from_library",
-                description=("검증 라이브러리 셔틀·링커를 **서열 directed evolution**(라이브러리 시드 "
-                             "point-mutation/crossover)으로 진화시켜 라이브러리 밖 후보를 제안하고 8축으로 "
-                             "재평가한다. 셔틀은 de-novo 생성이 아니라 검증 리간드에서 파생. **먼저 "
-                             "design_candidate로 가설 주도 직접 설계를 시도한 뒤, 그것으로도 부족할 때만** "
-                             "보조로 사용. 느림(수십 초~수 분)."),
-                parameters=S(type=T.OBJECT, properties={
-                    "rounds": S(type=T.INTEGER, description="2~3 진화 라운드"),
-                }, required=["rounds"]),
-            ))
         decls.append(types.FunctionDeclaration(
             name="optimize_developability",
             description=("한 셔틀 서열의 **개발성**(liability·응집·불안정성)을 신뢰 가능한 규칙/척도 "
@@ -215,11 +200,6 @@ class GeminiOptimizationAgent(OptimizationAgent):
         if name == "analyze_structure":
             text, sdata = self._structure(cargo, args)
             return text, AgentEvent("structure", text=text, data=sdata)
-        if name == "evolve_from_library":
-            text, rows = self._coevolve(cargo, args)
-            return text, AgentEvent("evaluation",
-                                    text="🧬 라이브러리 시드 directed evolution (셔틀·링커 공진화)",
-                                    data={"rows": rows})
         if name == "optimize_developability":
             return self._optimize_developability(args)
         return f"unknown tool: {name}", None
@@ -335,7 +315,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
     def _recommend_on_failure(self, client, model, types, cargo, choice, critique_text):
         """최종 미승인(전 후보 반려)일 때, 실패 진단 + 시스템 내 구체적 대안을 권고한다.
 
-        화물(치료 목표)은 고정이므로 화물 교체가 아니라 셔틀·링커·생성(FBGAN)·모달리티 관점의
+        화물(치료 목표)은 고정이므로 화물 교체가 아니라 셔틀·링커·잔기 편집·개발성 최적화 관점의
         '다음 수'를 제시한다. 실패 경로에서만 1회 호출되어 비용 부담이 작다. 반환: 권고안 텍스트.
         """
         dev_list = choice.get("dev_liabilities") or []

@@ -46,11 +46,6 @@ DEEPB3P_PYTHON = BASE_DIR / "vendor" / ".venv-deepb3p" / "bin" / "python"
 DEEPB3P_RUNNER = DEEPB3P_REPO / "_run_predict.py"
 DEEPB3P_CKPT = DEEPB3P_REPO / "model" / "checkpoint" / "512d_16ff_32k_1nl_2h_0.0001lr_0.1p"
 
-# 로컬 링커·셔틀 co-evolution (서열 directed evolution) 러너
-# 셔틀은 검증 라이브러리 리간드에서 시드해 서열로 진화 — GAN 생성기 가중치 불필요.
-# (BBB·독성 스코어러는 _run_fbgan.py 의 BBBScorer/score_tox 를 재사용)
-COEVO_RUNNER = DEEPB3P_REPO / "_run_coevo.py"
-
 # 로컬 ToxinPred3 (펩타이드 독성 예측) 자원 경로
 TOXINPRED3_REPO = BASE_DIR / "vendor" / "toxinpred3"
 TOXINPRED3_PYTHON = BASE_DIR / "vendor" / ".venv-toxinpred3" / "bin" / "python"
@@ -150,16 +145,6 @@ class Settings:
             TOXINPRED3_PYTHON.exists()
             and TOXINPRED3_SCRIPT.exists()
             and TOXINPRED3_MODEL_PKL.exists()
-        )
-
-    @property
-    def use_coevo_local(self) -> bool:
-        """로컬 링커·셔틀 co-evolution(서열 directed evolution) 사용 가능 여부.
-        deepB3P + ToxinPred3 + 러너만 있으면 됨(셔틀은 서열 진화라 GAN 가중치 불요)."""
-        return (
-            self.use_deepb3p_local
-            and self.use_toxinpred3_local
-            and COEVO_RUNNER.exists()
         )
 
     @property

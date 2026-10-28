@@ -1,8 +1,8 @@
 """
 BBB-Optimize AI Agent — Streamlit UI (thin layer)
 =================================================
-화물(cargo) 서열을 받아, **자율 설계 에이전트**가 링커·셔틀을 조립·잔기 편집·서열 진화 도구로
-오케스트레이션하고 deepB3P(BBB)·ToxinPred3(독성)·선택성 등 8축으로 평가해 최종 융합체를 설계한다.
+화물(cargo) 서열을 받아, **자율 설계 에이전트**가 링커·셔틀을 조립·잔기 편집(가설 주도)·개발성 최적화 도구로
+오케스트레이션하고 deepB3P(BBB)·ToxinPred3(독성)·선택성 등 7축으로 평가해 최종 융합체를 설계한다.
 UI는 얇은 표시·스트리밍 계층이며 계산은 core/*.py.
 
 실행:
@@ -108,7 +108,7 @@ with _hero:
     else:
         st.caption("데모 모드 — API 키 없이 예시 결과로 화면을 미리봅니다.")
     agent_run = st.button("자율 설계 에이전트 실행", type="primary", width='stretch')
-    st.caption("에이전트가 BBB·독성·구조·수용체·잔기 편집·서열 진화 도구를 스스로 오케스트레이션해 "
+    st.caption("에이전트가 BBB·독성·구조·수용체·잔기 편집·개발성 최적화 도구를 스스로 오케스트레이션해 "
                "최종 융합체를 설계합니다.")
     with st.expander(f"라이브러리 구성 (링커 {len(LINKER_LIBRARY)} · 셔틀 {len(SHUTTLES)})"):
         st.markdown("**링커**")
@@ -244,8 +244,8 @@ def _demo_agent_events(cargo):
         "BBB·독성·선택성 근거가 일관되고 임계값을 만족합니다. 최종 선택을 승인합니다."),
         data={"approve": True})
     yield _Ev("reflection", text=(
-        "추가로 검증 셔틀의 잔기 편집(design_candidate)이나 링커·셔틀 co-evolution으로 "
-        "라이브러리 시드에서 더 나은 후보를 탐색할 수 있습니다."))
+        "추가로 검증 셔틀의 잔기 편집(design_candidate)·개발성 다목적 최적화(optimize_developability)로 "
+        "기능을 보존하며 더 나은 후보를 다듬을 수 있습니다."))
 
 
 def _emit_agent_event(ev):
@@ -445,7 +445,7 @@ if agent_run:
     st.divider()
     st.subheader("자율 설계 에이전트")
     st.caption(
-        f"화물 `{cargo}` · **{brain}**가 BBB·독성·구조·잔기 편집·서열 진화 도구를 자율 오케스트레이션해 "
+        f"화물 `{cargo}` · **{brain}**가 BBB·독성·구조·잔기 편집·개발성 최적화 도구를 자율 오케스트레이션해 "
         f"최종 융합체를 탐색 (최대 {agent_rounds}스텝)"
     )
     events = []

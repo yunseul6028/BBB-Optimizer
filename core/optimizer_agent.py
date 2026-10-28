@@ -7,8 +7,8 @@
   - evaluate  : deepB3P(BBB) + ToxinPred3(독성) + 안정성 + 수용체유사 + 개발성(용해도·응집 포함) + 선택성 배치 채점
   - structure : ESMFold 폴딩 → 셔틀 구조 노출도 (느림 ~10초, 최종 후보에만)
 
-셔틀은 **de-novo 생성하지 않는다**(검증 리간드만). 라이브러리 밖 탐색은 잔기 편집(design_candidate)
-또는 링커·셔틀 co-evolution(라이브러리 시드 진화)로 수행한다.
+셔틀은 **de-novo 생성하지 않는다**(검증 리간드만). 라이브러리 밖 탐색은 잔기 편집(design_candidate)으로
+수행하며, 개발성 다목적 최적화는 optimize_developability가 담당한다.
 """
 
 from __future__ import annotations
@@ -117,27 +117,3 @@ class OptimizationAgent:
                       "shuttle_plddt": sr.shuttle_plddt, "mean_plddt": sr.mean_plddt,
                       "verdict": sr.verdict, "exposed": sr.exposed}
 
-    def _coevolve(self, cargo, tool_input):
-        """검증 라이브러리 셔틀·링커를 **서열 directed evolution**(라이브러리 시드 point-mutation/
-        crossover)으로 진화시켜 라이브러리 밖 후보를 제안하고, 그 결과를 **8축 평가 파이프라인으로
-        재채점**한다(선택성·delivery 분해·eff_bbb 랭킹에 그대로 합류). 셔틀은 de-novo 생성이 아니라
-        검증 리간드에서 파생된 변이체다."""
-        if not self.settings.use_coevo_local:
-            return "evolve unavailable (no local co-evolution engine).", []
-        from .coevolution import CoevolutionOptimizer
-        rounds = max(2, min(3, int(tool_input.get("rounds", 2))))
-        try:
-            # 라이브 세션용 경량 파라미터(짧은 탐색 버스트) + 짧은 타임아웃
-            res = CoevolutionOptimizer(timeout=300.0).run(
-                cargo, rounds=rounds, pop=16, elite=4,
-                tox_threshold=self.settings.toxicity_threshold)
-        except Exception as exc:  # noqa: BLE001
-            return f"evolve failed: {type(exc).__name__}: {exc}", []
-        pairs = res.best[:6]
-        if not pairs:
-            return "co-evolution produced no non-toxic candidates.", []
-        # 진화된 (링커, 셔틀) 쌍을 8축 평가로 재채점 → 후보 풀에 합류
-        constructs = [{"label": f"진화#{i + 1}", "linker": p.get("linker", ""),
-                       "shuttle": p.get("shuttle", "")} for i, p in enumerate(pairs)]
-        text, rows = self._evaluate(cargo, {"constructs": constructs})
-        return ("directed evolution (라이브러리 시드) → 8축 재평가:\n" + text), rows
