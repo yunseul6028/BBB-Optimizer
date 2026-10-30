@@ -24,8 +24,7 @@
   스스로 결정**한다(effect: off-target이면 잔기 편집, 파묻히면 링커 교체, 개발성 약하면 개발성 최적화).
 - **🧠 가설 주도 설계 [주인공]** — `design_candidate`로 잔기를 편집할 때 **무작위 변이가 아니라
   관찰→가설→예측→오라클 검증→반성** 루프로 설계한다. 예측이 빗나가면 에이전트가 솔직히 인정하고
-  재가설 → **LLM의 설계 직관을 신뢰 오라클이 실시간 검증·교정**한다(점수 우기기 불가). `finish` 전
-  최소 1회 필수, EA 자동진화는 직접 설계로 부족할 때의 보조.
+  재가설 → **LLM의 설계 직관을 신뢰 오라클이 실시간 검증·교정**한다(점수 우기기 불가). `finish` 전 최소 1회 필수.
 - **🎯 지표 게이밍(reward-hacking) 회피 [신뢰 가드레일]** — deepB3P가 양이온성 CPP를 고평가하는 편향에
   낚인 **"BBB만 높은 off-target 후보"**를 **선택성 축**이 감점(`eff = BBB − λ·off_target`)하고 **독립
   심사**가 적대적으로 반박 → 추론 에이전트가 **양이온 드리프트로 새지 않게** 막아 수용체 선택적 RMT 셔틀을 선호.
@@ -112,7 +111,7 @@ flowchart TB
 ```mermaid
 flowchart LR
   P(["PLAN"]) --> L{"ACT 루프"}
-  L -->|도구 호출| T["평가·잔기편집·구조·진화<br/>best 갱신 = BBB − λ·off_target"]
+  L -->|도구 호출| T["평가·잔기편집·구조·개발성<br/>best 갱신 = BBB − λ·off_target"]
   T --> L
   L -->|finish| C{"CRITIC<br/>적대 검증"}
   C -.->|REVISE 재설계| L
@@ -177,7 +176,7 @@ python benchmark_agent.py   # M4 에이전트 효율 · M5 심사 효과 (LLM �
 **에이전트 도구**: `evaluate_candidates`(7축 배치) · `design_candidate`(가설 주도 잔기 편집 — 가설·예측·반성) ·
 `analyze_structure`(ESMFold 노출도) · `optimize_developability`(셔틀 개발성 다목적 Pareto 최적화 — 기능 보존) · `finish`(자기 종료).
 
-**자원 경량**: deepB3P·독성·진화는 **CPU 완결**, 구조는 ESMFold **공개 API** → 프런티어 GPU 불필요.
+**자원 경량**: deepB3P·독성은 **CPU 완결**, 구조는 ESMFold **공개 API** → 프런티어 GPU 불필요.
 
 ---
 
