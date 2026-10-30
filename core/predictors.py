@@ -5,9 +5,10 @@
   - DeepB3PLocalPredictor  : 로컬 deepB3P 딥러닝 추론 (실측 BBB) ← 현재 기본
   - DeepB3ApiPredictor     : 원격 예측 서버 (자체 호스팅 시)
 
-⚠️ 이 레이어는 **BBB 투과(효능)만** 예측한다. 독성(부작용)은 아직 연결된 도구가
-   없어 에이전트가 placeholder(LINKER_TOX_TABLE)로 채운다. [[toxicity-engine-todo]]
-   따라서 여기서 반환하는 toxicity_risk는 중립 기본값이며 에이전트가 덮어쓴다.
+⚠️ 이 레이어는 **BBB 투과(효능)만** 예측한다(관심사 분리). 독성은 **별도 예측기 ToxinPred3**
+   (`core/toxicity.py`)가 담당하며, 평가 파이프라인(`optimizer_agent._evaluate`)이 ToxinPred3를
+   따로 호출해 실제 독성을 쓴다. 따라서 여기 `PredictionResult.toxicity_risk`는 **쓰이지 않는 중립
+   placeholder**(공유 dataclass의 미사용 필드)일 뿐, 실제 독성 판단이 아니다.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from pathlib import Path
 from .config import DEEPB3P_PYTHON, DEEPB3P_REPO, DEEPB3P_RUNNER, Settings, junction_window
 from .schemas import PredictionResult
 
-_DEFAULT_TOX = 0.20  # 에이전트가 링커 잔기 기준으로 덮어씀
+_DEFAULT_TOX = 0.20  # 미사용 placeholder — 실제 독성은 ToxinPred3(평가 파이프라인)가 계산
 
 
 class BBBPredictor(ABC):
