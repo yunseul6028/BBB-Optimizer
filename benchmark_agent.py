@@ -18,8 +18,7 @@ from core.config import TOXICITY_THRESHOLD, get_settings
 from core.predictors import get_predictor
 from core.toxicity import get_toxicity_predictor
 from core.optimizer_agent_gemini import get_gemini_agent
-from core.optimizer_agent import is_comparison_only
-from benchmark import _library_scores
+from benchmark import _library_scores, is_cpp_row
 
 
 # max_rounds=6 은 의도적 선택 — "타이트한 예산에서도 에이전트가 효율적인가"를 보는 실측이다.
@@ -37,7 +36,7 @@ def m4_agent_efficiency(cargo="GSNKGAIIGLM", max_rounds=6):
     # oracle 분모는 **후보군(RMT)** 기준이어야 한다. 비독성 전수의 최고는 CPP(SynB1)인데
     # CPP는 비교군이라 에이전트가 고를 수 없다 → 도달 불가능한 기준으로 나누면 항상 미달로 보인다.
     # (같은 오류를 애블레이션 집계에서도 고쳤다 — docs/experiments.md §11.)
-    cand = [r for r in valid if not is_comparison_only(r)]
+    cand = [r for r in valid if not is_cpp_row(r)]
     oracle = max(cand, key=lambda r: r["bbb"])["bbb"] if cand else 0.0
     oracle_all = max(valid, key=lambda r: r["bbb"])["bbb"] if valid else 0.0
 

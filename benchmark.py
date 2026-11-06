@@ -138,6 +138,17 @@ def _library_scores(cargo, predictor, tox_pred, thr):
     return rows
 
 
+def is_cpp_row(r) -> bool:
+    """`_library_scores` 행이 **비교군(CPP)**인가.
+
+    ⚠️ `core.optimizer_agent.is_comparison_only` 를 여기에 쓰면 안 된다 — 그쪽은
+    `mechanism` 키를 읽는 **다른 행 모양**(에이전트 평가 행)용이다. 여기 행은 셔틀을
+    **이름**으로만 들고 있어 `mechanism` 이 없으므로 항상 False 가 되어 **필터가 통째로
+    무효가 된다**(실측: M4 의 후보군 oracle 이 CPP 포함 전수와 같은 0.960 으로 찍혔다).
+    """
+    return "CPP" in SHUTTLES[r["shuttle"]]["note"]
+
+
 def m2_search(cargo, predictor, tox_pred, thr):
     rows = _library_scores(cargo, predictor, tox_pred, thr)
     valid = [r for r in rows if not r["toxic"]]
@@ -152,7 +163,7 @@ def m2_search(cargo, predictor, tox_pred, thr):
           f"BBB={opt['bbb']:.3f}  독성={opt['tox']:.3f}")
     # CPP는 **비특이 흡수 비교군**이라 최종 선택 대상이 아니다(core.optimizer_agent.is_comparison_only).
     # 따라서 '실제 달성 목표'는 후보군(RMT) 기준 최적이다 — 둘 다 보고해야 정직하다.
-    cand = [r for r in valid if "CPP" not in SHUTTLES[r["shuttle"]]["note"]]
+    cand = [r for r in valid if not is_cpp_row(r)]
     copt = max(cand, key=lambda r: r["bbb"]) if cand else None
     if copt is not None:
         print(f"  🎯 후보군 최적(RMT만, 실제 목표): {copt['linker']}+{copt['shuttle']}  "
@@ -160,15 +171,22 @@ def m2_search(cargo, predictor, tox_pred, thr):
         print(f"     (비교군 CPP {len(valid) - len(cand)}개 제외 → 후보군 {len(cand)}개)")
 
     # 무작위 탐색 효율: K개 평가 시 최적의 몇 %에 도달 (여러 시드 평균)
-    print("  무작위 탐색 효율(최적 대비 도달률, 시드 20개 평균):")
+    #
+    # ⚠️ 기저선은 **에이전트와 같은 운동장**에서 재야 한다. 에이전트는 CPP를 최종
+    # 선택할 수 없으므로(비교군) 무작위도 **후보군(RMT)에서만 뽑고 후보군 최적을
+    # 분모로** 쓴다. 과거엔 CPP 포함 전수(0.960)를 분모로 써서 M4 효율과 분모가
+    # 어긋나 있었다 — 같은 수치를 나란히 놓으면 안 되는 비교였다.
+    pool = [r for r in rows if not is_cpp_row(r)]
+    denom = copt["bbb"] if copt is not None else opt["bbb"]
+    print(f"  무작위 탐색 효율(후보군 최적 {denom:.3f} 대비 도달률, 시드 20개 평균):")
     for k in (3, 6, 12, 24):
         reach = []
         for seed in range(20):
             rng = random.Random(seed)
-            sample = rng.sample(rows, min(k, len(rows)))
+            sample = rng.sample(pool, min(k, len(pool)))
             v = [r["bbb"] for r in sample if not r["toxic"]]
-            reach.append((max(v) / opt["bbb"]) if v else 0.0)
-        print(f"    {k:2d}개 평가 → 최적의 {100*sum(reach)/len(reach):5.1f}%")
+            reach.append((max(v) / denom) if v else 0.0)
+        print(f"    {k:2d}개 평가 → 후보군 최적의 {100*sum(reach)/len(reach):5.1f}%")
     print("  → 에이전트(M4)는 이보다 적은 평가로 최적 근접/초과해야 가치가 증명됨.")
 
 
