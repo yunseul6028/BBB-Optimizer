@@ -29,8 +29,8 @@ MAX_CANDIDATES_PER_STEP = 24
 # ── 도구 역할 분리: evaluate는 '선택', design은 '생성' ─────────────────────
 # `evaluate_candidates`는 원래 **라이브러리 조합 채점(선택)** 도구인데, 임의 서열을 그대로
 # 받아주고 있었다. 그래서 에이전트가 **평가 도구를 설계 통로로 전용**했고, 애블레이션에서
-# design_candidate를 차단한 팔조차 라이브러리 밖 서열(`G+HAIYPRH`)을 최종 선택했다
-# → 설계 도구의 기여를 **측정 자체가 불가능**했다(실측: evaluate만 팔이 후보군 oracle의 112%).
+# design_candidate를 차단한 조건조차 라이브러리 밖 서열(`G+HAIYPRH`)을 최종 선택했다
+# → 설계 도구의 기여를 **측정 자체가 불가능**했다(실측: evaluate만 조건이 후보군 oracle의 112%).
 # 그래서 evaluate는 **라이브러리 멤버만** 받고, 라이브러리 밖은 design_candidate로 보낸다.
 # (design_candidate는 가설·예측을 요구하므로 '설계'가 기록에 남는다.)
 LIB_LINKERS = frozenset((v["seq"] or "").upper() for v in LINKER_LIBRARY.values())

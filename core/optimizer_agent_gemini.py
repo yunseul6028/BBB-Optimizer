@@ -153,7 +153,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
             ),
         ]
         # analyze_structure(ESMFold 구조 노출도)는 **에이전트 도구에서 제거**했다.
-        # 근거(애블레이션 n=3, docs/experiments.md §11): 이 도구를 뺀 팔이 **자기 고유 축인
+        # 근거(애블레이션 n=3, docs/experiments.md §11): 이 도구를 뺀 조건이 **자기 고유 축인
         # 셔틀 노출도에서조차 퇴행하지 않았다**(0.689 vs 대조군 0.693). 유효점수는 오히려 높았다
         # (0.577 vs 0.469). 즉 이 도구는 에이전트의 판단을 개선하지 않으면서 호출당 ~10초와
         # 공개 API 장애 위험만 추가하고 있었다. 점수 공식을 바꿔 쓸모를 만드는 대신 도구를 뺀다.
@@ -255,7 +255,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
     # 근거(docs/experiments.md §11): pareto_scrub 은 liability·응집·불안정성 3축만 줄이고
     # 제약은 rmt_sim 하나뿐이라 **효능을 보지 않는다.** 그래서 T7(HAIYPRH)을 다듬은
     # HAVYPNH 가 유사도는 지키면서 융합 BBB를 0.526 → 0.104 로 떨어뜨렸고, 에이전트가 그걸
-    # 그대로 제출했다. 실측상 이 도구가 있는 팔은 (래칫을 가정해도) 없는 팔보다 eff 가
+    # 그대로 제출했다. 실측상 이 도구가 있는 조건은 (래칫을 가정해도) 없는 조건보다 eff 가
     # 약 0.12 낮았다. 도구를 지우는 대신 **범위를 좁힌다** — 제조 가능성은 진짜 과제다.
     DEV_BBB_FLOOR_RATIO = 0.80
 
@@ -487,7 +487,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
             # ── 래칫(ratchet) 게이트 — '이미 본 더 좋은 후보를 버리고 제출' 금지 ──
             # 애블레이션 실측(docs/experiments.md §11): 16세션 중 **7세션이 퇴행**했고
             # 최대 낙폭은 -0.395였다. 편집 채널(design_candidate·optimize_developability)이
-            # 있는 팔에서만 일어나고, 라이브러리 선택만 하는 팔은 퇴행 0건이었다.
+            # 있는 조건에서만 일어나고, 라이브러리 선택만 하는 조건은 퇴행 0건이었다.
             # 원인은 **되돌아갈 장치가 없는 것**이다. 개발성으로 다듬은 변이체가 효능을 깎아도
             # 에이전트가 그대로 제출해 버린다. 탐색은 자유롭게 하되 **제출은 최고치 아래로
             # 내려가지 못하게** 막는다 — 설계의 상방은 살리고 하방만 자른다.

@@ -11,8 +11,8 @@
   analyze_structure       → 셔틀이 가려졌는지 본다            ⇒ eff 로는 **보이지 않음**
 
 따라서 "도구를 빼도 eff가 안 나빠진다"는 결론은 **도구가 쓸모없다는 뜻이 아니라,
-측정 축이 그 도구를 못 본다는 뜻**이다. 올바른 애블레이션은 각 팔(arm)의 산출물을
-**그 팔이 보지 못한 축까지 포함해 독립 심판이 전부 채점**하는 것이다.
+측정 축이 그 도구를 못 본다는 뜻**이다. 올바른 애블레이션은 각 조건(arm)의 산출물을
+**그 조건이 보지 못한 축까지 포함해 독립 심판이 전부 채점**하는 것이다.
 
 ⚠️ 여기서 하지 않는 일: **목적함수(eff)에 개발성·구조를 더하지 않는다.**
    그 도구가 계산한 값을 그 도구의 점수에 넣으면 순환이고(도구를 쓰면 당연히 오른다),
@@ -54,7 +54,7 @@ OWN_AXIS = {
 
 
 def score_final(agent, cargo, linker, shuttle):
-    """최종 선택을 **독립적으로** 다시 채점한다(그 팔이 못 본 축까지 전부)."""
+    """최종 선택을 **독립적으로** 다시 채점한다(그 조건이 못 본 축까지 전부)."""
     row = agent._score_choice(cargo, {"chosen_label": "사후채점",
                                       "chosen_linker": linker or "",
                                       "chosen_shuttle": shuttle or ""})
@@ -116,7 +116,7 @@ def main():
     # ── 분모(oracle) 교정 ────────────────────────────────────────────────
     # ablation_tools 의 oracle_eff 는 **CPP 포함** 전수 최적이다(직접융합+SynB1 = 0.795).
     # 그런데 CPP는 비교군이라 에이전트가 고를 수 없다 → 그 분모로 나눈 %oracle 은
-    # 애초에 도달 불가능한 기준이고 모든 팔을 부당하게 낮게 보이게 한다.
+    # 애초에 도달 불가능한 기준이고 모든 조건을 부당하게 낮게 보이게 한다.
     # 올바른 분모는 **후보군(RMT) 라이브러리 최적** = 도달 가능 전선의 상한이다.
     cargo0 = recs[0]["cargo"]
     front = agent.reachable_front(cargo0)
@@ -152,7 +152,7 @@ def main():
         by.setdefault(s["config"], []).append(s)
     names = [n for n in ORDER if n in by] + [n for n in by if n not in ORDER]
 
-    print("\n### 축별 사후 채점 (독립 심판이 모든 팔의 최종 선택을 전부 채점)\n")
+    print("\n### 축별 사후 채점 (독립 심판이 모든 조건의 최종 선택을 전부 채점)\n")
     print("| 설정 | n | eff↑ | %후보군oracle | 개발성 liability↓ | 불안정성↓ | 셔틀 노출도↑ (측정성공) | 잃은 도구의 축 |")
     print("|---|---|---|---|---|---|---|---|")
     for n in names:

@@ -34,7 +34,7 @@ PRICE_OUT_PER_TOK = 3.00 / 1_000_000
 TOOLS = ["evaluate_candidates", "design_candidate", "optimize_developability"]
 
 # analyze_structure 는 2026-11 애블레이션(§11) 결과 **도구에서 제거**됐다 —
-# 자기 고유 축(셔틀 노출도)에서조차 퇴행이 없었다. 그래서 -struct 팔도 함께 사라졌다.
+# 자기 고유 축(셔틀 노출도)에서조차 퇴행이 없었다. 그래서 -struct 조건도 함께 사라졌다.
 CONFIGS = {
     "full":      [],                      # 전체 도구 (대조군)
     "-design":   ["design_candidate"],    # 가설 주도 설계 제거
