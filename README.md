@@ -9,7 +9,7 @@
 > **핵심 원리 — 규율 있는 범위 설정** — deepB3P가 양이온 CPP를 과대평가하는 편향(보상 해킹) 때문에,
 > **BBB 효능은 검증 라이브러리에서 "선택"**하고 **잔기 편집·최적화는 신뢰 가능한 오라클이 있는 축
 > (선택성·개발성)에만** 적용한다. "모든 지표 최적화"가 아니라 **"무엇을 최적화하고 무엇을 하지 않을지
-> 아는 것"**이 차별점. (검증: 선택성 AUC 1.0 vs deepB3P 0.398 → [docs/experiments.md](docs/experiments.md))
+> 아는 것"**이 차별점. (검증: 선택성 AUC 1.0 vs deepB3P 0.468 → [docs/experiments.md](docs/experiments.md))
 
 > **동기** — 항체(약 150 kDa)는 BBB에 막혀 투여량의 **0.1–0.2%만 뇌에 도달**한다. 셔틀이 수용체매개
 > 수송(RMT)을 편승(hitchhike)해 화물을 넘긴다. 산업 선례: Roche *Brain Shuttle* · Denali *Transport
@@ -122,9 +122,11 @@ flowchart LR
   class O ok
 ```
 
-**라이브러리**: **링커 13 × 셔틀 10 = 130 조합**
-- RMT 셔틀: Angiopep-2·ApoE(159-167)₂·Leptin30 · **T7·B6 (TfR)** · **RVG29·CDX (nAChR)**
-- CPP 셔틀: TAT · Penetratin · SynB1
+**라이브러리**: **링커 13 × 셔틀 12 = 156 조합**
+- RMT 셔틀(**후보군**, 9종): Angiopep-2·ApoE(159-167)₂·Leptin30 · **T7·B6·THR (TfR)** ·
+  **RVG29·CDX (nAChR)** · **Tet1 (GT1b)**
+- CPP 셔틀(**비교군**, 3종): TAT · Penetratin · SynB1 — 비특이 흡수 대조군이며
+  **최종 결과·순위에서 제외**된다(docs/experiments.md §8).
 
 ---
 
@@ -140,7 +142,7 @@ python benchmark_agent.py   # M4 에이전트 효율 · M5 심사 효과 (LLM �
 | 지표 | 실측 |
 |---|---|
 | **M1 판별력** | AUC **0.807**(양성 vs 무작위) |
-| **M2 최적성** | 130조합 oracle 최적 BBB **0.960**(직접융합+SynB1) |
+| **M2 최적성** | 156조합 · 전체 oracle BBB **0.960**(직접융합+SynB1, 비교군) / **후보군 oracle BBB 0.568**(직접융합+Tet1) |
 | **M3 가드레일** | 독소 **2/2 검출**(멜리틴·마스토파란), 오탈락 0 |
 | **M4 에이전트 효율** | **22평가로 최적의 96.8%**(무작위 24평가 71.6% 대비) |
 | **M5 심사 효과** | 불량 후보 **2/2 REVISE** |
@@ -149,7 +151,7 @@ python benchmark_agent.py   # M4 에이전트 효율 · M5 심사 효과 (LLM �
 
 | 검증 | 결과 |
 |---|---|
-| **선택성 축** (RMT vs CPP) | AUC **1.0** — 반면 deepB3P 단독 **0.398**(<0.5, 양이온 CPP를 더 높게 랭킹 = **보상해킹 실증**) |
+| **선택성 축** (RMT vs CPP) | AUC **1.0** — 반면 deepB3P 단독 **0.468**(<0.5, 양이온 CPP를 더 높게 랭킹 = **보상해킹 실증**). 최초 7종 세트에선 0.398 |
 | **개발성 — 응집·용해도 신호** (아밀로이드 vs 가용성) | AUC **0.96**, 가중치 섭동에 둔감(Spearman ≥ 0.95) |
 | **Angiopep-2 vs Angiopep-7** | deepB3P가 **뇌 전달 ~9.5배 낮은**(모세혈관에 갇히는) 변이체를 **더 높게**(0.98 vs 0.87) = BBB 편집 비신뢰 |
 | **개발성 잔기 편집** | 제약 편집 **기능 보존 7/7**(liability 평균 0.86개↓) vs 무제약 **기능 파괴 7/7**(더 줄이나 rmt 붕괴) — 핵심은 "기능 보존하며 스크럽" |
@@ -173,8 +175,13 @@ python benchmark_agent.py   # M4 에이전트 효율 · M5 심사 효과 (LLM �
 | 수용체·선택성·개발성(응집·용해도) | Biopython + 규칙 엔진 | BLOSUM62 정렬 · 서열 규칙 · AGGRESCAN a3v (로컬) |
 | 브레인(추론) | **Google Gemini**(기본) | 자율 최적화 에이전트 (Claude는 `with-claude` 브랜치) |
 
-**에이전트 도구**: `evaluate_candidates`(7축 배치) · `design_candidate`(가설 주도 잔기 편집 — 가설·예측·반성) ·
-`analyze_structure`(ESMFold 노출도) · `optimize_developability`(셔틀 개발성 다목적 Pareto 최적화 — 기능 보존) · `finish`(자기 종료).
+**에이전트 도구**: `evaluate_candidates`(7축 배치 — **라이브러리 조합 전용**) · `design_candidate`(가설 주도 잔기 편집 — 가설·예측·반성, **라이브러리 밖 전담**) ·
+`optimize_developability`(셔틀 개발성 다목적 Pareto 최적화 — 기능 보존) · `finish`(자기 종료).
+구조(ESMFold)는 **도구에서 제거**하고 최종 후보 1건의 참고 근거로만 남겼다 — 자기 축(셔틀 노출도)에서조차
+기여가 없다는 애블레이션 결과(→ [docs/experiments.md](docs/experiments.md) §11)를 따랐다.
+같은 애블레이션에서 **`evaluate_candidates`가 임의 서열까지 채점해 설계 통로로 쓰이고 있었다**는 것도
+드러나, 평가(라이브러리 선택)와 설계(라이브러리 밖)를 **게이트로 분리**했다. 또 16세션 중 7세션이
+**이미 본 더 좋은 후보를 버리고 제출**(최대 −0.395)해, 심사자에 **래칫 게이트**를 추가했다.
 
 **자원 경량**: deepB3P·독성은 **CPU 완결**, 구조는 ESMFold **공개 API** → 프런티어 GPU 불필요.
 
@@ -214,12 +221,56 @@ python3 -m venv .venv-toxinpred3
 ```bash
 cp .env.example .env   # .env 에 GEMINI_API_KEY 입력
 ```
-키가 없으면 데모 모드로 예시 결과 화면을 미리볼 수 있다(값은 "예시"로 명시).
+키는 [Google AI Studio](https://aistudio.google.com/apikey)에서 무료 발급(무료 티어 있음). 키가 없으면
+데모 모드로 예시 결과 화면을 미리볼 수 있다(값은 "예시"로 명시).
+
+> 설치 요약: `requirements.txt`(Streamlit) → `biopython requests py3Dmol`(구조·3D) → `vendor/`에
+> deepB3P·ToxinPred3 클론+venv → `.env`에 `GEMINI_API_KEY`. Python **3.9+**(개발·검증 환경은 3.9.6).
 
 ## ▶️ 실행
+
+### 로컬 (기본)
 ```bash
 streamlit run app.py
 ```
+브라우저에서 `http://localhost:8501` 자동 오픈. 본인 PC에서만 접속된다.
+
+### 외부 서버 (다른 사람도 접속)
+Streamlit은 기본적으로 로컬에만 바인딩된다. **서버의 모든 인터페이스(0.0.0.0)에 바인딩**하고 헤드리스로 띄우면
+네트워크 밖에서도 접속된다:
+
+```bash
+streamlit run app.py \
+  --server.address 0.0.0.0 \
+  --server.port 8501 \
+  --server.headless true
+```
+
+- 접속: `http://<서버_공인IP_또는_도메인>:8501`
+- **방화벽/보안그룹에서 8501 포트 인바운드 허용** 필요(AWS Security Group, GCP 방화벽, `ufw allow 8501` 등).
+- 세션이 끊겨도 돌게 하려면 `nohup ... &`, `tmux`/`screen`, 또는 `systemd` 서비스로 띄운다.
+
+> ⚠️ **서버에도 로컬 엔진이 똑같이 설치돼야 한다.** deepB3P·ToxinPred3는 `vendor/`의 격리 venv를
+> 서브프로세스로 호출하므로(§설치 2단계), 서버에 `vendor/`가 없으면 BBB/독성 실측이 꺼지고 폴백으로 동작한다.
+> `.env`의 `GEMINI_API_KEY`도 서버에 있어야 자율 에이전트가 켜진다.
+
+#### 리버스 프록시(nginx/도메인·HTTPS) 뒤에 둘 때
+공개 도메인·SSL로 서비스하려면 nginx가 WebSocket을 프록시하도록 하고(Streamlit은 WS 사용), 하위 경로로
+서빙하면 `--server.baseUrlPath`를 맞춘다:
+
+```nginx
+# /etc/nginx/... — 예시 (example.com → 127.0.0.1:8501)
+location / {
+    proxy_pass http://127.0.0.1:8501;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;      # WebSocket 업그레이드
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+}
+```
+프록시 뒤에서는 Streamlit을 `--server.address 127.0.0.1`(로컬만)로 두고 외부 노출은 nginx(80/443)가 담당한다.
+
+> 🔒 이 앱에는 자체 인증이 없다. 공개 노출 시 리버스 프록시의 **basic-auth**나 접속 IP 제한을 두는 것을 권장.
 
 ---
 

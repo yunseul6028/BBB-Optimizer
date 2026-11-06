@@ -16,8 +16,9 @@ from __future__ import annotations
 import time
 from typing import Generator
 
-from .config import LINKER_LIBRARY, MIN_BBB_SIGNAL, MODEL_MAX_LEN, SHUTTLES, Settings
-from .optimizer_agent import AgentEvent, OptimizationAgent
+from .config import (LINKER_LIBRARY, MIN_BBB_SIGNAL, MODEL_MAX_LEN, OFF_TARGET_PENALTY,
+                     SHUTTLES, Settings)
+from .optimizer_agent import AgentEvent, OptimizationAgent, is_candidate, is_comparison_only
 
 # 일시적 오류(모델 과부하·분당 레이트리밋·응답 지연) — 백오프 재시도 대상
 _TRANSIENT = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "overloaded", "high demand",
@@ -31,15 +32,15 @@ _REQUEST_TIMEOUT_MS = 120_000
 # 유효 BBB = BBB − λ·off_target_risk. deepB3P가 양이온성 CPP를 고평가해 BBB만 좇으면
 # 비특이(off-target) 후보로 수렴하므로, off-target 위험을 소폭 감점해 RMT형에 기회를 준다.
 # λ↑ = 선택성 중시(BBB 지배↓), λ↓ = BBB 지배↑. 0.25 = "조금만" 낮춘 값.
-OFF_TARGET_PENALTY = 0.25
+# OFF_TARGET_PENALTY 는 config 에서 가져온다(위 임포트) — 여기서 재노출만 유지.
 
 
 def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> str:
     lib_l = ", ".join(f"{n}({v['seq'] or '링커없음/직접융합'})" for n, v in LINKER_LIBRARY.items())
     lib_s = ", ".join(f"{n}({v['seq']})" for n, v in SHUTTLES.items())
-    tools = ("evaluate_candidates(BBB·독성·안정성·수용체 배치), design_candidate(잔기 수준 편집 "
-             "서열 채점), analyze_structure(구조 노출도), optimize_developability(셔틀 개발성 다목적 "
-             "Pareto 최적화 — 기능 보존 잔기 편집)")
+    tools = ("evaluate_candidates(**라이브러리 조합만** 채점 — BBB·독성·안정성·수용체), "
+             "design_candidate(**라이브러리 밖** 직접 편집·설계 서열 채점), "
+             "optimize_developability(셔틀 개발성 다목적 Pareto 최적화 — 기능 보존 잔기 편집)")
     tools += ", finish(수렴 시 최종 후보 제출·종료)"
     return (
         "[연구 맥락] 이것은 알츠하이머병 치료제의 뇌 전달을 개선하기 위한 정당한 학술·공모전용 "
@@ -58,13 +59,18 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
         f"  ② 독성(ToxinPred3) ≤ {tox_threshold:.2f}\n"
         "  ③ **선택성(off-target 최소화)**: 비특이 양이온성 CPP보다 **수용체 선택적 RMT형"
         "(Angiopep-2·ApoE·Leptin30 계열)**을 선호 — off-target 위험이 낮은 쪽.\n"
-        "  ④ 셔틀이 구조적으로 노출(ESMFold) + 검증 셔틀과 유사(수용체 메커니즘 근거)\n"
+        "  **[셔틀 역할 — 반드시 지킬 것] CPP(TAT·Penetratin·SynB1 등 양이온성 막투과)는 "
+        "비특이 흡수 **비교군(baseline)**이다. 비교 목적으로 채점하는 건 좋지만 **최종 후보로 "
+        "finish에 제출하지 마라.** 최종 선택은 RMT(수용체 매개) 후보 중에서 한다 — deepB3P가 "
+        "양이온성 CPP를 고평가하는 편향이 있어(실측 CPP 평균 BBB 0.357 vs RMT 0.058) 점수만 "
+        "좇으면 비특이 후보로 수렴하기 때문이다. CPP를 제출하면 심사가 자동 미승인한다.**\n"
+        "  ④ 검증 셔틀과 유사(수용체 메커니즘 근거 — bind match)\n"
         "  ⑤ 융합체 자체 안정성: 불안정성 지수 < 40 선호\n\n"
         "[BBB 점수 해석 — 중요] evaluate_candidates는 deepB3P를 **분해**해 보여준다: primary(융합 "
         "연결부위 점수)·shuttleBBB(셔틀 단독)·mech(RMT/CPP)·preserv(융합 보존도). deepB3P는 짧은 "
         "펩타이드의 막투과를 학습했으므로 **CPP 셔틀엔 비교적 유효하지만, RMT(수용체 매개) 셔틀엔 약한 "
         "프록시**다(실제 전달 병목은 수용체 결합·avidity). 따라서 **RMT형은 primary 절대값만으로 줄 "
-        "세우지 말고 mech=RMT·preserv(셔틀 신호가 보존됐나)·구조 노출(analyze_structure)을 함께 근거로 "
+        "세우지 말고 mech=RMT·preserv(셔틀 신호가 보존됐나)·match(수용체 유사도)를 함께 근거로 "
         "삼아라. 최종 보고서엔 '이 셔틀의 전달은 무슨 메커니즘이고 deepB3P를 어느 정도 믿는지'를 밝혀라.\n"
         f"  **[최종 확정 하한 — 필수]** 단, 선택성이 아무리 좋아도 **융합 BBB(primary)가 near-zero"
         f"(< {MIN_BBB_SIGNAL})인 후보는 finish로 확정하지 마라** — 효능 신호 자체가 없으면 선택적이어도 "
@@ -76,8 +82,12 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
         "권장 워크플로우(자율 판단): evaluate_candidates로 라이브러리 조합(**링커 유무 — 직접융합"
         "(링커 빈칸)도 포함**)을 폭넓게 스크리닝 → "
         "유망 방향으로 **design_candidate로 잔기 수준 편집**(변이·트리밍·연장·하이브리드)해 라이브러리 "
-        "밖까지 정밀 설계·재평가 → 상위 1~3개를 analyze_structure로 구조 검증 → **충분히 수렴했다고 "
+        "밖까지 정밀 설계·재평가 → **충분히 수렴했다고 "
         "판단하면 스스로 finish**를 호출해 최종 융합체 1개(라벨·링커·셔틀·전체 근거)를 제출하라.\n"
+        "  **[도구 역할 분리 — 반드시 지킬 것] `evaluate_candidates`는 위 라이브러리 링커·셔틀 "
+        "**원본 서열 조합만** 채점한다(선택 도구). 한 잔기라도 편집한 서열을 넣으면 **채점을 거부**하고 "
+        "되돌려보낸다. 직접 설계한 서열은 반드시 `design_candidate`로 제출하라 — 가설·예측을 적어야 "
+        "한다. 이는 '고르기'와 '만들기'를 기록상 분리해 설계의 기여를 측정하기 위한 것이다.**\n"
         "- design_candidate: 라이브러리에 얽매이지 말고 셔틀/링커의 특정 잔기를 자유롭게 편집한 서열을 "
         "제안·채점할 수 있다(진짜 설계). 왜 그렇게 편집했는지 edit_note에 남겨라.\n"
         "- optimize_developability: 최종 셔틀을 확정하기 전에 **개발성(liability·응집·불안정성)을 신뢰 "
@@ -141,16 +151,14 @@ class GeminiOptimizationAgent(OptimizationAgent):
                     "edit_note": S(type=T.STRING, description="구체적 편집 내용(어느 잔기를 어떻게)"),
                 }, required=["label", "linker", "shuttle", "hypothesis", "prediction"]),
             ),
-            types.FunctionDeclaration(
-                name="analyze_structure",
-                description=("한 융합체를 ESMFold로 접어 셔틀이 구조적으로 노출됐는지 vs 화물에 "
-                             "가려졌는지와 예측 신뢰도(pLDDT)를 반환. 느림(~10초), 최종 후보에만."),
-                parameters=S(type=T.OBJECT, properties={
-                    "linker": S(type=T.STRING),
-                    "shuttle": S(type=T.STRING),
-                }, required=["linker", "shuttle"]),
-            ),
         ]
+        # analyze_structure(ESMFold 구조 노출도)는 **에이전트 도구에서 제거**했다.
+        # 근거(애블레이션 n=3, docs/experiments.md §11): 이 도구를 뺀 팔이 **자기 고유 축인
+        # 셔틀 노출도에서조차 퇴행하지 않았다**(0.689 vs 대조군 0.693). 유효점수는 오히려 높았다
+        # (0.577 vs 0.469). 즉 이 도구는 에이전트의 판단을 개선하지 않으면서 호출당 ~10초와
+        # 공개 API 장애 위험만 추가하고 있었다. 점수 공식을 바꿔 쓸모를 만드는 대신 도구를 뺀다.
+        # 구조 근거 자체는 버리지 않고 **최종 후보 1건에만 best-effort로 접어 보고**한다
+        # (아래 run()의 구조 증거 단계) — 에이전트의 의사결정에는 들어가지 않는다.
         decls.append(types.FunctionDeclaration(
             name="optimize_developability",
             description=("한 셔틀 서열의 **개발성**(liability·응집·불안정성)을 신뢰 가능한 규칙/척도 "
@@ -178,7 +186,8 @@ class GeminiOptimizationAgent(OptimizationAgent):
     def _dispatch(self, cargo, name, args):
         """도구 실행 → (LLM에 돌려줄 텍스트, 방출할 AgentEvent 또는 None)."""
         if name == "evaluate_candidates":
-            text, rows = self._evaluate(cargo, args)
+            # library_only=True — 평가 도구는 **선택** 전용. 라이브러리 밖은 design_candidate로.
+            text, rows = self._evaluate(cargo, args, library_only=True)
             return text, AgentEvent("evaluation", text=args.get("rationale", ""), data={"rows": rows})
         if name == "design_candidate":
             text, rows = self._evaluate(cargo, {"constructs": [{
@@ -197,9 +206,6 @@ class GeminiOptimizationAgent(OptimizationAgent):
             return text + reflect, AgentEvent("evaluation",
                                     text="🎨 정밀 설계" + (f" — {detail}" if detail else ""),
                                     data={"rows": rows})
-        if name == "analyze_structure":
-            text, sdata = self._structure(cargo, args)
-            return text, AgentEvent("structure", text=text, data=sdata)
         if name == "optimize_developability":
             return self._optimize_developability(args)
         return f"unknown tool: {name}", None
@@ -253,30 +259,110 @@ class GeminiOptimizationAgent(OptimizationAgent):
         return row
 
     # ---- 심사(비평) 에이전트 — 독립 페르소나·독립 컨텍스트 ----------------
-    def _critic_prompt(self):
+    @staticmethod
+    def _front_text(front: dict) -> str:
+        """도달 가능 집합(Pareto 전선)을 심사자에게 줄 텍스트로 만든다."""
+        b = front.get("best") or {}
+        lines = [
+            f"[도달 가능 집합 — 라이브러리 전수 {front.get('n_total', '?')}조합을 **동일 지표**로 채점한 결과]",
+            f"  비독성 {front.get('n_nontoxic', '?')}개 → 하드 게이트(독성 + BBB≥"
+            f"{front.get('bbb_floor', '?')}) 통과 {front.get('n_gate_all', '?')}개"
+            f" → 그중 **후보군(CPP 비교군 제외) {front.get('n_gate', '?')}개**"
+            f" (엄밀 RMT {front.get('n_gate_rmt', 0)}개)",
+            f"  축별 **달성 한계**: BBB 최대 {b.get('bbb_max')} · off_target 최소 {b.get('off_min')}"
+            f" · 불안정성 최소 {b.get('instability_min')}",
+            f"  **전선의 유효점수(eff = BBB − {OFF_TARGET_PENALTY}×off) 범위: "
+            f"{front.get('front_eff_min')} ~ {front.get('front_eff_max')}**"
+            " — 제출 후보가 이 하한보다 낮으면, 사소한 축(예: 불안정성)에서만 앞서는 "
+            "'전선 이탈'이므로 REVISE 대상이다.",
+        ]
+        fr = front.get("front") or []
+        if fr:
+            lines.append(f"  **후보군 Pareto 전선**(BBB↑ · off↓ · 불안정성↓ 비지배) {len(fr)}개 "
+                         f"— 비교군(CPP)은 제외된 전선이다:")
+            for r in fr[:8]:
+                lines.append(f"    · {r['label']}: BBB {r['bbb']} · off {r['off']} · 불안정성 "
+                             f"{r['instability']} · {r['mechanism']} · 개발성 {r['dev_risk']}")
+        opts = front.get("rmt_options") or []
+        if opts:
+            lines.append(f"  게이트 통과 **RMT 후보(후보군)** {front.get('n_gate_rmt', len(opts))}개:")
+            for r in opts:
+                lines.append(f"    · {r['label']}: BBB {r['bbb']} · off {r['off']} · 불안정성 "
+                             f"{r['instability']} · 개발성 {r['dev_risk']}")
+        else:
+            lines.append("  ⚠️ 게이트를 통과한 RMT 후보가 **없다** — 이 경우에만 CPP(비교군) 선택이 "
+                         "조건부로 허용된다.")
+        cpp = front.get("cpp_baseline") or []
+        if cpp:
+            lines.append("  [비교군(CPP) 참고치 — **최종 선택 대상 아님**. 비특이 흡수 상한을 "
+                         "보여줄 뿐이다]")
+            for r in cpp:
+                lines.append(f"    · {r['label']}: BBB {r['bbb']} · off {r['off']} · 불안정성 "
+                             f"{r['instability']} (비교군)")
+            lines.append("    ※ CPP의 높은 BBB를 이유로 후보군을 깎지 마십시오 — 비교군은 "
+                         "달성 목표가 아닙니다.")
+        lines.append("  → **이 집합 밖의 값을 요구하지 마십시오.** 여기 적힌 **후보군** 수치가 "
+                     "이 문제에서 실제로 달성 가능한 최선입니다.")
+        return "\n".join(lines)
+
+    def _critic_prompt(self, front_text: str):
         thr = self.settings.toxicity_threshold
         return (
-            "당신은 신약 후보를 **적대적으로 검증하는 안전·엄밀성 심사 에이전트**입니다. 설계 에이전트가 "
-            "제안한 최종 BBB 융합체 후보를 의심하고 반박하세요. 관대하지 마세요.\n"
-            "날카롭게 따질 것:\n"
-            f"① 독성 마진 — 임계값 {thr:.2f} 대비 실제로 안전한가, 아슬아슬한가.\n"
-            "② 안정성 — 불안정성 지수가 40 미만이 이상적. 높으면 응집·분해 위험을 지적.\n"
-            "③ BBB 점수 신뢰도 — deepB3P는 짧은 펩타이드 막투과 학습 모델. **RMT(수용체 매개) 셔틀이면 "
-            "deepB3P는 약한 프록시**(전달 병목은 수용체 결합·avidity)이므로 primary 절대값에 기댔는지, "
-            "메커니즘(mech)·융합 보존(preserv)·구조 노출로 뒷받침했는지 따져라. CPP형이면 비특이 흡수를 "
-            f"경계하라. 단 **융합 BBB가 near-zero(< {MIN_BBB_SIGNAL})면 효능 신호 부재**이므로 선택성이 "
-            "좋아도 REVISE 사유다(선택성만으론 확정 불가).\n"
-            "④ 구조 근거 — 셔틀이 표면 노출됐다는 ESMFold 검증을 실제로 거쳤는가.\n"
-            "⑤ 개발성 리스크 — 과도한 Arg/Lys(양이온)는 비특이 결합·독성·응집 위험. 서열 liability.\n"
-            "⑥ off-target/선택성 — 양전하·친유성 주도(CPP형)면 여러 조직에 비특이 흡수돼 off-target "
-            "위험. RMT 수용체 표적(Angiopep형)이 선택적. off-target 위험 높으면 지적하라.\n"
-            "⑦ 설계의 실질 — 라이브러리의 뻔한 선택인가, 근거 있는 정밀 설계인가.\n"
-            "3~5문장으로 핵심 반박을 쓰고, **마지막 줄에 정확히** `VERDICT: APPROVE`(승인) 또는 "
-            "`VERDICT: REVISE`(개선 요구)를 써라. 애매하면 REVISE."
+            "당신은 신약 후보를 **적대적으로 검증하는 안전·엄밀성 심사 에이전트**입니다. 설계 "
+            "에이전트가 제안한 최종 BBB 융합체 후보를 의심하고 반박하세요.\n\n"
+            "[판정 원칙 — 가장 중요]\n"
+            "**절대적 이상과 비교하지 마십시오.** 아래 '도달 가능 집합'이 이 문제에서 실제로 달성 "
+            "가능한 최선입니다. 판정 기준은 '이상적인가'가 아니라 **'달성 가능한 최선 대비 합리적인 "
+            "선택인가'**입니다. 이 축들은 서로 **적대적**입니다 — BBB를 올리는 양이온성이 off-target과 "
+            "불안정성을 함께 올립니다(실측 상관: BBB↔off +0.62, BBB↔불안정성 +0.50). 따라서 **모든 "
+            "축의 동시 만족을 요구하지 마십시오. 그런 후보는 존재하지 않습니다.**\n\n"
+            f"{front_text}\n\n"
+            "[하드 게이트 — 이 둘만 탈락 사유. 위반하면 예외 없이 REVISE]\n"
+            f"  ① **독성**: ToxinPred3 > {thr:.2f} → 탈락.\n"
+            f"  ② **효능 신호**: 융합 BBB(primary) < {MIN_BBB_SIGNAL} → 효능 부재로 탈락. "
+            "RMT도 예외가 아니다 — 선택적이어도 효능 신호가 없으면 의미가 없다.\n\n"
+            "[셔틀 역할 — CPP는 비교군이다]\n"
+            "  **RMT**(수용체 매개: Angiopep·T7·B6·ApoE·Leptin30 계열)가 **후보군**이고, "
+            "**CPP**(TAT·SynB1·Penetratin 등 양이온성 막투과)는 **비특이 흡수 비교군(baseline)**입니다. "
+            "최종 후보가 CPP라면: 위 집합에 게이트를 통과한 RMT가 **하나라도 있으면 REVISE**하고 그 RMT "
+            "대안을 지목하십시오. 게이트 통과 RMT가 전혀 없을 때만 CPP를 조건부 승인할 수 있고, 그때도 "
+            "'비교군을 최종안으로 쓴 이유'를 한계로 명시해야 합니다.\n\n"
+            "[트레이드오프 축 — 탈락 사유가 아니라 '한계로 명시할' 사유]\n"
+            "  불안정성 · 개발성 liability/양이온 · off-target 정도 · "
+            "설계의 실질(라이브러리의 뻔한 선택인가 근거 있는 정밀 설계인가).\n"
+            "  이 축들에서는 제출 후보가 전선에서 **지배당하는지만** 보십시오.\n"
+            "   · **지배당함** = 모든 축에서 더 나은 **달성 가능** 후보가 실제로 존재 → REVISE, 그 후보를 "
+            "지목.\n"
+            "   · **비지배** = 트레이드오프 상의 합리적 지점 → 한계를 명시하고 조건부 승인.\n"
+            "   · **전선 이탈** = 비지배이더라도 **유효점수가 전선의 하한보다 낮으면** REVISE. "
+            "불안정성 같은 부차 축에서만 앞서고 결정축(효능·선택성)에서 전선보다 크게 뒤처지는 "
+            "후보를 승인해서는 안 된다.\n\n"
+            "[판정 — 마지막 줄에 정확히 하나]\n"
+            "  `VERDICT: APPROVE`              하드 게이트 통과 + 비지배 + 특별히 명시할 한계도 없음\n"
+            "  `VERDICT: APPROVE_WITH_LIMITS`  하드 게이트 통과 + 비지배이나 명시할 한계가 있음 "
+            "(정상적인 승인 형태)\n"
+            "  `VERDICT: REVISE`               하드 게이트 위반, 전선에서 지배당함, 또는 RMT 대안이 "
+            "있는데 CPP를 고름\n"
+            "**애매하면 REVISE가 아니라 `APPROVE_WITH_LIMITS`로 하고 한계를 적으십시오.** 단 하드 게이트 "
+            "위반과 'RMT 대안이 있는데 CPP 선택'은 예외 없이 REVISE입니다.\n"
+            "3~5문장으로 핵심 평가(무엇이 한계이고 그래도 왜 합리적인지, 또는 어느 후보에 지배당하는지)를 "
+            "쓰고 **마지막 줄에 VERDICT**를 쓰십시오."
         )
 
-    def _critic_review(self, client, model, types, cargo, choice):
-        """최종 후보를 별도 컨텍스트로 적대적 검증. 반환 (approve: bool, critique_text: str)."""
+    # 세션 중 이미 채점해 본 후보보다 **못한 것을 제출**하면 막는 여유폭.
+    # 0.02는 오라클 잡음보다 크고 의미 있는 효능 차이보다 작게 잡은 값이다.
+    RATCHET_MARGIN = 0.02
+
+    def _critic_review(self, client, model, types, cargo, choice, best_seen=None):
+        """최종 후보를 별도 컨텍스트로 적대적 검증.
+
+        반환 `(approve: bool, critique_text: str, tier: str)`.
+        tier ∈ {APPROVE, APPROVE_WITH_LIMITS, REVISE} — **계층 판정**이다.
+        하드 게이트(독성·BBB 하한)만 탈락 사유이고, 나머지 축은 '도달 가능 집합(Pareto 전선)
+        대비 지배당하는가'로만 본다. 절대적 이상과 비교하면 승인 가능 영역이 비기 때문이다
+        (실측: 심사 기준 AND → 130조합 중 0개. `reachable_front` 주석 참고).
+        """
+        front = self.reachable_front(cargo)
         dev_list = choice.get("dev_liabilities") or []
         m = (f"화물={cargo}, 링커={choice.get('linker') or '—'}, 셔틀={choice.get('shuttle')}, "
              f"전체서열={choice.get('sequence')}\n"
@@ -293,24 +379,79 @@ class GeminiOptimizationAgent(OptimizationAgent):
              f"(선택성 {choice.get('selectivity', '?')}), {choice.get('sel_mech', '?')}\n"
              f"용해도 — {choice.get('sol_level', '?')}(점수 {choice.get('sol_score', '?')})")
         cfg = types.GenerateContentConfig(
-            system_instruction=self._critic_prompt(), temperature=1.0,
+            system_instruction=self._critic_prompt(self._front_text(front)), temperature=1.0,
             thinking_config=types.ThinkingConfig(include_thoughts=False))
         contents = [types.Content(role="user", parts=[types.Part.from_text(
-            text="설계 에이전트가 제출한 최종 후보다. 적대적으로 검증하고 VERDICT를 내려라.\n" + m)])]
+            text="설계 에이전트가 제출한 최종 후보다. 도달 가능 집합 대비로 검증하고 VERDICT를 "
+                 "내려라.\n" + m)])]
         resp = self._gen_retry(client, model, contents, cfg)
         cand = (resp.candidates or [None])[0]
         parts = (cand.content.parts if cand and cand.content else None) or []
         text = "\n\n".join(p.text for p in parts
                            if getattr(p, "text", None) and not getattr(p, "thought", False))
-        approve = "APPROVE" in (text or "").upper().rsplit("VERDICT:", 1)[-1]
-        # 결정론적 하한 게이트: 융합 BBB가 near-zero면 효능 신호 부재 → 선택성이 좋아도 무조건 미승인.
-        if choice.get("bbb", 0.0) < MIN_BBB_SIGNAL:
+        tail = (text or "").upper().rsplit("VERDICT:", 1)[-1]
+        if "APPROVE_WITH_LIMITS" in tail or "APPROVE WITH LIMITS" in tail:
+            tier = "APPROVE_WITH_LIMITS"
+        elif "APPROVE" in tail:
+            tier = "APPROVE"
+        else:
+            tier = "REVISE"
+
+        # ── 결정론적 게이트 (LLM 판정을 덮어쓴다) ─────────────────────────
+        # 하드 게이트는 둘뿐: ① 독성 ② BBB 하한. 나머지 축은 트레이드오프이므로 탈락시키지 않는다.
+        if choice.get("toxic"):
+            text = (text or "") + (
+                f"\n\n[시스템 게이트] 독성 {choice.get('tox', 0.0):.3f} > 임계값 "
+                f"{self.settings.toxicity_threshold:.2f} → 안전성 하드 게이트 위반으로 자동 미승인(REVISE).")
+            tier = "REVISE"
+        elif choice.get("bbb", 0.0) < MIN_BBB_SIGNAL:
             text = (text or "") + (
                 f"\n\n[시스템 게이트] 융합 BBB {choice.get('bbb', 0.0):.3f} < 최소 효능 신호 "
                 f"{MIN_BBB_SIGNAL} → 선택성이 좋아도 **효능 신호 부재**로 자동 미승인(REVISE). "
-                "링커/정밀설계로 BBB를 하한 위로 끌어올리거나, BBB 신호가 있으면서 선택성도 괜찮은 후보로 교체 필요.")
-            approve = False
-        return approve, text
+                "링커/정밀설계로 BBB를 하한 위로 끌어올리거나, BBB 신호가 있으면서 선택성도 괜찮은 "
+                "후보로 교체 필요.")
+            tier = "REVISE"
+        elif (str(choice.get("mechanism") or "").upper().startswith("CPP")
+              and (front.get("n_gate_rmt") or 0) > 0):
+            # CPP는 비특이 흡수 **비교군**이다. 게이트를 통과한 RMT 후보가 실제로 존재하면
+            # 비교군을 최종안으로 확정할 이유가 없다 → 대안을 지목해 REVISE.
+            alts = ", ".join(f"{r['label']}(BBB {r['bbb']}·off {r['off']})"
+                             for r in (front.get("rmt_options") or [])[:3])
+            text = (text or "") + (
+                f"\n\n[시스템 게이트] 최종 후보가 **CPP(비특이 흡수 비교군)**인데, 하드 게이트를 통과한 "
+                f"**RMT 후보가 {front.get('n_gate_rmt')}개 실재**한다 → 비교군을 최종안으로 확정할 수 "
+                f"없으므로 자동 미승인(REVISE). 달성 가능한 RMT 대안: {alts}.")
+            tier = "REVISE"
+        elif (front.get("front_eff_min") is not None
+              and self._eff_bbb(choice) < front["front_eff_min"] - 1e-9):
+            # '전선 이탈' — 비지배(부차 축에서만 앞섬)여도 결정축에서 달성 가능 하한보다 낮으면
+            # 승인하지 않는다. 하한은 임의 상수가 아니라 **전선 자체에서 도출**된 값이다.
+            alts = ", ".join(f"{r['label']}(eff {r['bbb'] - OFF_TARGET_PENALTY * r['off']:.3f})"
+                             for r in (front.get("front") or [])[:3])
+            text = (text or "") + (
+                f"\n\n[시스템 게이트] 유효점수 {self._eff_bbb(choice):.3f} < 도달 가능 전선의 하한 "
+                f"{front['front_eff_min']:.3f} → 불안정성 등 부차 축에서만 앞설 뿐 **결정축(효능·"
+                f"선택성)에서 전선 밖으로 이탈**했으므로 자동 미승인(REVISE). 달성 가능한 대안: {alts}.")
+            tier = "REVISE"
+        elif (best_seen is not None
+              and self._eff_bbb(choice) < self._eff_bbb(best_seen) - self.RATCHET_MARGIN):
+            # ── 래칫(ratchet) 게이트 — '이미 본 더 좋은 후보를 버리고 제출' 금지 ──
+            # 애블레이션 실측(docs/experiments.md §11): 16세션 중 **7세션이 퇴행**했고
+            # 최대 낙폭은 -0.395였다. 편집 채널(design_candidate·optimize_developability)이
+            # 있는 팔에서만 일어나고, 라이브러리 선택만 하는 팔은 퇴행 0건이었다.
+            # 원인은 **되돌아갈 장치가 없는 것**이다. 개발성으로 다듬은 변이체가 효능을 깎아도
+            # 에이전트가 그대로 제출해 버린다. 탐색은 자유롭게 하되 **제출은 최고치 아래로
+            # 내려가지 못하게** 막는다 — 설계의 상방은 살리고 하방만 자른다.
+            text = (text or "") + (
+                f"\n\n[시스템 게이트] 제출 후보의 유효점수 {self._eff_bbb(choice):.3f} < "
+                f"**이 세션이 이미 채점해 본** 최고 후보 "
+                f"`{best_seen.get('linker') or '직접융합'}+{best_seen.get('shuttle', '?')}`의 "
+                f"{self._eff_bbb(best_seen):.3f} → 더 좋은 걸 **이미 손에 쥐고도** 더 나쁜 것을 "
+                "확정하려 했으므로 자동 미승인(REVISE). 그 후보로 되돌아가거나, 그보다 나은 설계를 "
+                "찾아 제출하라.")
+            tier = "REVISE"
+
+        return tier != "REVISE", text, tier
 
     def _recommend_on_failure(self, client, model, types, cargo, choice, critique_text):
         """최종 미승인(전 후보 반려)일 때, 실패 진단 + 시스템 내 구체적 대안을 권고한다.
@@ -395,7 +536,8 @@ class GeminiOptimizationAgent(OptimizationAgent):
         contents = [types.Content(role="user", parts=[types.Part.from_text(
             text=f"화물 `{cargo}`에 최적인 링커·셔틀을 설계하라. 도구를 자율적으로 사용해 "
                  "BBB·독성·구조·안정성을 모두 만족하는 최종 융합체를 찾아라.")])]
-        best = None
+        best = None        # 후보군(CPP 제외) 러닝 베스트
+        best_cpp = None    # 비교군 최고치 — 보고용이며 최종 선택이 되지 않는다
 
         def _blocked(cand, resp):
             fr = str(getattr(cand, "finish_reason", "") or "")
@@ -433,7 +575,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
 
             # ── 1. 설계자 실행 + 자기종료(finish) → 심사(Critic) → REVISE 시 재설계 ──
             choice = final_report = critique_text = None
-            approve = True
+            approve, tier = True, "APPROVE"
             critiques, MAX_CRITIQUES, turn, grace = 0, 1, 0, 0
             while turn < self.max_rounds + grace:
                 turn += 1
@@ -469,9 +611,15 @@ class GeminiOptimizationAgent(OptimizationAgent):
                         yield ev
                         if ev.kind == "evaluation":
                             for r in ev.data["rows"]:
-                                if not r["toxic"] and (best is None
-                                                       or self._eff_bbb(r) > self._eff_bbb(best)):
+                                # 러닝 베스트는 **후보군(CPP 비교군 제외)**에서만 고른다.
+                                # CPP는 비교 근거로만 쓰고 best_cpp에 따로 보관한다.
+                                if is_candidate(r) and (best is None
+                                                        or self._eff_bbb(r) > self._eff_bbb(best)):
                                     best = r
+                                elif is_comparison_only(r) and not r.get("toxic") and (
+                                        best_cpp is None
+                                        or self._eff_bbb(r) > self._eff_bbb(best_cpp)):
+                                    best_cpp = r
                     fr_parts.append(types.Part.from_function_response(
                         name=fc.name, response={"result": text}))
 
@@ -494,9 +642,11 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 if ch is not None:
                     choice = ch
                 if choice is not None:
-                    approve, critique_text = self._critic_review(client, model, types, cargo, choice)
+                    # best(후보군 러닝 베스트)를 함께 넘겨 **퇴행 제출**을 막는다(래칫 게이트).
+                    approve, critique_text, tier = self._critic_review(
+                        client, model, types, cargo, choice, best_seen=best)
                 else:
-                    approve, critique_text = True, "후보 채점 실패로 심사를 생략합니다."
+                    approve, critique_text, tier = True, "후보 채점 실패로 심사를 생략합니다.", "APPROVE"
                 yield AgentEvent("progress", data={"round": turn,
                                                    "best_bbb": (choice or best or {}).get("bbb", 0)})
                 if (not approve) and critiques < MAX_CRITIQUES:
@@ -519,9 +669,25 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 parts = (cand.content.parts if cand and cand.content else None) or []
                 contents.append(cand.content)
                 final_report = _visible(parts)
+            # ── 비교군(CPP) 제출은 최종 결과로 올리지 않는다 ──────────────────
+            # 심사는 이미 자동 미승인(REVISE)을 냈고 재설계 기회도 소진된 상태다. 이때 CPP를
+            # 포디움 1위로 올리면 "비교군이 결과로 나온다" — 그래서 후보군 러닝 베스트로 교체한다.
+            # (후보군을 하나도 못 찾은 경우에만 결과 없음으로 둔다.)
+            if choice is not None and is_comparison_only(choice):
+                swapped = best is not None
+                final_report = (final_report or "") + (
+                    "\n\n> **[시스템] 비교군 대체** — 제출된 최종 후보 "
+                    f"`{choice.get('shuttle', '?')}`는 비특이 흡수 **비교군(CPP)**이므로 최종 결과로 "
+                    "확정하지 않습니다." + (
+                        f" 후보군(RMT) 중 최고 후보 `{best.get('shuttle', '?')}`"
+                        f"(유효점수 {self._eff_bbb(best):.3f})로 대체해 제시합니다."
+                        if swapped else
+                        " 후보군(RMT)에서 유효한 후보를 찾지 못해 최종 후보 없이 종료합니다."))
+                choice = None
             final_pick = choice or best
             if critique_text is None and final_pick is not None:
-                approve, critique_text = self._critic_review(client, model, types, cargo, final_pick)
+                approve, critique_text, tier = self._critic_review(
+                    client, model, types, cargo, final_pick)
 
             # 최종 미승인(막다른 경우) → 실패 진단 + 대안 권고를 최종 보고서에 덧붙인다(실패 때만 1회).
             if final_pick is not None and not approve:
@@ -533,6 +699,14 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 except Exception:  # noqa: BLE001 - 권고는 부가기능, 실패해도 결과는 낸다
                     pass
 
+            # 비교군 최고치는 '참고선'으로만 보고서에 남긴다 — 결과 카드에는 올리지 않는다.
+            if best_cpp is not None:
+                final_report = (final_report or "") + (
+                    f"\n\n> **비교군 참고선(CPP, 최종 선택 대상 아님)** — "
+                    f"`{best_cpp.get('shuttle', '?')}` BBB {best_cpp.get('bbb', 0):.3f} · "
+                    f"off-target {best_cpp.get('sel_off', 0):.2f}. 비특이 흡수 상한을 보여주는 "
+                    "대조군이며, 선택성 때문에 후보군에서 제외됩니다.")
+
             # ── 결과 방출 (한 번씩): 설계자 결론 + 심사 판정 ──
             # 심사 최종 판정을 최종 후보에 각인 → UI가 "승인/미승인"을 정직하게 표시한다.
             # finish로 고른 choice가 있으면 그것을, 없으면(예산 소진) best를 최종 선택으로
@@ -540,6 +714,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
             pick = choice if choice is not None else final_pick
             if pick is not None:
                 pick["critic_approved"] = approve
+                pick["critic_tier"] = tier
                 pick["agent_pick"] = True
                 yield AgentEvent("choice", data=pick)
             yield AgentEvent("final", final_report or "")
@@ -548,14 +723,36 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 # 모델이 빈 텍스트를 돌려줘도 판정 문구를 채워 카드가 사라지지 않게.
                 yield AgentEvent(
                     "critique",
-                    critique_text or ("BBB·독성·선택성이 임계값을 만족합니다. 최종 선택을 승인합니다."
+                    critique_text or ("하드 게이트(독성·BBB 하한)를 통과하고 도달 가능 전선에서 "
+                                      "지배당하지 않습니다. 최종 선택을 승인합니다."
                                       if approve else "근거가 불충분합니다. 개선이 필요합니다."),
-                    data={"approve": approve})
+                    data={"approve": approve, "tier": tier})
                 final_pick["critic_approved"] = approve
+                final_pick["critic_tier"] = tier
+                # ── 구조 증거(ESMFold) — **에이전트 판단 밖**, 최종 후보 1건 보고용 ──
+                # analyze_structure 를 도구에서 뺀 뒤에도 구조 근거 자체는 버리지 않는다.
+                # 다만 (a) 의사결정에 넣지 않고 (b) 1회만 접고 (c) 실패하면 조용히 건너뛴다.
+                # 공개 API 장애가 결과를 막지 못하게 하려는 것이다.
+                try:
+                    stext, sdata = self._structure(
+                        cargo, {"linker": final_pick.get("linker", ""),
+                                "shuttle": final_pick.get("shuttle", "")})
+                    if not (sdata or {}).get("error"):
+                        final_pick["structure"] = sdata
+                        yield AgentEvent("structure", text=stext, data=sdata)
+                except Exception:  # noqa: BLE001 — 구조는 참고 근거일 뿐, 실패해도 결과를 막지 않는다
+                    pass
                 yield AgentEvent("optimum", data=final_pick)
         except Exception as exc:  # noqa: BLE001
             yield AgentEvent("error", f"Gemini 호출 오류: {type(exc).__name__}: {exc}")
 
 
-def get_gemini_agent(settings: Settings, max_rounds: int = 8) -> GeminiOptimizationAgent | None:
+# max_rounds 기본값 = 10 — 에이전트의 실제 종료는 `finish`(자기 수렴 선언)이고, 이 값은 그걸 못 할 때를
+# 대비한 **안전 상한(budget ceiling)**이다. 근거:
+#   · 수렴 바닥 6 — M4 효율 실측상 6라운드면 oracle 최적의 96.8% 도달(benchmark_agent.m4_agent_efficiency).
+#   · 여유분 +4 — 가설 주도 설계(finish 전 1회 필수)·구조/개발성 도구 라운드 + CRITIC→REVISE 재설계
+#     1~2회를 덮기 위함(grace +1은 마지막 스텝 REVISE만 커버).
+#   · 상한 성격 — 보통 5~6라운드에 finish로 먼저 끝나 10에는 잘 안 닿음 → 비용 폭주 없는 백스톱.
+# (주의: M4 벤치는 "타이트 예산에서도 효율적"임을 보이려 의도적으로 6을 쓴다 — 운영 기본값 10과 역할이 다름.)
+def get_gemini_agent(settings: Settings, max_rounds: int = 10) -> GeminiOptimizationAgent | None:
     return GeminiOptimizationAgent(settings, max_rounds) if settings.use_gemini_agent else None

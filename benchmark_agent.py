@@ -21,6 +21,8 @@ from core.optimizer_agent_gemini import get_gemini_agent
 from benchmark import _library_scores
 
 
+# max_rounds=6 은 의도적 선택 — "타이트한 예산에서도 에이전트가 효율적인가"를 보는 실측이다.
+# (운영 기본값은 10 = 안전 상한, get_gemini_agent 참고. 여기 6은 수렴 바닥을 재는 프로브다.)
 def m4_agent_efficiency(cargo="GSNKGAIIGLM", max_rounds=6):
     settings = get_settings()
     agent = get_gemini_agent(settings, max_rounds=max_rounds)
@@ -80,8 +82,8 @@ def m5_critic_effectiveness():
         if choice is None:
             print(f"  {label}: 채점 실패")
             continue
-        approve, _ = agent._critic_review(client, model, types, "GSNKGAIIGLM", choice)
-        verdict = "APPROVE" if approve else "REVISE"
+        approve, _, tier = agent._critic_review(client, model, types, "GSNKGAIIGLM", choice)
+        verdict = tier
         ok = (expect.startswith("REVISE") and not approve)
         hits += ok if expect.startswith("REVISE") else 0
         print(f"  {label:22s} BBB={choice['bbb']:.2f} 독성={choice['tox']:.2f} "

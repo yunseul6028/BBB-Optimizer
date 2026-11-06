@@ -60,6 +60,12 @@ VALID_AMINO_ACIDS = set("ACDEFGHIKLMNPQRSTVWY")
 TOXICITY_THRESHOLD = 0.38          # 부작용 탈락 기준선 (ToxinPred3 기본 임계값에 맞춤)
 MIN_BBB_SIGNAL = 0.15              # 최종 확정 최소 효능 신호(deepB3P 융합 점수). near-zero(<이 값)는
                                    # 선택성이 좋아도 효능 신호 부재로 확정 불가 → 심사 자동 미승인.
+
+# 유효점수 λ — eff_bbb = BBB − λ·off_target. **후보군 내부**의 선택성 저울질용이다.
+# (비교군 CPP 배제는 λ가 담당하지 않는다: 실측상 λ=0.25의 최대 영향력 0.25 < CPP↔RMT
+#  BBB 격차 0.434 → 어떤 off 값으로도 역전 불가. 그래서 배제는 역할 분리가 맡는다.
+#  optimizer_agent.is_comparison_only 참고.)
+OFF_TARGET_PENALTY = 0.25
 MODEL_MAX_LEN = 50                 # deepB3P seq_len — 초과분은 잘림(truncate)
 
 # --- 링커 라이브러리 (융합체의 링커 축) ---
@@ -88,6 +94,8 @@ SHUTTLES = {
     "B6":             {"seq": "GHKAKGPRK",           "target": "TfR1(트랜스페린 수용체)",  "note": "hTfR 세포외도메인 파지디스플레이 유래 monovalent 셔틀(9aa, RMT)"},
     "RVG29":          {"seq": "YTIWMPENPRPGTPCDIFTNSRGKRASNG", "target": "nAChR(니코틴성 수용체)", "note": "광견병 바이러스 당단백 유래 nAChR 셔틀(29aa, RMT)"},
     "CDX":            {"seq": "FKESWREARGTRIERG",    "target": "α7 nAChR(니코틴성 수용체)", "note": "Candoxin 유래 α7 nAChR 셔틀(16aa, RMT) — sub-μM 결합·낮은 off-target"},
+    "THR":            {"seq": "THRPPMWSPVWP",        "target": "TfR1(트랜스페린 수용체)",  "note": "TfR1 표적 셔틀·파지디스플레이 12-mer(12aa, RMT) — 금나노입자·AAV8·siRNA 뇌전달 보고. 주의: 혈청 안정성이 낮다는 보고(불안정성 지수도 높음) → 한계로 명시할 것"},
+    "Tet1":           {"seq": "HLNILSTLWKYR",        "target": "GT1b 갱글리오사이드 수용체(뉴런)", "note": "파상풍독소 모사 뉴런 표적 셔틀(12aa, RMT) — 근거 수준 주의: GT1b 결합·역행수송 보고가 중심이고 BBB 통과 직접 근거는 TfR 계열(T7·B6·THR)보다 약하다. 비교·탐색용으로 포함"},
     "TAT":            {"seq": "GRKKRRQRRRPPQ",       "target": "세포투과",    "note": "HIV-1 TAT 세포투과 펩타이드(13aa, CPP)"},
     "Penetratin":     {"seq": "RQIKIWFQNRRMKWKK",    "target": "세포투과",    "note": "Antennapedia 세포투과 펩타이드(16aa, CPP)"},
     "SynB1":          {"seq": "RGGRLSYSRRRFSTSTGR",  "target": "세포투과",    "note": "SynB 벡터 계열(18aa, CPP)"},

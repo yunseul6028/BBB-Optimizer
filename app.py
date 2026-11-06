@@ -24,6 +24,7 @@ from core.config import (
     SHUTTLES,
     VALID_AMINO_ACIDS,
 )
+from core.optimizer_agent import is_comparison_only
 from core.optimizer_agent_gemini import get_gemini_agent, OFF_TARGET_PENALTY
 from core.schemas import Verdict
 
@@ -101,9 +102,10 @@ with _hero:
 
     # === 자율 설계 에이전트 (입력은 항상 화물) ===
     if settings.use_gemini_agent:
-        agent_rounds = st.slider("최대 스텝 수", 4, 12, 10,
-                                 help="에이전트가 도구를 호출하는 최대 횟수. 낮추면 빠르고 저렴하지만, "
-                                      "너무 낮으면 finish 전에 예산이 소진돼 심사가 축약될 수 있습니다.")
+        agent_rounds = st.slider("최대 스텝 수 (안전 상한)", 4, 12, 10,
+                                 help="에이전트는 보통 finish로 5~6스텝에 스스로 끝나며, 이 값은 그걸 못 할 때를 "
+                                      "대비한 안전 상한입니다. 기본 10 = 수렴 바닥 6(M4 실측) + REVISE·가설루프 여유 4. "
+                                      "낮추면 빠르고 저렴하지만, 너무 낮으면 finish 전에 예산이 소진돼 심사가 축약될 수 있습니다.")
         st.caption(f"모델 — Gemini ({settings.gemini_model})")
     else:
         st.caption("데모 모드 — API 키 없이 예시 결과로 화면을 미리봅니다.")
@@ -162,7 +164,14 @@ def _verdict_pill(verdict) -> str:
     return _pill(text, bg, fg)
 
 
-def _approve_pill(approve: bool) -> str:
+def _approve_pill(approve, tier=None) -> str:   # py3.9 호환: `str | None` 표기 불가
+    """심사 판정 배지 — 계층 판정(APPROVE / APPROVE_WITH_LIMITS / REVISE)을 그대로 보여준다.
+
+    조건부 승인은 '한계를 명시한 승인'이며 정상적인 승인 형태다(심사 기준 축들이 서로
+    적대적이라 모든 축을 동시에 만족하는 후보는 존재하지 않는다 — docs/experiments.md 참고).
+    """
+    if tier == "APPROVE_WITH_LIMITS":
+        return _pill("조건부 승인 · APPROVE (한계 명시)", "#fff4e0", "#8a5300")
     return (_pill("승인 · APPROVE", "#e7f6ed", "#0b6b34") if approve
             else _pill("개선 요구 · REVISE", "#fbe9e9", "#a32020"))
 
@@ -225,13 +234,13 @@ def _demo_agent_events(cargo):
 
     yield _Ev("plan", text=(
         "**전략** — 라이브러리의 셔틀·링커 조합을 전수 평가해 BBB 투과·독성·안정성·"
-        "수용체 결합을 함께 만족하는 융합체를 찾습니다. 상위 후보는 구조(ESMFold)로 재검증합니다."))
+        "수용체 결합을 함께 만족하는 융합체를 찾습니다. 최종 후보는 구조(ESMFold)로 참고 검증합니다."))
     yield _Ev("reasoning", text=(
         "화물이 짧아 셔틀의 표면 노출이 결합에 결정적입니다. 유연 링커(GS 계열)를 우선 검토합니다."))
     yield _Ev("evaluation", text="1차 후보 평가", data={"rows": rows})
     for i, b in enumerate([0.72, 0.85, 0.90, 0.94]):
         yield _Ev("progress", data={"best_bbb": b, "round": i + 1})
-    yield _Ev("structure", text="상위 후보에서 셔틀이 표면에 충분히 노출됩니다.",
+    yield _Ev("structure", text="최종 후보에서 셔틀이 표면에 충분히 노출됩니다.",
               data={"exposed": True})
     win = dict(r_win)
     win["agent_pick"] = True
@@ -261,7 +270,8 @@ def _emit_agent_event(ev):
     elif ev.kind == "critique":
         with st.container(border=True):
             st.markdown(
-                f"**심사 에이전트 — 적대적 검증** &nbsp; {_approve_pill(ev.data.get('approve'))}",
+                f"**심사 에이전트 — 적대적 검증** &nbsp; "
+                f"{_approve_pill(ev.data.get('approve'), ev.data.get('tier'))}",
                 unsafe_allow_html=True,
             )
             st.markdown(ev.text)
@@ -308,25 +318,37 @@ def _eff_bbb(r):
 
 
 def _extract_podium(events, n=3):
-    """상위 후보 n개. 에이전트 결정축과 동일한 **유효점수(eff = BBB − λ·off_target)** 순으로
-    정렬한다 — raw BBB 최고여도 off-target CPP면 밀린다. 에이전트가 finish로 고른 최종
-    선택(choice)이 있으면 1위로 고정하고, 나머지는 유효점수 순으로 채운다(중복 제거)."""
+    """상위 **후보군** n개. 에이전트 결정축과 동일한 유효점수(eff = BBB − λ·off_target) 순.
+
+    **비교군(CPP)은 순위에서 제외한다.** CPP(TAT·SynB1·Penetratin 등)는 비특이 흡수
+    대조군으로만 쓰며 최종 결과가 아니다. off_target 페널티로는 CPP를 밀어낼 수 없기
+    때문에(실측: λ=0.25의 최대 영향력 0.25 < CPP↔RMT BBB 격차 0.434 → 어떤 off 값이어도
+    역전 불가) 페널티가 아니라 **역할 분리**로 제외한다.
+    """
     seen = {}
     for e in events:
         if e.kind == "evaluation":
             for r in e.data.get("rows", []):
-                if r.get("toxic"):
+                if r.get("toxic") or is_comparison_only(r):
                     continue
                 seq = r["sequence"]
                 if seq not in seen or _eff_bbb(r) > _eff_bbb(seen[seq]):
                     seen[seq] = r
     ranked = sorted(seen.values(), key=_eff_bbb, reverse=True)
     choice = next((e.data for e in events if e.kind == "choice"), None)
-    if choice:
+    if choice and not is_comparison_only(choice):
         cseq = choice.get("sequence")
         rest = [r for r in ranked if r.get("sequence") != cseq]
         return [choice] + rest[:n - 1]
     return ranked[:n]
+
+
+def _extract_baseline(events):
+    """비교군(CPP) 최고치 — 참고선으로만 표시하고 순위·결과에는 올리지 않는다."""
+    cpps = [r for e in events if e.kind == "evaluation"
+            for r in e.data.get("rows", [])
+            if not r.get("toxic") and is_comparison_only(r)]
+    return max(cpps, key=_eff_bbb) if cpps else None
 
 def _render_agent_summary(events, cargo):
     """최적화 궤적 + 상위 3 후보 카드(+온디맨드 분석) + 보고서."""
@@ -358,6 +380,11 @@ def _render_agent_summary(events, cargo):
         st.altair_chart(_chart, use_container_width=True)
     if podium:
         st.markdown("##### 상위 후보")
+        _bl = _extract_baseline(events)
+        if _bl is not None:
+            st.caption(f"비교군 참고선(CPP, 최종 선택 대상 아님) — `{_bl.get('shuttle', '?')}` "
+                       f"BBB {_bl.get('bbb', 0):.3f} · off-target {_bl.get('sel_off', 0):.2f}. "
+                       "비특이 흡수 상한을 보여주는 대조군이며 순위에서 제외됩니다.")
         st.caption("에이전트가 고른 최종 선택(심사 판정 포함)이 1위이고, 나머지는 **유효점수"
                    "(BBB − off-target 감점) 순** 차순위입니다 — raw BBB 최고여도 비특이(off-target) "
                    "CPP는 밀립니다(에이전트 결정축과 동일).")
@@ -365,9 +392,15 @@ def _render_agent_summary(events, cargo):
         for i, cand in enumerate(podium):
             with cols[i]:
                 approved = cand.get("critic_approved")
+                tier = cand.get("critic_tier")
                 is_pick = cand.get("agent_pick") or approved is not None
                 with st.container(border=True, key=f"best-card-{i}"):
-                    if is_pick and approved is False:
+                    if is_pick and approved and tier == "APPROVE_WITH_LIMITS":
+                        st.markdown("### 에이전트 최종 선택")
+                        st.caption("심사 조건부 승인 — 하드 게이트(독성·BBB 하한) 통과, 달성 가능 "
+                                   "전선에서 비지배. 남은 한계는 심사 카드에 명시됩니다.")
+                        _v = Verdict.ACCEPTED
+                    elif is_pick and approved is False:
                         # 1위(최종 선택)로는 제시하되, 심사 미승인임을 명시한다.
                         st.markdown("### 에이전트 최종 선택")
                         st.caption("심사 에이전트가 개선요구(REVISE) — 확정 아님. 스텝 수를 늘려 "
@@ -418,7 +451,8 @@ def _render_agent_summary(events, cargo):
     if critique is not None:
         with st.container(border=True):
             st.markdown(
-                f"### 심사 에이전트 — 적대적 검증  &nbsp; {_approve_pill(critique.data.get('approve'))}",
+                f"### 심사 에이전트 — 적대적 검증  &nbsp; "
+                f"{_approve_pill(critique.data.get('approve'), critique.data.get('tier'))}",
                 unsafe_allow_html=True,
             )
             st.markdown(critique.text)

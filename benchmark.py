@@ -148,8 +148,16 @@ def m2_search(cargo, predictor, tox_pred, thr):
     if opt is None:
         print("  (비독성 최적 없음)")
         return
-    print(f"  🏆 라이브러리 최적(oracle): {opt['linker']}+{opt['shuttle']}  "
+    print(f"  🏆 전체 최적(oracle, 비교군 CPP 포함): {opt['linker']}+{opt['shuttle']}  "
           f"BBB={opt['bbb']:.3f}  독성={opt['tox']:.3f}")
+    # CPP는 **비특이 흡수 비교군**이라 최종 선택 대상이 아니다(core.optimizer_agent.is_comparison_only).
+    # 따라서 '실제 달성 목표'는 후보군(RMT) 기준 최적이다 — 둘 다 보고해야 정직하다.
+    cand = [r for r in valid if "CPP" not in SHUTTLES[r["shuttle"]]["note"]]
+    copt = max(cand, key=lambda r: r["bbb"]) if cand else None
+    if copt is not None:
+        print(f"  🎯 후보군 최적(RMT만, 실제 목표): {copt['linker']}+{copt['shuttle']}  "
+              f"BBB={copt['bbb']:.3f}  독성={copt['tox']:.3f}")
+        print(f"     (비교군 CPP {len(valid) - len(cand)}개 제외 → 후보군 {len(cand)}개)")
 
     # 무작위 탐색 효율: K개 평가 시 최적의 몇 %에 도달 (여러 시드 평균)
     print("  무작위 탐색 효율(최적 대비 도달률, 시드 20개 평균):")
