@@ -25,7 +25,7 @@ from benchmark import _library_scores, is_cpp_row
 # (운영 기본값은 10 = 안전 상한, get_gemini_agent 참고. 여기 6은 수렴 바닥을 재는 프로브다.)
 def m4_agent_efficiency(cargo="GSNKGAIIGLM", max_rounds=6):
     settings = get_settings()
-    agent = get_gemini_agent(settings, max_rounds=max_rounds)
+    agent = get_gemini_agent(settings, max_rounds=max_rounds, use_ledger=False)
     if agent is None:
         print("⚠️ Gemini 에이전트 비활성(GEMINI_API_KEY 필요) — M4 생략.")
         return
@@ -65,7 +65,7 @@ def m4_agent_efficiency(cargo="GSNKGAIIGLM", max_rounds=6):
 
 def m5_critic_effectiveness():
     settings = get_settings()
-    agent = get_gemini_agent(settings)
+    agent = get_gemini_agent(settings, use_ledger=False)
     if agent is None:
         print("⚠️ Gemini 에이전트 비활성 — M5 생략.")
         return

@@ -18,7 +18,10 @@ from typing import Generator
 
 from .config import (LINKER_LIBRARY, MIN_BBB_SIGNAL, MODEL_MAX_LEN, OFF_TARGET_PENALTY,
                      SHUTTLES, Settings)
-from .optimizer_agent import AgentEvent, OptimizationAgent, is_candidate, is_comparison_only
+from .optimizer_agent import (AgentEvent, LIB_LINKERS, LIB_SHUTTLES, OptimizationAgent,
+                              is_candidate, is_comparison_only)
+from .order_specificity import DELTA_MIN as ORDER_DELTA_MIN
+from .order_specificity import Z_MIN as ORDER_Z_MIN
 
 # 일시적 오류(모델 과부하·분당 레이트리밋·응답 지연) — 백오프 재시도 대상
 _TRANSIENT = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "overloaded", "high demand",
@@ -118,6 +121,14 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
 class GeminiOptimizationAgent(OptimizationAgent):
     """Claude 백엔드 재사용 + Gemini function-calling 루프."""
 
+    def __init__(self, settings, max_rounds: int = 10, use_ledger: bool = True):
+        super().__init__(settings, max_rounds)
+        # 설계 이력 원장(core/ledger.py) 사용 여부.
+        # ⚠️ **벤치마크·애블레이션은 반드시 False**로 고정한다. 원장을 켠 세션은 이전
+        # 세션의 탐색을 물려받으므로 콜드 스타트 세션과 **비교 불가**다('18평가로 134.8%'
+        # 같은 효율 수치의 의미가 달라진다). 섞으면 §12 분모 불일치와 같은 거짓 비교가 된다.
+        self.use_ledger = use_ledger
+
     def _function_decls(self, types):
         T = types.Type
         S = types.Schema
@@ -137,14 +148,17 @@ class GeminiOptimizationAgent(OptimizationAgent):
             ),
             types.FunctionDeclaration(
                 name="design_candidate",
-                description=("라이브러리에 없는, **직접 편집·설계한** 링커·셔틀 서열 하나를 채점한다. "
-                             "편집 전 **가설(무엇을 왜 바꾸나)·예측(어느 축이 어떻게 변할까)**을 반드시 제시하라 "
-                             "— 무작위 변이가 아니라 근거 있는 설계. 잔기 변이·트리밍·연장·하이브리드 등 "
-                             "자유 설계. evaluate와 동일 지표 반환(채점 뒤 예측과 대조해 반성할 것)."),
+                description=("**직접 편집·설계한 셔틀** 서열 하나를 채점한다. 편집 전 "
+                             "**가설(무엇을 왜 바꾸나)·예측(어느 축이 어떻게 변할까)**을 반드시 제시하라 "
+                             "— 무작위 변이가 아니라 근거 있는 설계. 셔틀은 잔기 변이·트리밍·연장·"
+                             "하이브리드 등 자유 설계. **단, 링커는 반드시 라이브러리 링커 중 하나**"
+                             "(또는 직접융합=빈 문자열)여야 한다 — 임의 잔기를 접합부에 끼워넣는 것은 "
+                             "설계가 아니라 점수 교란이다. evaluate와 동일 지표 반환."),
                 parameters=S(type=T.OBJECT, properties={
                     "label": S(type=T.STRING),
-                    "linker": S(type=T.STRING),
-                    "shuttle": S(type=T.STRING),
+                    "linker": S(type=T.STRING, description="**라이브러리 링커만** — 직접융합은 빈 문자열. "
+                               "임의 서열을 쓰면 채점되지 않는다."),
+                    "shuttle": S(type=T.STRING, description="자유 설계 가능(편집 대상은 셔틀이다)"),
                     "hypothesis": S(type=T.STRING, description="무엇을 왜 편집하는가 — 직전 평가의 어느 "
                                     "문제(축)를 어떤 편집으로 고치려는지"),
                     "prediction": S(type=T.STRING, description="그 편집이 어느 축을 어떻게 바꿀지 예측(방향·대략치)"),
@@ -190,8 +204,33 @@ class GeminiOptimizationAgent(OptimizationAgent):
             text, rows = self._evaluate(cargo, args, library_only=True)
             return text, AgentEvent("evaluation", text=args.get("rationale", ""), data={"rows": rows})
         if name == "design_candidate":
+            # ── 링커 제약 ──────────────────────────────────────────────────
+            # 이건 **장부 정규화**다 — 해킹을 막는 장치가 아니다(그건 구성체 수준 통제가 한다).
+            # 실측(docs/experiments.md §13): 화물+T7 에 아무 잔기나 하나 끼우면 융합 BBB 가
+            # 0.526 → 평균 0.743(20종 중 18종 상승)으로 뛴다. 열어두면 에이전트가 셔틀 설계
+            # 대신 접합부를 긁는다(실제로 승자 전원이 `V+...` 였다).
+            # ⚠️ **필드를 막는 것만으로는 못 막는다**: `링커 Y + 셔틀 HAIYPRH` 와
+            # `직접융합 + 셔틀 YHAIYPRH` 는 **같은 분자**이고 BBB 도 똑같이 0.875 다. 실제로
+            # 이 제약을 넣자 에이전트가 Y 를 셔틀 앞으로 옮겨 그대로 우회했다. 링커/셔틀 구분은
+            # 장부상의 경계일 뿐 화학적 경계가 아니다.
+            # 그래서 이 제약의 목적은 하나다: **모든 설계를 셔틀 필드로 모아** 구성체 수준
+            # 통제(순서 델타 + 접합부 길이 z)가 빠짐없이 걸리게 하는 것.
+            lk_raw = (args.get("linker", "") or "")
+            lk = "".join(ch for ch in lk_raw.upper() if ch.isalpha())
+            if lk and lk not in LIB_LINKERS:
+                from .config import LINKER_LIBRARY
+                opts = ", ".join(sorted({(v["seq"] or "직접융합") for v in LINKER_LIBRARY.values()}))
+                self.gate_rejections = getattr(self, "gate_rejections", 0) + 1
+                msg = (f"⚠️ 링커 `{lk}`는 라이브러리에 없어 **채점하지 않았다**.\n"
+                       f"임의 잔기를 접합부에 끼우면 점수가 오르지만 그건 설계가 아니라 "
+                       f"**점수 교란**이다 — 실측으로 화물+T7 에 아무 잔기 하나를 끼우면 "
+                       f"BBB 가 0.526→평균 0.743(20종 중 18종 상승)으로 뛴다. 발린 하나가 "
+                       f"TfR 결합을 바꿀 메커니즘은 없다.\n"
+                       f"**링커는 라이브러리에서 고르고, 설계는 셔틀에 하라.** "
+                       f"사용 가능한 링커: {opts}")
+                return msg, AgentEvent("text", text=f"🚫 라이브러리 밖 링커 `{lk}` 거부")
             text, rows = self._evaluate(cargo, {"constructs": [{
-                "label": args.get("label", "설계"), "linker": args.get("linker", ""),
+                "label": args.get("label", "설계"), "linker": lk,
                 "shuttle": args.get("shuttle", "")}]})
             hyp = args.get("hypothesis", "").strip()
             pred = args.get("prediction", "").strip()
@@ -203,7 +242,14 @@ class GeminiOptimizationAgent(OptimizationAgent):
             # ── 순서 특이성 즉시 피드백 ──
             # deepB3P 점수의 상당 부분은 조성에서 온다(M1: 스크램블 AUC 0.618). 설계체가
             # 단순 조성 쌓기인지 **그 자리에서** 알려준다 — 심사까지 끌고 가면 라운드를 낭비한다.
-            text += self._order_note(args.get("shuttle", ""))
+            note, delta = self._order_note(args.get("shuttle", ""))
+            text += note
+            inote, iz = self._insertion_note(cargo, args.get("shuttle", ""))
+            text += inote
+            for r in rows:
+                # 원장·심사·러닝베스트가 모두 같은 값을 보게 행에 실어둔다.
+                r["order_delta"] = delta
+                r["insert_z"] = iz
             reflect = ("\n\n[반성 요구] 위 실제 점수를 네 **예측과 대조**하라: 예측이 맞았나? "
                        "틀렸다면 어느 축에서 왜 빗나갔나? 그 교훈으로 다음 가설을 세워 설계를 "
                        "이어가거나, 충분히 수렴했으면 finish하라. (점수를 우기지 말고 오라클 결과를 따르라.)")
@@ -217,47 +263,92 @@ class GeminiOptimizationAgent(OptimizationAgent):
     def _order_specificity(self, shuttle: str):
         """셔틀의 순서 특이성 → (delta, 라이브러리 여부, 통과, 설명). 실패해도 예외 없음."""
         from .order_specificity import order_delta, verdict
-        from .optimizer_agent import LIB_SHUTTLES
         sh = "".join(ch for ch in (shuttle or "").upper() if ch.isalpha())
         is_lib = sh in LIB_SHUTTLES
         delta, _real, _mean, _n = order_delta(sh, self.predictor)
         ok, msg = verdict(delta, is_lib)
         return delta, is_lib, ok, msg
 
-    def _order_gate(self, choice) -> tuple[bool, str]:
+    def _insertion_check(self, cargo: str, shuttle: str):
+        """접합부 길이 통제 → (통과, 설명, z). 대상이 아니면 (True, "", None)."""
+        from .order_specificity import insertion_verdict, insertion_z
+        r = insertion_z(cargo, shuttle, self.predictor, LIB_SHUTTLES)
+        ok, msg = insertion_verdict(*r)
+        return ok, msg, r[0]
+
+    def _insertion_note(self, cargo: str, shuttle: str):
+        """design_candidate 응답에 붙일 접합부 길이 통제 한 단락 → (문구, z)."""
+        try:
+            ok, msg, z = self._insertion_check(cargo, shuttle)
+        except Exception:  # noqa: BLE001
+            return "", None
+        if not msg:
+            return "", None
+        tail = ("" if ok else " 길이를 늘리는 대신 셔틀 **내부 잔기를 치환**하라.")
+        return f"\n\n[접합부 길이 통제] {'✅' if ok else '⚠️'} {msg}{tail}", z
+
+    @staticmethod
+    def _order_ok_row(r) -> bool:
+        """이 행이 순서 특이성 요건을 만족하나 — **이미 계산된 값만** 쓴다(예측 호출 0회).
+
+        라이브러리 셔틀은 면제(근거가 문헌에 있다). `order_delta` 가 없는 행은
+        `evaluate_candidates`(라이브러리 전용) 유래이거나 측정 실패이므로 통과시킨다.
+        """
+        sh = (r.get("shuttle") or "").upper()
+        if sh in LIB_SHUTTLES:
+            return True
+        d = r.get("order_delta")
+        if d is not None and d < ORDER_DELTA_MIN:
+            return False
+        z = r.get("insert_z")
+        if z is not None and z < ORDER_Z_MIN:
+            return False
+        return True
+
+    def _order_gate(self, cargo, choice) -> tuple[bool, str]:
         """심사용 순서 특이성 게이트 → (미승인시키나, 게이트 문구).
 
         라이브러리 셔틀이면 **예측을 호출하지 않고** 즉시 통과시킨다(게이트 면제 + 비용 0).
         측정이 실패하면 통과시킨다 — 보조 지표의 실패로 후보를 떨어뜨리지 않는다.
         """
-        from .order_specificity import DELTA_MIN
         try:
             delta, is_lib, ok, msg = self._order_specificity(choice.get("shuttle", ""))
         except Exception:  # noqa: BLE001
             return False, ""
-        if is_lib or ok:
+        if is_lib:
             return False, ""
+        if ok:
+            # 순서는 통과했어도 **길이로 올린 것**일 수 있다. 실측: `YHAIYPRH` 는 순서 델타
+            # +0.273 으로 통과하는데, 같은 분자인 `링커 Y + T7` 과 점수가 똑같다(0.875).
+            # 두 통제는 서로 다른 널을 쓰므로 **둘 다** 걸어야 한다.
+            try:
+                iok, imsg, _z = self._insertion_check(cargo, choice.get("shuttle", ""))
+            except Exception:  # noqa: BLE001
+                return False, ""
+            if iok:
+                return False, ""
+            return True, f"\n\n[시스템 게이트] 최종 후보가 **설계체**인데 {imsg}"
         return True, (
             f"\n\n[시스템 게이트] 최종 후보가 **설계체**(라이브러리 밖)인데 {msg}\n"
             f"deepB3P 점수는 서열 순서보다 **조성**에 끌리는 성향이 있다(M1 실측: 양성 vs 무작위 "
             f"AUC 0.807 vs 양성 vs 스크램블 0.618). 그래서 조성만 바꿔 쌓은 서열도 높은 점수를 "
             f"받는다 → 자동 미승인(REVISE). 요구: 설계체는 자기 스크램블 대조보다 "
-            f"**{DELTA_MIN:+.3f} 이상** 높아야 한다. 양이온 잔기를 쌓는 방향이 아니라 "
+            f"**{ORDER_DELTA_MIN:+.3f} 이상** 높아야 한다. 양이온 잔기를 쌓는 방향이 아니라 "
             f"**결합 모티프의 배치·간격**을 설계하거나, 라이브러리 셔틀로 되돌아가라.")
 
-    def _order_note(self, shuttle: str) -> str:
-        """design_candidate 응답에 붙일 순서 특이성 한 단락."""
+    def _order_note(self, shuttle: str):
+        """design_candidate 응답에 붙일 순서 특이성 한 단락 → (문구, delta)."""
         try:
             delta, is_lib, ok, msg = self._order_specificity(shuttle)
         except Exception:  # noqa: BLE001
-            return ""   # 보조 지표다. 실패가 본 평가를 막아선 안 된다.
+            return "", None   # 보조 지표다. 실패가 본 평가를 막아선 안 된다.
         if is_lib:
-            return f"\n\n[순서 특이성] {msg}"
+            return f"\n\n[순서 특이성] {msg}", delta
         head = "✅" if ok else "⚠️"
         tail = ("" if ok else
                 " 조성(아르기닌 등 양이온 잔기 쌓기)으로 올린 점수는 **심사에서 자동 미승인**된다. "
                 "특정 잔기를 쌓는 대신 **결합 모티프의 배치**를 설계하라.")
-        return f"\n\n[순서 특이성] {head} {msg}{tail}"
+        return f"\n\n[순서 특이성] {head} {msg}{tail}", delta
 
     def _optimize_developability(self, args, cargo=""):
         """셔틀의 개발성(liability·응집·불안정성)을 다목적 Pareto로 최적화 — 기능 보존.
@@ -520,7 +611,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 f"**RMT 후보가 {front.get('n_gate_rmt')}개 실재**한다 → 비교군을 최종안으로 확정할 수 "
                 f"없으므로 자동 미승인(REVISE). 달성 가능한 RMT 대안: {alts}.")
             tier = "REVISE"
-        elif (og := self._order_gate(choice))[0]:
+        elif (og := self._order_gate(cargo, choice))[0]:
             # ── 순서 특이성 게이트 — '조성 쌓기로 올린 점수' 금지 ──
             # M1 실측: 양성 vs 무작위 AUC 0.807 인데 양성 vs 스크램블(조성 동일·순서 파괴)은
             # 0.618 뿐이다 → deepB3P 점수의 상당 부분이 **아미노산 조성**에서 온다. 그래서
@@ -643,9 +734,23 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 kw["tools"] = [tools]
             return types.GenerateContentConfig(**kw)
 
+        task = (f"화물 `{cargo}`에 최적인 링커·셔틀을 설계하라. 도구를 자율적으로 사용해 "
+                "BBB·독성·구조·안정성을 모두 만족하는 최종 융합체를 찾아라.")
+        # 설계 이력 요약 — 지난 세션들이 실측한 상위 후보와 실패를 **바닥**으로 깔아준다.
+        # 세션 내 래칫이 '한 세션 안에서 퇴행 금지'라면, 이건 그걸 세션 경계 밖으로 확장한 것이다.
+        ledger_brief = ""
+        if self.use_ledger:
+            try:
+                from .ledger import brief as _ledger_brief
+                ledger_brief = _ledger_brief(cargo)
+            except Exception:  # noqa: BLE001
+                ledger_brief = ""   # 보조 장치다. 실패해도 세션은 그대로 돌아간다
+        if ledger_brief:
+            yield AgentEvent("text", text="📒 설계 이력을 불러왔습니다 — 지난 세션들의 실측 "
+                                          "상위 후보·실패 기록을 출발점으로 씁니다.")
         contents = [types.Content(role="user", parts=[types.Part.from_text(
-            text=f"화물 `{cargo}`에 최적인 링커·셔틀을 설계하라. 도구를 자율적으로 사용해 "
-                 "BBB·독성·구조·안정성을 모두 만족하는 최종 융합체를 찾아라.")])]
+            text=task + ledger_brief)])]
+        seen_rows = []     # 이번 세션이 채점한 모든 행 — 원장 기록용
         best = None        # 후보군(CPP 제외) 러닝 베스트
         best_cpp = None    # 비교군 최고치 — 보고용이며 최종 선택이 되지 않는다
 
@@ -720,11 +825,15 @@ class GeminiOptimizationAgent(OptimizationAgent):
                     if ev is not None:
                         yield ev
                         if ev.kind == "evaluation":
+                            seen_rows.extend(ev.data["rows"])
                             for r in ev.data["rows"]:
                                 # 러닝 베스트는 **후보군(CPP 비교군 제외)**에서만 고른다.
                                 # CPP는 비교 근거로만 쓰고 best_cpp에 따로 보관한다.
-                                if is_candidate(r) and (best is None
-                                                        or self._eff_bbb(r) > self._eff_bbb(best)):
+                                # 순서 특이성 탈락 후보는 러닝 베스트가 될 수 없다 —
+                                # 그래야 최종 교체(복구)가 **통과하는** 후보로 되돌아간다.
+                                if (is_candidate(r) and self._order_ok_row(r)
+                                        and (best is None
+                                             or self._eff_bbb(r) > self._eff_bbb(best))):
                                     best = r
                                 elif is_comparison_only(r) and not r.get("toxic") and (
                                         best_cpp is None
@@ -802,6 +911,22 @@ class GeminiOptimizationAgent(OptimizationAgent):
             # 3/4가 퇴행 상태로 종료됐다(0.725를 이미 보고 0.461을 제출). 검출만으로는 못 고친다.
             # 그래서 CPP 대체와 **같은 방식으로** 이미 채점해 본 최고 후보로 바꿔 제시한다.
             # 탐색 기록(best)은 오라클 실측이므로 임의 추정이 아니다.
+            elif choice is not None and not self._order_ok_row(choice) and best is not None:
+                # ── 순서 특이성 '복구' 절반 ──
+                # 게이트가 REVISE를 내도 재설계 기회(MAX_CRITIQUES)를 다 쓰면 그 후보가
+                # 그대로 최종이 돼 버린다 → 승인 0건으로 끝난다(실측: 2세션 모두 그랬다).
+                # 래칫에서 이미 겪은 '검출은 하는데 복구가 없다'와 **같은 구멍**이라
+                # 같은 방식으로 막는다: 순서 특이성을 통과한 러닝 베스트로 되돌린다.
+                final_report = (final_report or "") + (
+                    f"\n\n> **[시스템] 조성 쌓기 대체** — 제출 후보 "
+                    f"`{(choice.get('linker') or '직접융합')}+{choice.get('shuttle', '?')}`는 "
+                    f"BBB {choice.get('bbb', 0):.3f}이지만 **순서 특이성 미달**(스크램블 대조 대비 "
+                    f"{(choice.get('order_delta') or 0):+.3f} < {ORDER_DELTA_MIN:+.3f})로, 점수가 "
+                    f"서열 순서가 아니라 아미노산 조성에서 왔다. 순서 특이성을 통과한 "
+                    f"`{(best.get('linker') or '직접융합')}+{best.get('shuttle', '?')}`"
+                    f"(BBB {best.get('bbb', 0):.3f})로 대체한다.")
+                choice = None
+                swapped_out = True
             elif (choice is not None and best is not None
                   and self._eff_bbb(choice) < self._eff_bbb(best) - self.RATCHET_MARGIN):
                 final_report = (final_report or "") + (
@@ -829,6 +954,27 @@ class GeminiOptimizationAgent(OptimizationAgent):
                         final_report = (final_report or "") + "\n\n" + rec
                 except Exception:  # noqa: BLE001 - 권고는 부가기능, 실패해도 결과는 낸다
                     pass
+
+            # ── 설계 이력 원장에 이번 세션을 기록 ──
+            # 다음 세션이 이 결과를 **바닥**으로 깔고 시작한다(세션 간 래칫). 실패 사유도
+            # 같이 남겨 같은 벽에 다시 부딪히는 라운드를 아낀다.
+            if self.use_ledger:
+                try:
+                    from .ledger import record as _ledger_record
+                    notes = {}
+                    for r in seen_rows:
+                        sh = (r.get("shuttle") or "").upper()
+                        if not sh or sh in LIB_SHUTTLES:
+                            continue
+                        k = ((r.get("linker") or "").upper(), sh)
+                        d, z = r.get("order_delta"), r.get("insert_z")
+                        if d is not None and d < ORDER_DELTA_MIN:
+                            notes[k] = f"순서 특이성 미달(델타 {d:+.3f}) — 조성 쌓기"
+                        elif z is not None and z < ORDER_Z_MIN:
+                            notes[k] = f"접합부 길이 통제 미달(z {z:+.2f}) — 길이로 올린 점수"
+                    _ledger_record(cargo, seen_rows, final_pick, notes)
+                except Exception:  # noqa: BLE001
+                    pass    # 기록 실패가 결과를 무효화하진 않는다
 
             # 비교군 최고치는 '참고선'으로만 보고서에 남긴다 — 결과 카드에는 올리지 않는다.
             if best_cpp is not None:
@@ -885,5 +1031,8 @@ class GeminiOptimizationAgent(OptimizationAgent):
 #     1~2회를 덮기 위함(grace +1은 마지막 스텝 REVISE만 커버).
 #   · 상한 성격 — 보통 5~6라운드에 finish로 먼저 끝나 10에는 잘 안 닿음 → 비용 폭주 없는 백스톱.
 # (주의: M4 벤치는 "타이트 예산에서도 효율적"임을 보이려 의도적으로 6을 쓴다 — 운영 기본값 10과 역할이 다름.)
-def get_gemini_agent(settings: Settings, max_rounds: int = 10) -> GeminiOptimizationAgent | None:
-    return GeminiOptimizationAgent(settings, max_rounds) if settings.use_gemini_agent else None
+def get_gemini_agent(settings: Settings, max_rounds: int = 10,
+                     use_ledger: bool = True) -> GeminiOptimizationAgent | None:
+    """use_ledger: 설계 이력 원장 사용. **벤치마크·애블레이션은 False** (비교 불가해짐)."""
+    return (GeminiOptimizationAgent(settings, max_rounds, use_ledger)
+            if settings.use_gemini_agent else None)

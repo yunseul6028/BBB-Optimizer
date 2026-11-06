@@ -107,7 +107,7 @@ def make_prompt_patch(orig_prompt, dis: set[str]):
 # ---------------------------------------------------------------------------
 def run_session(cargo: str, disabled: list[str], max_rounds: int, rep: int) -> dict:
     settings = get_settings()
-    agent = get_gemini_agent(settings, max_rounds=max_rounds)
+    agent = get_gemini_agent(settings, max_rounds=max_rounds, use_ledger=False)
     if agent is None:
         raise SystemExit("Gemini 에이전트 비활성 — GEMINI_API_KEY / 로컬 엔진 확인")
 
@@ -233,7 +233,7 @@ def main():
 
     out = Path(args.out)
     settings = get_settings()
-    probe = get_gemini_agent(settings, max_rounds=args.max_rounds)
+    probe = get_gemini_agent(settings, max_rounds=args.max_rounds, use_ledger=False)
     if probe is None:
         raise SystemExit("Gemini 에이전트 비활성 — GEMINI_API_KEY / 로컬 엔진 확인")
 
