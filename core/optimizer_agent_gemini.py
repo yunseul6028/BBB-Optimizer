@@ -722,8 +722,10 @@ class GeminiOptimizationAgent(OptimizationAgent):
             # 심사는 이미 자동 미승인(REVISE)을 냈고 재설계 기회도 소진된 상태다. 이때 CPP를
             # 포디움 1위로 올리면 "비교군이 결과로 나온다" — 그래서 후보군 러닝 베스트로 교체한다.
             # (후보군을 하나도 못 찾은 경우에만 결과 없음으로 둔다.)
+            swapped_out = False          # 제출 후보를 러닝 베스트로 바꿨는가(재심사 필요)
             if choice is not None and is_comparison_only(choice):
                 swapped = best is not None
+                swapped_out = swapped
                 final_report = (final_report or "") + (
                     "\n\n> **[시스템] 비교군 대체** — 제출된 최종 후보 "
                     f"`{choice.get('shuttle', '?')}`는 비특이 흡수 **비교군(CPP)**이므로 최종 결과로 "
@@ -733,10 +735,29 @@ class GeminiOptimizationAgent(OptimizationAgent):
                         if swapped else
                         " 후보군(RMT)에서 유효한 후보를 찾지 못해 최종 후보 없이 종료합니다."))
                 choice = None
+            # ── 퇴행 제출은 러닝 베스트로 되돌린다(래칫의 '복구' 절반) ──────────
+            # 래칫 게이트(_critic_review)는 퇴행을 **검출**해 REVISE를 내지만, 재설계 기회를
+            # 소진하면 퇴행 후보가 그대로 최종이 된다. 실측(verify 4세션): 전부 미승인인데도
+            # 3/4가 퇴행 상태로 종료됐다(0.725를 이미 보고 0.461을 제출). 검출만으로는 못 고친다.
+            # 그래서 CPP 대체와 **같은 방식으로** 이미 채점해 본 최고 후보로 바꿔 제시한다.
+            # 탐색 기록(best)은 오라클 실측이므로 임의 추정이 아니다.
+            elif (choice is not None and best is not None
+                  and self._eff_bbb(choice) < self._eff_bbb(best) - self.RATCHET_MARGIN):
+                final_report = (final_report or "") + (
+                    "\n\n> **[시스템] 퇴행 대체** — 제출된 최종 후보 "
+                    f"`{choice.get('linker') or '직접융합'}+{choice.get('shuttle', '?')}`"
+                    f"(유효점수 {self._eff_bbb(choice):.3f})보다 **이 세션이 이미 채점해 본** "
+                    f"`{best.get('linker') or '직접융합'}+{best.get('shuttle', '?')}`"
+                    f"(유효점수 {self._eff_bbb(best):.3f})가 더 좋으므로 후자로 대체해 제시합니다. "
+                    "설계 탐색 중 더 나쁜 후보로 확정되는 것을 막는 장치입니다.")
+                choice = None          # → final_pick = best
+                swapped_out = True
             final_pick = choice or best
-            if critique_text is None and final_pick is not None:
+            # 교체가 일어났으면 **교체된 후보로 다시 심사**한다 — 이전 판정은 버린 후보의 것이다.
+            # (교체가 없고 이미 판정이 있으면 재호출하지 않는다 — 불필요한 LLM 비용.)
+            if final_pick is not None and (critique_text is None or swapped_out):
                 approve, critique_text, tier = self._critic_review(
-                    client, model, types, cargo, final_pick)
+                    client, model, types, cargo, final_pick, best_seen=best)
 
             # 최종 미승인(막다른 경우) → 실패 진단 + 대안 권고를 최종 보고서에 덧붙인다(실패 때만 1회).
             if final_pick is not None and not approve:
