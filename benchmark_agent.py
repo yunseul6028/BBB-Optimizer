@@ -87,10 +87,32 @@ def m5_critic_effectiveness():
         # 전선 하한(≈0.42)을 넘으면서 best_seen 보다만 낮아야 하므로, T7 직접융합(eff 0.491)을
         # 제출하고 더 좋은 `A+T7`(eff 0.635)을 이미 본 것으로 준다. 차이 0.144 > 여유폭 0.02.
         ("퇴행(더 좋은 걸 봤음)", "", "HAIYPRH", "REVISE", "래칫", ("A", "HAIYPRH")),
+        # 순서 특이성 프로브 — **에이전트가 실제로 올렸던** 설계체를 쓴다(공진화 세션의 ApoE
+        # 변이, R 치환). 선행 게이트를 모두 비껴간다: BBB 0.513 > 하한 0.15 · 비독성(0.205) ·
+        # mech=RMT(CPP 게이트 비껴감). 스크램블 델타는 +0.025 < 마진 0.05 → 조성 쌓기로 판정돼야
+        # 한다. 라이브러리 밖 서열이라 게이트 면제도 받지 않는다.
+        ("조성쌓기 설계체(ApoE변이)", "", "LRVYQAGRRLRVYQAGRR", "REVISE", "순서 특이성", None),
         ("양호(A+T7 설계체)", "A", "HAIYPRH", "APPROVE?", "—", None),
     ]
+
+    # 어느 게이트가 실제로 걸렸나 — 심사문의 지표 문구로 식별한다.
+    # ⚠️ 이게 없으면 "REVISE 나왔다"만 알고 **의도한 게이트가 걸렸는지는 모른다**.
+    #    실제로 예전 래칫 프로브는 BBB 하한에 먼저 걸려 있었는데 통과로 집계됐다.
+    GATE_MARKERS = [
+        ("독성", "안전성 하드 게이트"),
+        ("BBB 하한", "최소 효능 신호"),
+        ("CPP 비교군", "비특이 흡수 비교군"),
+        ("순서 특이성", "순서 특이성"),
+        ("전선 이탈", "도달 가능 전선의 하한"),
+        ("래칫", "이미 채점해 본"),
+    ]
+
+    def fired_gate(txt: str) -> str:
+        hit = [nm for nm, mk in GATE_MARKERS if mk in (txt or "")]
+        return "+".join(hit) if hit else "—"
     print("\n── M5. 심사(Critic) 효과 (라이브) ──")
     hits = n_bad = 0
+    mis_gate = []   # 의도와 다른 게이트에 걸린 프로브
     for label, lk, sh, expect, gate, better in probes:
         choice = agent._score_choice(CARGO, {"chosen_label": label,
                                              "chosen_linker": lk, "chosen_shuttle": sh})
@@ -102,14 +124,23 @@ def m5_critic_effectiveness():
             best_seen = agent._score_choice(CARGO, {"chosen_label": "본최고",
                                                     "chosen_linker": better[0],
                                                     "chosen_shuttle": better[1]})
-        approve, _, tier = agent._critic_review(client, model, types, CARGO, choice,
-                                                best_seen=best_seen)
+        approve, critique, tier = agent._critic_review(client, model, types, CARGO, choice,
+                                                       best_seen=best_seen)
+        got = fired_gate(critique)
+        ok_gate = (gate == "—") or (gate in got.split("+"))
         if expect.startswith("REVISE"):
             n_bad += 1
-            hits += (not approve)
-        print(f"  {label:20s} [{gate:9s}] BBB={choice['bbb']:.2f} 독성={choice['tox']:.2f} "
-              f"II={choice['instability']} → 심사 {tier}  (기대 {expect})")
-    print(f"  나쁜 후보 REVISE 검출: {hits}/{n_bad}")
+            # **의도한 게이트가 걸렸을 때만** 검출로 집계한다. REVISE 자체는 쉽다.
+            hits += (not approve) and ok_gate
+            if not ok_gate:
+                mis_gate.append(f"{label}(기대 {gate} / 실제 {got})")
+        print(f"  {label:26s} [겨냥 {gate:9s}] BBB={choice['bbb']:.2f} 독성={choice['tox']:.2f} "
+              f"II={choice['instability']} → {tier}  실제게이트 {got}  "
+              f"{'✅' if (tier.startswith('REVISE') == expect.startswith('REVISE')) and ok_gate else '❌'}")
+    print(f"  나쁜 후보 검출(의도한 게이트까지 일치): {hits}/{n_bad}")
+    if mis_gate:
+        print("  ⚠️ 엉뚱한 게이트에 걸린 프로브: " + "; ".join(mis_gate))
+        print("     → REVISE는 났지만 **겨냥한 게이트를 검증하지 못했다**. 프로브를 고쳐야 한다.")
 
 
 def main():

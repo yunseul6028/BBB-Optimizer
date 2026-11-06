@@ -200,6 +200,10 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 f"가설: {hyp}" if hyp else "",
                 f"예측: {pred}" if pred else "",
                 f"편집: {note}" if note else "") if x)
+            # ── 순서 특이성 즉시 피드백 ──
+            # deepB3P 점수의 상당 부분은 조성에서 온다(M1: 스크램블 AUC 0.618). 설계체가
+            # 단순 조성 쌓기인지 **그 자리에서** 알려준다 — 심사까지 끌고 가면 라운드를 낭비한다.
+            text += self._order_note(args.get("shuttle", ""))
             reflect = ("\n\n[반성 요구] 위 실제 점수를 네 **예측과 대조**하라: 예측이 맞았나? "
                        "틀렸다면 어느 축에서 왜 빗나갔나? 그 교훈으로 다음 가설을 세워 설계를 "
                        "이어가거나, 충분히 수렴했으면 finish하라. (점수를 우기지 말고 오라클 결과를 따르라.)")
@@ -209,6 +213,51 @@ class GeminiOptimizationAgent(OptimizationAgent):
         if name == "optimize_developability":
             return self._optimize_developability(args, cargo)
         return f"unknown tool: {name}", None
+
+    def _order_specificity(self, shuttle: str):
+        """셔틀의 순서 특이성 → (delta, 라이브러리 여부, 통과, 설명). 실패해도 예외 없음."""
+        from .order_specificity import order_delta, verdict
+        from .optimizer_agent import LIB_SHUTTLES
+        sh = "".join(ch for ch in (shuttle or "").upper() if ch.isalpha())
+        is_lib = sh in LIB_SHUTTLES
+        delta, _real, _mean, _n = order_delta(sh, self.predictor)
+        ok, msg = verdict(delta, is_lib)
+        return delta, is_lib, ok, msg
+
+    def _order_gate(self, choice) -> tuple[bool, str]:
+        """심사용 순서 특이성 게이트 → (미승인시키나, 게이트 문구).
+
+        라이브러리 셔틀이면 **예측을 호출하지 않고** 즉시 통과시킨다(게이트 면제 + 비용 0).
+        측정이 실패하면 통과시킨다 — 보조 지표의 실패로 후보를 떨어뜨리지 않는다.
+        """
+        from .order_specificity import DELTA_MIN
+        try:
+            delta, is_lib, ok, msg = self._order_specificity(choice.get("shuttle", ""))
+        except Exception:  # noqa: BLE001
+            return False, ""
+        if is_lib or ok:
+            return False, ""
+        return True, (
+            f"\n\n[시스템 게이트] 최종 후보가 **설계체**(라이브러리 밖)인데 {msg}\n"
+            f"deepB3P 점수는 서열 순서보다 **조성**에 끌리는 성향이 있다(M1 실측: 양성 vs 무작위 "
+            f"AUC 0.807 vs 양성 vs 스크램블 0.618). 그래서 조성만 바꿔 쌓은 서열도 높은 점수를 "
+            f"받는다 → 자동 미승인(REVISE). 요구: 설계체는 자기 스크램블 대조보다 "
+            f"**{DELTA_MIN:+.3f} 이상** 높아야 한다. 양이온 잔기를 쌓는 방향이 아니라 "
+            f"**결합 모티프의 배치·간격**을 설계하거나, 라이브러리 셔틀로 되돌아가라.")
+
+    def _order_note(self, shuttle: str) -> str:
+        """design_candidate 응답에 붙일 순서 특이성 한 단락."""
+        try:
+            delta, is_lib, ok, msg = self._order_specificity(shuttle)
+        except Exception:  # noqa: BLE001
+            return ""   # 보조 지표다. 실패가 본 평가를 막아선 안 된다.
+        if is_lib:
+            return f"\n\n[순서 특이성] {msg}"
+        head = "✅" if ok else "⚠️"
+        tail = ("" if ok else
+                " 조성(아르기닌 등 양이온 잔기 쌓기)으로 올린 점수는 **심사에서 자동 미승인**된다. "
+                "특정 잔기를 쌓는 대신 **결합 모티프의 배치**를 설계하라.")
+        return f"\n\n[순서 특이성] {head} {msg}{tail}"
 
     def _optimize_developability(self, args, cargo=""):
         """셔틀의 개발성(liability·응집·불안정성)을 다목적 Pareto로 최적화 — 기능 보존.
@@ -470,6 +519,18 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 f"\n\n[시스템 게이트] 최종 후보가 **CPP(비특이 흡수 비교군)**인데, 하드 게이트를 통과한 "
                 f"**RMT 후보가 {front.get('n_gate_rmt')}개 실재**한다 → 비교군을 최종안으로 확정할 수 "
                 f"없으므로 자동 미승인(REVISE). 달성 가능한 RMT 대안: {alts}.")
+            tier = "REVISE"
+        elif (og := self._order_gate(choice))[0]:
+            # ── 순서 특이성 게이트 — '조성 쌓기로 올린 점수' 금지 ──
+            # M1 실측: 양성 vs 무작위 AUC 0.807 인데 양성 vs 스크램블(조성 동일·순서 파괴)은
+            # 0.618 뿐이다 → deepB3P 점수의 상당 부분이 **아미노산 조성**에서 온다. 그래서
+            # 아르기닌을 쌓으면 점수가 오른다(보상 해킹의 메커니즘).
+            # 교정 실측(core/order_specificity.py): 조성 쌓기 프로브 델타 +0.000~+0.018 vs
+            # 정당한 RMT 셔틀 중위 +0.289 → 셔틀 단독 기준으로는 분리가 명확하다.
+            # **라이브러리 셔틀은 면제**한다 — 그 서열의 근거는 deepB3P 가 아니라 문헌이고,
+            # 모델의 조성 성분을 못 믿는다는 이유로 published 셔틀을 떨어뜨릴 수는 없다
+            # (실제로 THR 의 델타는 +0.014 로 프로브 수준이다). 게이트는 **설계체 전용**이다.
+            text = (text or "") + og[1]
             tier = "REVISE"
         elif (front.get("front_eff_min") is not None
               and self._eff_bbb(choice) < front["front_eff_min"] - 1e-9):
