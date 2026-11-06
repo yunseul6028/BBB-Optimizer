@@ -207,10 +207,10 @@ class GeminiOptimizationAgent(OptimizationAgent):
                                     text="🎨 정밀 설계" + (f" — {detail}" if detail else ""),
                                     data={"rows": rows})
         if name == "optimize_developability":
-            return self._optimize_developability(args)
+            return self._optimize_developability(args, cargo)
         return f"unknown tool: {name}", None
 
-    def _optimize_developability(self, args):
+    def _optimize_developability(self, args, cargo=""):
         """셔틀의 개발성(liability·응집·불안정성)을 다목적 Pareto로 최적화 — 기능 보존.
         BBB가 아니라 '제조·안정성' 다듬기. 신뢰 오라클만 사용(규칙·AGGRESCAN·Guruprasad)."""
         from .developability_opt import objectives, pareto_scrub
@@ -224,20 +224,69 @@ class GeminiOptimizationAgent(OptimizationAgent):
             return (f"개발성 최적화 실패: {type(exc).__name__}",
                     AgentEvent("text", text="🧪 개발성 최적화 실패"))
         seed = objectives(sh)
+        front, n_dropped, seed_bbb = self._filter_front_by_efficacy(sh, front, cargo)
+        if not front:
+            msg = (f"셔틀 {sh}의 개발성 전선이 **전부 효능 하한에 걸려 비었다**(시드 BBB {seed_bbb:.3f}의 "
+                   f"{int(self.DEV_BBB_FLOOR_RATIO * 100)}% 미만). 이 셔틀은 개발성으로 더 다듬을 여지가 "
+                   "없다 — 원본을 그대로 쓰거나 다른 셔틀을 고려하라.")
+            return msg, AgentEvent("text", text=f"🧪 개발성 최적화: 효능 하한으로 전선 없음 (셔틀 `{sh}`)")
 
         def _fmt(o):
             return f"liability {o['liability']}·응집 {o['aggregation']}·불안정 {o['instability']}"
-        rows = [f"- `{m['seq']}` — {_fmt(m['objectives'])} · rmt_sim {m['rmt_sim']} · 편집 {m['n_edits']}"
+        rows = [f"- `{m['seq']}` — {_fmt(m['objectives'])} · rmt_sim {m['rmt_sim']} · "
+                f"**융합BBB {m['bbb']:.3f}**(시드 {seed_bbb:.3f}) · 편집 {m['n_edits']}"
                 for m in front[:6]]
         body = "\n".join(rows)
+        drop = (f" · 효능 하한 미달 **{n_dropped}개 제외**" if n_dropped else "")
         md = (f"**🧪 개발성 다목적(Pareto) 최적화** — 셔틀 `{sh}`\n"
-              f"시드: liability {seed[0]}·응집 {seed[1]}·불안정 {seed[2]}. 기능 보존(rmt_sim≥0.85)하며 "
-              f"liability·응집·불안정성 동시 최소화 → 비지배 전선 {len(front)}개:\n{body}")
-        llm = (f"셔틀 {sh}의 개발성 Pareto 전선 {len(front)}개(rmt_sim≥0.85 보존, 시드=liability {seed[0]}·"
-               f"응집 {seed[1]}·불안정 {seed[2]}). 트레이드오프 변이체:\n{body}\n"
+              f"시드: liability {seed[0]}·응집 {seed[1]}·불안정 {seed[2]}·BBB {seed_bbb:.3f}. "
+              f"기능 보존(rmt_sim≥0.85) + **효능 보존(융합BBB ≥ 시드의 "
+              f"{int(self.DEV_BBB_FLOOR_RATIO * 100)}%)**하며 liability·응집·불안정성 동시 최소화 "
+              f"→ 비지배 전선 {len(front)}개{drop}:\n{body}")
+        llm = (f"셔틀 {sh}의 개발성 Pareto 전선 {len(front)}개{drop}. "
+               f"제약: rmt_sim≥0.85 **및 융합BBB ≥ 시드({seed_bbb:.3f})의 "
+               f"{int(self.DEV_BBB_FLOOR_RATIO * 100)}%**. 트레이드오프 변이체:\n{body}\n"
                "하나를 골라 design_candidate/finish의 셔틀로 쓰면 개발성(제조·안정성)이 개선된다. "
-               "단 이는 개발성 축이며 BBB 효능은 라이브러리 셔틀 선택이 담당한다(결합 보존은 프록시).")
+               "**주의: 개발성은 부차 축이다.** 효능(유효점수)이 지금 best보다 떨어지는 변이체를 "
+               "최종안으로 제출하면 심사가 자동 반려한다 — 개발성을 위해 효능을 팔지 마라.")
         return llm, AgentEvent("text", text=md)
+
+    # 개발성 편집이 지켜야 할 **효능 하한** — 시드 셔틀 단독 BBB 대비 비율.
+    # 근거(docs/experiments.md §11): pareto_scrub 은 liability·응집·불안정성 3축만 줄이고
+    # 제약은 rmt_sim 하나뿐이라 **효능을 보지 않는다.** 그래서 T7(HAIYPRH)을 다듬은
+    # HAVYPNH 가 유사도는 지키면서 융합 BBB를 0.526 → 0.104 로 떨어뜨렸고, 에이전트가 그걸
+    # 그대로 제출했다. 실측상 이 도구가 있는 팔은 (래칫을 가정해도) 없는 팔보다 eff 가
+    # 약 0.12 낮았다. 도구를 지우는 대신 **범위를 좁힌다** — 제조 가능성은 진짜 과제다.
+    DEV_BBB_FLOOR_RATIO = 0.80
+
+    def _filter_front_by_efficacy(self, seed_seq, front, cargo=""):
+        """개발성 전선에서 **효능이 시드보다 크게 떨어진 변이체**를 걷어낸다.
+
+        ⚠️ **셔틀 단독 BBB로 재면 안 된다.** 실측: `HAIYPRH`→`HAVYPNH` 편집은 셔틀 단독
+        BBB가 1.000→0.940(6% 하락)이라 통과하는데, **융합체** BBB는 0.526→0.104로 무너진다.
+        효능 손실이 셔틀이 아니라 **접합부(cargo+shuttle)**에서 일어나기 때문이다.
+        그래서 `_evaluate` 와 **같은 채점 서열**(bbb_scoring_seq)로 융합체를 잰다.
+        링커는 아직 정해지지 않았으므로 직접융합(링커 없음)을 공통 기준으로 쓴다.
+
+        탐색 중에 거르지 않고 **결과만 한 번에 배치 채점**한다 — deepB3P 는 subprocess 라
+        변이체마다 부르면 수백 번 호출이 되지만, 전선은 보통 ≤40개라 1회 배치로 끝난다.
+        반환: (살아남은 전선[bbb 포함], 제외 개수, 시드 융합 BBB)
+        """
+        from .config import bbb_scoring_seq
+        def _fuse(x):
+            return bbb_scoring_seq(cargo, "", x) if cargo else x
+        seqs = [_fuse(seed_seq)] + [_fuse(m["seq"]) for m in front]
+        try:
+            preds = self.predictor.predict_many(seqs)
+        except Exception:  # noqa: BLE001 — 채점 실패 시 거르지 않고 원본 전선을 돌려준다
+            return front, 0, 0.0
+        seed_bbb = preds[0].bbb_permeability
+        floor = seed_bbb * self.DEV_BBB_FLOOR_RATIO
+        kept = []
+        for m, p in zip(front, preds[1:]):
+            if p.bbb_permeability >= floor:
+                kept.append({**m, "bbb": p.bbb_permeability})
+        return kept, len(front) - len(kept), seed_bbb
 
     @staticmethod
     def _eff_bbb(r):
