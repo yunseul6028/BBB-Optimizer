@@ -58,8 +58,21 @@ TOXINPRED3_MODEL_ARG = 1   # 1: ML-only(AAC+DPC, 외부도구 불필요), 2: Hyb
 # ---------------------------------------------------------------------------
 VALID_AMINO_ACIDS = set("ACDEFGHIKLMNPQRSTVWY")
 TOXICITY_THRESHOLD = 0.38          # 부작용 탈락 기준선 (ToxinPred3 기본 임계값에 맞춤)
-MIN_BBB_SIGNAL = 0.15              # 최종 확정 최소 효능 신호(deepB3P 융합 점수). near-zero(<이 값)는
-                                   # 선택성이 좋아도 효능 신호 부재로 확정 불가 → 심사 자동 미승인.
+# ⚰️ MIN_BBB_SIGNAL (= 0.15) 는 2026-11-10 **폐지**했다. 하지 말아야 할 일을 하고 있었다:
+#    이름은 "최소 효능 신호"였지만 실제로 한 일은 **양이온성 필터**다. 실측(화물 GSNKGAIIGLM,
+#    링커 13종 전조합)에서
+#      · 문헌 근거 등급 **A**(ANG1005 임상 2상) Angiopep-2 → 최고 융합 BBB 0.102, **13/13 전멸**
+#      · 등급 B ApoE(159-167)2 0.136 · Leptin30 0.006 → 역시 전멸
+#      · 등급 **D**(BBB 통과 근거 없음) Tet1 0.568 → **통과**
+#      · 상위 3위가 전부 CPP 비교군(SynB1 0.960 · TAT 0.929 · Penetratin 0.877)
+#    즉 **근거가 가장 단단한 셔틀을 설계 공간에서 제거하고 근거 없는 셔틀을 통과시켰다.**
+#    Angiopep-2 가 낮은 이유는 투과를 못 해서가 아니라 C말단이 산성(…KTEEY)이라서다.
+#    근본 원인: M6(docs/experiments.md §14)에서 **융합 수준 deepB3P 에 서열 신호가 측정되지
+#    않는다**가 확인됐으므로, 그 점수의 절대 임계값으로 후보를 탈락시킬 근거가 없다.
+#    👉 대체: ⑴ 셔틀 선택 근거는 `core/evidence.py` 의 **문헌 근거 등급**(M7),
+#            ⑵ near-zero 쓰레기 설계체는 **순서 특이성 측정 가능성** 하드 게이트가 막는다
+#               (라이브러리 밖 셔틀이 homopolymer·반복서열이면 스크램블이 0개 = 측정 불가 → REVISE).
+#    되살리지 말 것. 되살린다면 먼저 등급 A 셔틀이 통과하는지 확인할 것.
 
 # 유효점수 λ — eff_bbb = BBB − λ·off_target. **후보군 내부**의 선택성 저울질용이다.
 # (비교군 CPP 배제는 λ가 담당하지 않는다: 실측상 λ=0.25의 최대 영향력 0.25 < CPP↔RMT
@@ -86,16 +99,21 @@ LINKER_LIBRARY = {
 }
 
 # --- 셔틀 라이브러리 (BBB 투과 수송 펩타이드, 전수 탐색) ---
+# ⚠️ `note` 문자열은 **기전 분류에 쓰인다**(`"CPP" in note` / `"RMT" in note` —
+#    benchmark.py·bench_selectivity.py·directional_pairs.py·scramble_delta.py). 편집할 때
+#    CPP/RMT 토큰을 지우거나 RMT 항목에 "CPP" 글자를 넣지 말 것.
+# 📚 셔틀별 **문헌 전달 근거 등급·인용·측정 맥락**은 `core/evidence.py` 가 단일 출처다.
+#    등급을 여기 복제하지 말 것(드리프트). 융합 BBB 점수로는 셔틀 간 순위를 매길 수 없다(M6).
 SHUTTLES = {
     "Angiopep-2":     {"seq": "TFFYGGSRGKRNNFKTEEY", "target": "LRP1",       "note": "LRP1 타겟 대표 BBB 셔틀(19aa, RMT)"},
-    "ApoE(159-167)2": {"seq": "LAVYQAGARLAVYQAGAR",  "target": "LDLR/LRP1",  "note": "ApoE 유래 RMT 셔틀·탠덤 이량체(18aa)"},
+    "ApoE(159-167)2": {"seq": "LAVYQAGARLAVYQAGAR",  "target": "LDLR/LRP1",  "note": "ApoE 유래 RMT 셔틀·탠덤 이량체(18aa, 단량체 LAVYQAGAR = 성숙체 159-167). 🔴 이름 충돌: 일부 문헌이 같은 이름으로 (LRKLRKRLL)2(=성숙체 141-149, 전구체 번호 159-167)를 지칭한다 — 강양이온성 다른 분자이므로 혼동 금지"},
     "Leptin30":       {"seq": "YQQILTSMPSRNVIQISNDLENLRDLLHVL", "target": "렙틴수용체(LepR)", "note": "렙틴 61-90 유래 RMT 셔틀(30aa)"},
     "T7":             {"seq": "HAIYPRH",             "target": "TfR(트랜스페린 수용체)",   "note": "TfR 표적 셔틀·파지디스플레이(7aa, RMT) — Tf와 다른 결합부위로 내인성 Tf 비경쟁"},
     "B6":             {"seq": "GHKAKGPRK",           "target": "TfR1(트랜스페린 수용체)",  "note": "hTfR 세포외도메인 파지디스플레이 유래 monovalent 셔틀(9aa, RMT)"},
     "RVG29":          {"seq": "YTIWMPENPRPGTPCDIFTNSRGKRASNG", "target": "nAChR(니코틴성 수용체)", "note": "광견병 바이러스 당단백 유래 nAChR 셔틀(29aa, RMT)"},
-    "CDX":            {"seq": "FKESWREARGTRIERG",    "target": "α7 nAChR(니코틴성 수용체)", "note": "Candoxin 유래 α7 nAChR 셔틀(16aa, RMT) — sub-μM 결합·낮은 off-target"},
+    "CDX":            {"seq": "FKESWREARGTRIERG",    "target": "α7 nAChR(니코틴성 수용체)", "note": "Candoxin 유래 α7 nAChR 셔틀(16aa, RMT) — sub-μM 결합(IC50 84.5nM)·낮은 off-target. ⚠️ 근거 등급 C: 문헌에서 뇌 전달이 입증된 형태는 D-retro-inverso(DCDX)이고 이 라이브러리 서열은 덜 안정한 선형 L형"},
     "THR":            {"seq": "THRPPMWSPVWP",        "target": "TfR1(트랜스페린 수용체)",  "note": "TfR1 표적 셔틀·파지디스플레이 12-mer(12aa, RMT) — 금나노입자·AAV8·siRNA 뇌전달 보고. 주의: 혈청 안정성이 낮다는 보고(불안정성 지수도 높음) → 한계로 명시할 것"},
-    "Tet1":           {"seq": "HLNILSTLWKYR",        "target": "GT1b 갱글리오사이드 수용체(뉴런)", "note": "파상풍독소 모사 뉴런 표적 셔틀(12aa, RMT) — 근거 수준 주의: GT1b 결합·역행수송 보고가 중심이고 BBB 통과 직접 근거는 TfR 계열(T7·B6·THR)보다 약하다. 비교·탐색용으로 포함"},
+    "Tet1":           {"seq": "HLNILSTLWKYR",        "target": "GT1b 갱글리오사이드 수용체(뉴런)", "note": "파상풍독소 모사 뉴런 표적 셔틀(12aa, RMT) — 🔴 근거 등급 D: GT1b/스핑고미엘린 결합 뉴런 표적 리간드이고 BBB 통과 **단독 근거가 없다**. Tet1-LNP가 뇌가 아니라 말초 신경으로 주로 간다는 보고가 있고, 문헌에서는 거의 항상 BBB 투과 펩타이드(B6·TGN)와 병용된다. 비교·탐색용으로만 포함 — 자세한 인용은 core/evidence.py"},
     "TAT":            {"seq": "GRKKRRQRRRPPQ",       "target": "세포투과",    "note": "HIV-1 TAT 세포투과 펩타이드(13aa, CPP)"},
     "Penetratin":     {"seq": "RQIKIWFQNRRMKWKK",    "target": "세포투과",    "note": "Antennapedia 세포투과 펩타이드(16aa, CPP)"},
     "SynB1":          {"seq": "RGGRLSYSRRRFSTSTGR",  "target": "세포투과",    "note": "SynB 벡터 계열(18aa, CPP)"},

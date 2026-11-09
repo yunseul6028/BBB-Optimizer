@@ -16,10 +16,13 @@ from __future__ import annotations
 import time
 from typing import Generator
 
-from .config import (LINKER_LIBRARY, MIN_BBB_SIGNAL, MODEL_MAX_LEN, OFF_TARGET_PENALTY,
+from .config import (LINKER_LIBRARY, MODEL_MAX_LEN, OFF_TARGET_PENALTY,
                      SHUTTLES, Settings)
 from .optimizer_agent import (AgentEvent, LIB_LINKERS, LIB_SHUTTLES, OptimizationAgent,
                               is_candidate, is_comparison_only)
+from .evidence import critic_rule as evidence_critic_rule
+from .evidence import prompt_brief as evidence_brief
+from .evidence import tier_of as evidence_tier
 from .order_specificity import DELTA_MIN as ORDER_DELTA_MIN
 from .order_specificity import Z_MIN as ORDER_Z_MIN
 
@@ -40,7 +43,8 @@ _REQUEST_TIMEOUT_MS = 120_000
 
 def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> str:
     lib_l = ", ".join(f"{n}({v['seq'] or '링커없음/직접융합'})" for n, v in LINKER_LIBRARY.items())
-    lib_s = ", ".join(f"{n}({v['seq']})" for n, v in SHUTTLES.items())
+    lib_s = ", ".join(f"{n}({v['seq']}, 근거 {evidence_tier(n)}등급)"
+                      for n, v in SHUTTLES.items())
     tools = ("evaluate_candidates(**라이브러리 조합만** 채점 — BBB·독성·안정성·수용체), "
              "design_candidate(**라이브러리 밖** 직접 편집·설계 서열 채점), "
              "optimize_developability(셔틀 개발성 다목적 Pareto 최적화 — 기능 보존 잔기 편집)")
@@ -75,12 +79,16 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
         "프록시**다(실제 전달 병목은 수용체 결합·avidity). 따라서 **RMT형은 primary 절대값만으로 줄 "
         "세우지 말고 mech=RMT·preserv(셔틀 신호가 보존됐나)·match(수용체 유사도)를 함께 근거로 "
         "삼아라. 최종 보고서엔 '이 셔틀의 전달은 무슨 메커니즘이고 deepB3P를 어느 정도 믿는지'를 밝혀라.\n"
-        f"  **[최종 확정 하한 — 필수]** 단, 선택성이 아무리 좋아도 **융합 BBB(primary)가 near-zero"
-        f"(< {MIN_BBB_SIGNAL})인 후보는 finish로 확정하지 마라** — 효능 신호 자체가 없으면 선택적이어도 "
-        "무의미하다(심사가 자동 미승인). RMT 셔틀의 융합 BBB가 바닥이면: (a) **셔틀 단독(shuttleBBB)은 "
-        "높은데 융합이 뭉갠 경우(preserv 낮음)면 링커 교체·design_candidate로 보존도를 먼저 회복**해 BBB를 "
-        "끌어올리고, (b) 회복이 안 되면 **BBB 신호가 있으면서 선택성도 괜찮은 후보(유효점수 상위)**를 택하라. "
-        f"요컨대 **BBB 하한({MIN_BBB_SIGNAL})을 넘는 것들 중에서 선택성으로 저울질**하는 게 최종 기준이다.\n\n"
+        "  **[중요 — BBB 점수에 하한은 없다]** 예전에는 융합 BBB < 0.15 를 자동 탈락시켰으나 "
+        "**폐지했다.** 그 하한은 실제로는 양이온성 필터였고, 문헌 근거 등급 **A**(임상 2상) "
+        "Angiopep-2 를 링커 13종 전조합에서 **전멸**시키면서 근거 등급 **D**(BBB 통과 근거 없음) "
+        "Tet1 은 통과시켰다. Angiopep-2 점수가 낮은 이유는 투과를 못 해서가 아니라 C말단이 "
+        "산성(…KTEEY)이라서다. 따라서 **융합 BBB 가 낮다는 것만으로 셔틀을 버리지 마라.**\n"
+        "  대신 이렇게 판단하라: ⑴ 셔틀 선택의 근거는 **문헌 근거 등급**(아래 블록)이다. "
+        "⑵ 셔틀 단독은 높은데 융합이 뭉갠 경우(preserv 낮음)는 **링커 교체·design_candidate 로 "
+        "보존도를 회복**할 여지가 있는 진짜 신호이므로 먼저 시도하라 — 이것이 이 시스템이 실제로 "
+        "기여하는 지점이다(셔틀을 발명하는 것이 아니라 **어떻게 붙이는지**). ⑶ 최종 보고서엔 "
+        "'이 셔틀을 고른 근거(등급·인용)'와 'deepB3P 를 어느 정도 믿는지'를 함께 밝혀라.\n\n"
         f"사용 가능한 도구: {tools}\n"
         "권장 워크플로우(자율 판단): evaluate_candidates로 라이브러리 조합(**링커 유무 — 직접융합"
         "(링커 빈칸)도 포함**)을 폭넓게 스크리닝 → "
@@ -112,6 +120,7 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
         "너의 가치는 '좋은 가설을 세우고 신뢰 오라클로 검증·교정하는 추론'에 있다(무작위 탐색이 아님).\n"
         "**[필수] 유망한 후보를 찾으면 finish 전에 반드시 `design_candidate`로 가설 주도 편집을 "
         "최소 1회 시도해 best를 개선하라** — 라이브러리 조합만으로 끝내지 마라(네 손으로 가설을 세워 설계하라).\n\n"
+        f"{evidence_brief()}\n\n"
         f"참고 라이브러리 — 링커: {lib_l}\n  셔틀: {lib_s}\n"
         f"주의: construct가 {MODEL_MAX_LEN}aa 초과면 BBB는 연결부위(링커+셔틀)로 계산된다. deepB3P는 "
         f"짧은 펩타이드 학습이라 절대값보다 상대 비교가 신뢰됨. 최대 {max_rounds}행동. 한국어로 간결히."
@@ -292,11 +301,20 @@ class GeminiOptimizationAgent(OptimizationAgent):
         """이 행이 순서 특이성 요건을 만족하나 — **이미 계산된 값만** 쓴다(예측 호출 0회).
 
         라이브러리 셔틀은 면제(근거가 문헌에 있다). `order_delta` 가 없는 행은
-        `evaluate_candidates`(라이브러리 전용) 유래이거나 측정 실패이므로 통과시킨다.
+        `evaluate_candidates`(라이브러리 전용) 유래이거나 측정 실패이므로 통과시킨다 —
+        **보조 지표의 실패로 후보를 떨어뜨리지 않는다**는 원칙이다.
+
+        단 **동일잔기 반복(homopolymer)은 예외**다. 그 경우 `order_delta` 가 None 인 이유는
+        측정이 실패한 게 아니라 **스크램블 대조가 존재하지 않는다**는 것이고(순열이 자기 자신뿐),
+        최종 심사의 순서 게이트는 이를 REVISE 한다. 여기서 통과시키면 `RRRRRRRRR` 같은
+        조성 쌓기 해킹(§13)이 running best 로 올라와 복구 경로로 제출되고 곧바로 REVISE 되는
+        낭비가 생긴다. 서열만으로 판별 가능하므로(예측 호출 0회) 여기서 막는다.
         """
         sh = (r.get("shuttle") or "").upper()
         if sh in LIB_SHUTTLES:
             return True
+        if sh and len(set(sh)) <= 1:
+            return False
         d = r.get("order_delta")
         if d is not None and d < ORDER_DELTA_MIN:
             return False
@@ -454,8 +472,8 @@ class GeminiOptimizationAgent(OptimizationAgent):
         b = front.get("best") or {}
         lines = [
             f"[도달 가능 집합 — 라이브러리 전수 {front.get('n_total', '?')}조합을 **동일 지표**로 채점한 결과]",
-            f"  비독성 {front.get('n_nontoxic', '?')}개 → 하드 게이트(독성 + BBB≥"
-            f"{front.get('bbb_floor', '?')}) 통과 {front.get('n_gate_all', '?')}개"
+            f"  비독성 {front.get('n_nontoxic', '?')}개 → 하드 게이트(**독성뿐** — BBB 하한은 "
+            f"폐지됨) 통과 {front.get('n_gate_all', '?')}개"
             f" → 그중 **후보군(CPP 비교군 제외) {front.get('n_gate', '?')}개**"
             f" (엄밀 RMT {front.get('n_gate_rmt', 0)}개)",
             f"  축별 **달성 한계**: BBB 최대 {b.get('bbb_max')} · off_target 최소 {b.get('off_min')}"
@@ -508,15 +526,20 @@ class GeminiOptimizationAgent(OptimizationAgent):
             f"{front_text}\n\n"
             "[하드 게이트 — 이 둘만 탈락 사유. 위반하면 예외 없이 REVISE]\n"
             f"  ① **독성**: ToxinPred3 > {thr:.2f} → 탈락.\n"
-            f"  ② **효능 신호**: 융합 BBB(primary) < {MIN_BBB_SIGNAL} → 효능 부재로 탈락. "
-            "RMT도 예외가 아니다 — 선택적이어도 효능 신호가 없으면 의미가 없다.\n\n"
+            "  ② **순서 특이성 측정 가능성**: 최종 후보가 **설계체**(라이브러리 밖)인데 자기 "
+            "스크램블 대조를 만들 수 없으면(동일잔기 반복·homopolymer) 탈락. 측정할 수 없는 것을 "
+            "통과시키지 않는다.\n"
+            "  ⚠️ **융합 BBB 점수에 하한은 없다**(2026-11-10 폐지). 그 하한은 양이온성 필터였고 "
+            "근거 등급 A 셔틀(Angiopep-2)을 전멸시켰다. **BBB 점수가 낮다는 이유만으로 REVISE "
+            "하지 마십시오** — 그건 더 이상 탈락 사유가 아닙니다.\n\n"
             "[셔틀 역할 — CPP는 비교군이다]\n"
             "  **RMT**(수용체 매개: Angiopep·T7·B6·ApoE·Leptin30 계열)가 **후보군**이고, "
             "**CPP**(TAT·SynB1·Penetratin 등 양이온성 막투과)는 **비특이 흡수 비교군(baseline)**입니다. "
             "최종 후보가 CPP라면: 위 집합에 게이트를 통과한 RMT가 **하나라도 있으면 REVISE**하고 그 RMT "
             "대안을 지목하십시오. 게이트 통과 RMT가 전혀 없을 때만 CPP를 조건부 승인할 수 있고, 그때도 "
             "'비교군을 최종안으로 쓴 이유'를 한계로 명시해야 합니다.\n\n"
-            "[트레이드오프 축 — 탈락 사유가 아니라 '한계로 명시할' 사유]\n"
+            f"{evidence_critic_rule()}"
+        "[트레이드오프 축 — 탈락 사유가 아니라 '한계로 명시할' 사유]\n"
             "  불안정성 · 개발성 liability/양이온 · off-target 정도 · "
             "설계의 실질(라이브러리의 뻔한 선택인가 근거 있는 정밀 설계인가).\n"
             "  이 축들에서는 제출 후보가 전선에서 **지배당하는지만** 보십시오.\n"
@@ -587,18 +610,13 @@ class GeminiOptimizationAgent(OptimizationAgent):
             tier = "REVISE"
 
         # ── 결정론적 게이트 (LLM 판정을 덮어쓴다) ─────────────────────────
-        # 하드 게이트는 둘뿐: ① 독성 ② BBB 하한. 나머지 축은 트레이드오프이므로 탈락시키지 않는다.
+        # 하드 게이트는 둘뿐: ① 독성 ② 순서 특이성 측정 가능성(= 설계체의 스크램블 대조 존재).
+        # BBB 하한(옛 ②)은 폐지했다 — 근거: `core/config.py` 의 MIN_BBB_SIGNAL 폐지 주석.
+        # 나머지 축은 트레이드오프이므로 탈락시키지 않는다.
         if choice.get("toxic"):
             text = (text or "") + (
                 f"\n\n[시스템 게이트] 독성 {choice.get('tox', 0.0):.3f} > 임계값 "
                 f"{self.settings.toxicity_threshold:.2f} → 안전성 하드 게이트 위반으로 자동 미승인(REVISE).")
-            tier = "REVISE"
-        elif choice.get("bbb", 0.0) < MIN_BBB_SIGNAL:
-            text = (text or "") + (
-                f"\n\n[시스템 게이트] 융합 BBB {choice.get('bbb', 0.0):.3f} < 최소 효능 신호 "
-                f"{MIN_BBB_SIGNAL} → 선택성이 좋아도 **효능 신호 부재**로 자동 미승인(REVISE). "
-                "링커/정밀설계로 BBB를 하한 위로 끌어올리거나, BBB 신호가 있으면서 선택성도 괜찮은 "
-                "후보로 교체 필요.")
             tier = "REVISE"
         elif (str(choice.get("mechanism") or "").upper().startswith("CPP")
               and (front.get("n_gate_rmt") or 0) > 0):
@@ -613,6 +631,10 @@ class GeminiOptimizationAgent(OptimizationAgent):
             tier = "REVISE"
         elif (og := self._order_gate(cargo, choice))[0]:
             # ── 순서 특이성 게이트 — '조성 쌓기로 올린 점수' 금지 ──
+            # 2026-11-10 부터 이 게이트가 **옛 BBB 하한의 역할도 대신한다**: 측정 불가
+            # (homopolymer → 스크램블 0개)인 설계체를 막는 것이 near-zero 쓰레기 설계를
+            # 막는 결정론 장치다. 점수의 절대값이 아니라 '측정 가능성·순서 의존성'을 보므로
+            # M6 로 무효화된 축에 의존하지 않는다.
             # M1 실측: 양성 vs 무작위 AUC 0.807 인데 양성 vs 스크램블(조성 동일·순서 파괴)은
             # 0.618 뿐이다 → deepB3P 점수의 상당 부분이 **아미노산 조성**에서 온다. 그래서
             # 아르기닌을 쌓으면 점수가 오른다(보상 해킹의 메커니즘).

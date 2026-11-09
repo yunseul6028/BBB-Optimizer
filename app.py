@@ -24,6 +24,7 @@ from core.config import (
     SHUTTLES,
     VALID_AMINO_ACIDS,
 )
+from core.evidence import tier_of as evidence_tier
 from core.optimizer_agent import is_comparison_only
 from core.optimizer_agent_gemini import get_gemini_agent, OFF_TARGET_PENALTY
 from core.schemas import Verdict
@@ -124,6 +125,9 @@ with _hero:
         st.dataframe(
             {"셔틀": list(SHUTTLES), "서열": [v["seq"] for v in SHUTTLES.values()],
              "타겟": [v["target"] for v in SHUTTLES.values()],
+             # 문헌 전달 근거 등급(core/evidence.py). 융합 BBB 점수로는 셔틀 간 순위를
+             # 매길 수 없으므로(M6), 셔틀 선택의 근거는 이 등급 = 인용이다.
+             "근거": [evidence_tier(n) for n in SHUTTLES],
              "설명": [v["note"] for v in SHUTTLES.values()]},
             width='stretch', hide_index=True,
         )

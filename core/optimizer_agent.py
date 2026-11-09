@@ -190,18 +190,23 @@ class OptimizationAgent:
         **'달성 가능 최선 대비'**로 판정하게 한다.
 
         전선 축: BBB↑ · off_target↓ · 불안정성↓ (하드 게이트 통과 후보 중 비지배).
-        하드 게이트는 독성과 BBB 하한(MIN_BBB_SIGNAL) 둘뿐 — 효능 신호 요구는 유지된다.
+        하드 게이트는 **독성 하나뿐**이다. BBB 하한(MIN_BBB_SIGNAL)은 2026-11-10 폐지했다 —
+        근거 등급 A 셔틀(Angiopep-2)을 13/13 전멸시키고 등급 D(Tet1)를 통과시키는
+        양이온성 필터였다(사유: `core/config.py` 의 폐지 주석). 따라서 전선은 **비독성 전체**
+        에서 만들어지고, near-zero 설계체는 순서 특이성 게이트가 막는다.
         """
         import hashlib
         import json
 
-        from .config import BASE_DIR, LINKER_LIBRARY, MIN_BBB_SIGNAL, OFF_TARGET_PENALTY, SHUTTLES
+        from .config import BASE_DIR, LINKER_LIBRARY, OFF_TARGET_PENALTY, SHUTTLES
 
         sig = hashlib.md5(json.dumps({
             "cargo": cargo,
             "linkers": {k: v["seq"] for k, v in LINKER_LIBRARY.items()},
             "shuttles": {k: v["seq"] for k, v in SHUTTLES.items()},
-            "floor": MIN_BBB_SIGNAL, "thr": self.settings.toxicity_threshold,
+            # 캐시 키: 하한 폐지로 게이트 구성이 바뀌었으므로 "floor" 를 버전 태그로 둔다
+            # (옛 캐시를 재사용하면 폐지 전 전선이 섞인다).
+            "floor": "no-bbb-floor-v2", "thr": self.settings.toxicity_threshold,
         }, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
         cache = BASE_DIR / ".cache" / "reachable" / f"{sig}.json"
         if cache.exists() and not refresh:
@@ -219,7 +224,8 @@ class OptimizationAgent:
             rows.extend(chunk)
 
         nontoxic = [r for r in rows if not r.get("toxic")]
-        gate_all = [r for r in nontoxic if (r.get("bbb") or 0.0) >= MIN_BBB_SIGNAL]
+        # BBB 하한 폐지 → 하드 게이트는 독성뿐이므로 게이트 통과 = 비독성 전체.
+        gate_all = list(nontoxic)
         # 전선은 **후보군(CPP 제외)** 안에서만 만든다 — CPP는 최종 선택 대상이 아니므로
         # 전선에 끼면 "비교군에 지배당했다"는 잘못된 기각 사유를 만들 수 있다.
         gate = [r for r in gate_all if is_candidate(r)]
@@ -270,7 +276,7 @@ class OptimizationAgent:
         f_effs = [(r.get("bbb") or 0.0) - OFF_TARGET_PENALTY * (r.get("sel_off") or 0.0)
                   for r in front]
         out = {
-            "cargo": cargo, "bbb_floor": MIN_BBB_SIGNAL,
+            "cargo": cargo, "bbb_floor": None,  # 폐지됨 — 심사 텍스트에서 "독성만"으로 표시
             "front_eff_min": round(min(f_effs), 4) if f_effs else None,
             "front_eff_max": round(max(f_effs), 4) if f_effs else None,
             "n_total": len(rows), "n_nontoxic": len(nontoxic),
