@@ -46,6 +46,11 @@ LEDGER_DIR = BASE_DIR / ".cache" / "ledger"
 MAX_WINS = 60
 MAX_FAILS = 40
 
+# 원장 스키마/목적함수 버전. **목적함수가 바뀌면 반드시 올린다** — 옛 기록은 폐지된
+# 축(유효점수 = BBB − 0.25·off)으로 매긴 순위라서, 그대로 '바닥'으로 깔면 새 목적함수를
+# 오염시킨다(reachable 캐시 키를 올리는 것과 같은 이유). 버전이 다르면 **빈 원장**으로 시작한다.
+LEDGER_VERSION = 2   # v2: 문헌 근거 그룹 + 위험 축 Pareto (2026-11-10)
+
 
 def _path(cargo: str) -> Path:
     """화물별 파일. 점수는 화물에 의존하므로 **화물이 다르면 다른 원장**이다."""
@@ -56,24 +61,29 @@ def _path(cargo: str) -> Path:
 def load(cargo: str) -> dict:
     """원장 읽기. 파일이 없거나 깨졌으면 **빈 원장**을 돌려준다(실행을 막지 않는다)."""
     p = _path(cargo)
+    empty = {"cargo": cargo, "version": LEDGER_VERSION, "sessions": 0, "wins": [], "fails": []}
     if not p.exists():
-        return {"cargo": cargo, "sessions": 0, "wins": [], "fails": []}
+        return empty
     try:
         d = json.loads(p.read_text())
         if not isinstance(d, dict):
             raise ValueError("원장 형식 오류")
+        if int(d.get("version") or 1) != LEDGER_VERSION:
+            # 옛 목적함수로 매긴 바닥은 새 목적함수에서 **의미가 없다**(BBB 기반 eff).
+            # 조용히 변환하지 않고 버린다 — 잘못된 바닥은 없는 바닥보다 나쁘다.
+            return empty
         d.setdefault("cargo", cargo)
         d.setdefault("sessions", 0)
         d.setdefault("wins", [])
         d.setdefault("fails", [])
-        # 과거 버전이 비교군(CPP)이나 라이브러리 밖 링커를 승자로 기록했을 수 있다
-        # → 읽을 때 걸러낸다(자가 치유). 둘 다 **도달 불가능한 바닥**을 만든다.
+        # 과거 버전이 비교군(CPP)·라이브러리 밖 링커·근거 미달을 승자로 기록했을 수 있다
+        # → 읽을 때 걸러낸다(자가 치유). 모두 **도달 불가능한 바닥**을 만든다.
         d["wins"] = [e for e in d["wins"]
-                     if not _is_cpp(e) and not _bad_linker(e) and not _length_hack(e)]
+                     if not _is_cpp(e) and not _bad_linker(e) and not _unsupported(e)]
         return d
     except Exception:  # noqa: BLE001
         # 손상된 원장은 조용히 무시한다. 보조 장치가 본 실행을 죽여선 안 된다.
-        return {"cargo": cargo, "sessions": 0, "wins": [], "fails": []}
+        return empty
 
 
 def _key(e: dict) -> tuple[str, str]:
@@ -94,24 +104,19 @@ def _bad_linker(e: dict) -> bool:
     return bool(lk) and lk not in LIB_LINKERS
 
 
-def _length_hack(e: dict) -> bool:
-    """부모 셔틀에 길이만 덧붙인 조합인가 — 승자 목록에서 빼야 한다.
+def _unsupported(e: dict) -> bool:
+    """문헌 근거가 없어 **승자 목록에 올릴 수 없는** 항목인가.
 
-    실측(docs/experiments.md §13): 부모 T7 에 **무작위 1잔기**를 덧붙인 20종의 융합 BBB 가
-    평균 0.743(부모 0.526), z≥2 는 0개였다. 즉 상승분은 '어느 잔기를 골랐나'가 아니라
-    '길이를 늘렸다'에서 온다. 에이전트가 실제로 `YHAIYPRH`(eff 0.835)를 승자로 올렸고,
-    그건 `링커 Y + T7` 과 **같은 분자**다.
+    이 함수가 옛 `_length_hack`(부모 셔틀에 길이만 덧붙인 조합)을 **승계한다**.
+    옛 판정의 근거는 "길이를 늘리면 BBB 가 오른다"(실측 §13: 부모 T7 에 무작위 1잔기를
+    붙인 20종의 융합 BBB 평균 0.743 vs 부모 0.526)였고, 그 BBB 를 순위에 쓰지 않게 된
+    지금(M6·M8)은 **길이를 늘릴 동기 자체가 없다.** 남는 질문은 하나다 — 이 조합이
+    문헌 근거를 보유했나(등급 A·B·C). 미등재·등급 D 는 바닥이 될 수 없다.
 
-    `iz`(접합부 길이 통제 z)가 기록돼 있으면 그 값으로 판정한다. 옛 기록엔 없으므로
-    **부모가 붙은 채 z 가 없으면 보수적으로 버린다** — 통과했다는 증거가 없는 것이다.
+    ⚠️ 옛 기록은 `tier` 가 없으므로 여기서 걸러진다 — 의도된 동작이다(LEDGER_VERSION 참고).
     """
-    from .order_specificity import Z_MIN, find_parent
-    from .optimizer_agent import LIB_SHUTTLES
-    found = find_parent((e.get("shuttle") or "").upper(), LIB_SHUTTLES)
-    if found is None or (found[1] + found[2]) <= 0:
-        return False
-    z = e.get("iz")
-    return z is None or z < Z_MIN
+    from .evidence import group_rank
+    return group_rank(e.get("tier")) > 1
 
 
 def _is_cpp(e: dict) -> bool:
@@ -138,40 +143,50 @@ def record(cargo: str, rows: list[dict], final: dict | None = None,
     wins = {_key(e): e for e in d["wins"]}
     fails = {_key(e): e for e in d["fails"]}
 
+    from .optimizer_agent import rank_key
     for r in rows or []:
-        eff = (r.get("bbb") or 0.0) - 0.25 * (r.get("sel_off") or 0.0)
+        # ⚠️ 키 이름을 행(row)과 **같게** 유지한다 — `rank_key` 를 그대로 쓰기 위해서다.
         e = {"linker": r.get("linker") or "", "shuttle": r.get("shuttle") or "",
-             "eff": round(eff, 4), "bbb": round(r.get("bbb") or 0.0, 4),
-             "off": round(r.get("sel_off") or 0.0, 3),
-             "inst": r.get("instability"), "toxic": bool(r.get("toxic")),
+             "tier": r.get("tier"), "tier_parent": r.get("tier_parent"),
+             "tier_sim": r.get("tier_sim"),
+             "dev_liab": r.get("dev_liab"), "instability": r.get("instability"),
+             "sel_off": round(r.get("sel_off") or 0.0, 3),
+             "dev_agg_hot": r.get("dev_agg_hot"),
+             "toxic": bool(r.get("toxic")),
              "mech": r.get("mechanism") or r.get("sel_mech"),
-             "delta": r.get("order_delta"), "iz": r.get("insert_z"),
+             # BBB 는 **보고치**로만 남긴다(순위·바닥 계산에 쓰지 않는다).
+             "bbb_report": round(r.get("bbb") or 0.0, 4),
              "ts": int(time.time())}
         k = _key(e)
         reason = notes.get(k) or notes.get((k[0], k[1]))
-        if e["toxic"] or (e["bbb"] < 0.15) or reason:
-            e["why"] = reason or ("독성 탈락" if e["toxic"] else "효능 하한 미달")
+        # ⚠️ 옛 구현에는 `e["bbb"] < 0.15` 가 실패 조건으로 남아 있었다 — 폐지한
+        # MIN_BBB_SIGNAL 을 원장이 **되살려 쓰고 있었다**(등급 A 셔틀을 전멸시키던 그 값이다).
+        # 제거했다. 실패 사유는 독성과 게이트 사유(notes)뿐이다.
+        if e["toxic"] or reason:
+            e["why"] = reason or "독성 탈락"
             prev = fails.get(k)
-            if prev is None or (prev.get("eff") or 0) < e["eff"]:
+            if prev is None or rank_key(e) < rank_key(prev):
                 fails[k] = e
             wins.pop(k, None)
             continue
-        if _is_cpp(e) or _bad_linker(e) or _length_hack(e):
-            continue    # 비교군·라이브러리 밖 링커·길이 해킹은 선택 대상이 아니다
+        if _is_cpp(e) or _bad_linker(e) or _unsupported(e):
+            continue    # 비교군·라이브러리 밖 링커·근거 미달은 선택 대상이 아니다
         if k in fails:
             continue    # 한 번 실패로 기록된 조합은 승자 목록으로 올리지 않는다
         prev = wins.get(k)
-        if prev is None or (prev.get("eff") or 0) < e["eff"]:
+        if prev is None or rank_key(e) < rank_key(prev):
             wins[k] = e
 
-    d["wins"] = sorted(wins.values(), key=lambda e: -(e.get("eff") or 0))[:MAX_WINS]
-    d["fails"] = sorted(fails.values(), key=lambda e: -(e.get("eff") or 0))[:MAX_FAILS]
+    d["version"] = LEDGER_VERSION
+    d["wins"] = sorted(wins.values(), key=rank_key)[:MAX_WINS]
+    d["fails"] = sorted(fails.values(), key=rank_key)[:MAX_FAILS]
     d["sessions"] = int(d.get("sessions") or 0) + 1
     if final is not None:
         d["last_final"] = {"linker": final.get("linker") or "",
                            "shuttle": final.get("shuttle") or "",
-                           "eff": round((final.get("bbb") or 0.0)
-                                        - 0.25 * (final.get("sel_off") or 0.0), 4)}
+                           "tier": final.get("tier"),
+                           "dev_liab": final.get("dev_liab"),
+                           "sel_off": final.get("sel_off")}
     try:
         LEDGER_DIR.mkdir(parents=True, exist_ok=True)
         _path(cargo).write_text(json.dumps(d, ensure_ascii=False, indent=1))
@@ -180,10 +195,14 @@ def record(cargo: str, rows: list[dict], final: dict | None = None,
     return d
 
 
-def floor_eff(cargo: str) -> float | None:
-    """이 화물에서 지금까지 확인된 최고 유효점수 = 이번 세션이 넘어야 할 **바닥**."""
+def floor_entry(cargo: str) -> dict | None:
+    """이 화물에서 지금까지 확인된 **최선 후보** = 이번 세션이 넘어야 할 바닥.
+
+    스칼라가 아니라 항목을 돌려준다 — 새 목적함수는 단일 점수가 아니라
+    (근거 그룹 → 위험 축 Pareto)이므로, 넘었는지는 `optimizer_agent.dominates` 로 본다.
+    """
     d = load(cargo)
-    return d["wins"][0]["eff"] if d["wins"] else None
+    return d["wins"][0] if d["wins"] else None
 
 
 def brief(cargo: str, k_win: int = 6, k_fail: int = 6) -> str:
@@ -196,20 +215,29 @@ def brief(cargo: str, k_win: int = 6, k_fail: int = 6) -> str:
            "비교군(CPP)은 선택 대상이 아니므로 **목록에서 제외**했다 — 바닥은 네가 실제로 "
            "선택할 수 있는 후보군에서만 나온다."]
     if d["wins"]:
-        out.append(f"\n확인된 상위 후보 (유효점수 = BBB − 0.25·off_target):")
+        out.append("\n확인된 상위 후보 (근거 등급 → liability·불안정성·off·응집 순):")
         for e in d["wins"][:k_win]:
-            dl = "" if e.get("delta") is None else f"·순서델타 {e['delta']:+.3f}"
-            out.append(f"  - {e['linker'] or '직접융합'}+{e['shuttle']} → eff {e['eff']:.3f} "
-                       f"(BBB {e['bbb']:.3f}·off {e['off']:.2f}{dl})")
-        out.append(f"\n⚠️ **바닥은 {d['wins'][0]['eff']:.3f} 다.** 이걸 다시 찾아 제출하는 것은 "
-                   "가치가 0이다 — 이미 아는 값이다. 네 할 일은 **이 바닥을 넘는 것**이고, "
-                   "라이브러리 조합으로는 더 못 넘기면 `design_candidate`로 설계해서 넘어라. "
-                   "넘지 못했으면 바닥 후보를 그대로 제출하되 '넘지 못했다'고 정직히 쓰라.")
+            inh = ("" if (e.get("tier_sim") or 1.0) >= 1.0 or not e.get("tier_parent")
+                   else f"←{e['tier_parent']}·{e['tier_sim']:.2f}")
+            out.append(f"  - {e['linker'] or '직접융합'}+{e['shuttle']} → 근거 "
+                       f"**{e.get('tier')}**{inh} · liab {e.get('dev_liab')} · 불안정성 "
+                       f"{e.get('instability')} · off {e.get('sel_off')} · 응집 "
+                       f"{e.get('dev_agg_hot')} (BBB 참고 {e.get('bbb_report')})")
+        t = d["wins"][0]
+        out.append(f"\n⚠️ **바닥은 `{t['linker'] or '직접융합'}+{t['shuttle']}`"
+                   f"(근거 {t.get('tier')}·liab {t.get('dev_liab')}·off {t.get('sel_off')}) 다.** "
+                   "이걸 다시 찾아 제출하는 것은 가치가 0이다 — 이미 아는 값이다. 네 할 일은 "
+                   "**이 후보에게 지배당하지 않는 것**이고(근거 등급이 같거나 높고 위험 축에서 "
+                   "하나라도 더 나아야 한다), 라이브러리 조합으로 더 못 넘기면 "
+                   "`design_candidate`·`optimize_developability`로 **부모의 근거를 유지한 채 "
+                   "liability 를 줄여** 넘어라. 넘지 못했으면 바닥 후보를 그대로 제출하되 "
+                   "'넘지 못했다'고 정직히 쓰라.\n"
+                   "⚠️ **BBB 참고값을 올리는 방향으로 움직이지 마라** — 그 점수는 순위에 쓰지 "
+                   "않는다(M6·M8).")
     if d["fails"]:
         out.append("\n이미 실패로 확인된 것들 (같은 벽에 다시 부딪히지 마라):")
         for e in d["fails"][:k_fail]:
-            out.append(f"  - {e['linker'] or '직접융합'}+{e['shuttle']} → {e.get('why', '탈락')}"
-                       f" (BBB {e['bbb']:.3f})")
+            out.append(f"  - {e['linker'] or '직접융합'}+{e['shuttle']} → {e.get('why', '탈락')}")
     out.append("\n이 이력은 **참고 자료**다. 점수를 우기는 근거로 쓰지 말고, 탐색의 "
                "출발점으로만 쓰라 — 최종 판정은 이번 세션의 실측과 독립 심사가 한다.")
     return "\n".join(out)

@@ -25,7 +25,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.config import TOXICITY_THRESHOLD, get_settings          # noqa: E402
 from core import optimizer_agent_gemini as oag                    # noqa: E402
-from core.optimizer_agent_gemini import OFF_TARGET_PENALTY, get_gemini_agent  # noqa: E402
+from core.config import OFF_TARGET_PENALTY  # noqa: E402  (폐지된 옛 축 — 재현용)
+from core.optimizer_agent_gemini import get_gemini_agent  # noqa: E402
 
 # gemini-3-flash-preview 공개 단가(USD / 1M tokens). thinking 토큰은 출력으로 과금.
 PRICE_IN_PER_TOK = 0.50 / 1_000_000

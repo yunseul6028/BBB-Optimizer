@@ -25,8 +25,8 @@ from core.config import (
     VALID_AMINO_ACIDS,
 )
 from core.evidence import tier_of as evidence_tier
-from core.optimizer_agent import is_comparison_only
-from core.optimizer_agent_gemini import get_gemini_agent, OFF_TARGET_PENALTY
+from core.optimizer_agent import is_candidate, is_comparison_only, rank_key
+from core.optimizer_agent_gemini import get_gemini_agent
 from core.schemas import Verdict
 
 st.set_page_config(page_title="BBB-Optimize AI Agent", page_icon="🧬", layout="wide")
@@ -314,31 +314,30 @@ def _emit_agent_event(ev):
         st.error(ev.text)
 
 
-def _eff_bbb(r):
-    """에이전트 결정축과 동일한 **유효점수** = BBB − λ·off_target_risk.
-    raw BBB가 최고여도 비특이(off-target) CPP면 감점돼 밀린다(reward-hacking 회피).
-    표시축(랭킹)을 이 결정축과 일치시켜 '왜 1위를 안 골랐나' 불일치를 없앤다."""
-    return r.get("bbb", 0.0) - OFF_TARGET_PENALTY * r.get("sel_off", 0.0)
+# ⚰️ `_eff_bbb`(= BBB − λ·off_target) 는 2026-11-10 폐지했다. 표시축을 에이전트 결정축과
+#    일치시키는 목적 자체는 그대로지만, 결정축이 바뀌었다 — 이제 `optimizer_agent.rank_key`
+#    (문헌 근거 그룹 → liability·불안정성·off·응집 Pareto)다. BBB 는 보고치로만 표시한다.
+#    근거: M6(셔틀 간 순위 무의미)·M8(링커 간도 무의미, 0/108).
 
 
 def _extract_podium(events, n=3):
-    """상위 **후보군** n개. 에이전트 결정축과 동일한 유효점수(eff = BBB − λ·off_target) 순.
+    """상위 **후보군** n개. 에이전트 결정축과 **동일한 키**(`rank_key`) 순.
 
-    **비교군(CPP)은 순위에서 제외한다.** CPP(TAT·SynB1·Penetratin 등)는 비특이 흡수
-    대조군으로만 쓰며 최종 결과가 아니다. off_target 페널티로는 CPP를 밀어낼 수 없기
-    때문에(실측: λ=0.25의 최대 영향력 0.25 < CPP↔RMT BBB 격차 0.434 → 어떤 off 값이어도
-    역전 불가) 페널티가 아니라 **역할 분리**로 제외한다.
+    **비교군(CPP)·문헌 근거 미달(등급 D·미등재)은 순위에서 제외한다**(`is_candidate`).
+    CPP는 비특이 흡수 대조군이고, 근거 미달은 '좋다'고 말할 근거가 없는 서열이다.
+    둘 다 BBB 점수로는 상위에 오므로(실측 CPP 평균 0.357 vs RMT 0.058, Tet1 0.568)
+    점수가 아니라 **역할·근거**로 제외한다.
     """
     seen = {}
     for e in events:
         if e.kind == "evaluation":
             for r in e.data.get("rows", []):
-                if r.get("toxic") or is_comparison_only(r):
+                if not is_candidate(r):
                     continue
                 seq = r["sequence"]
-                if seq not in seen or _eff_bbb(r) > _eff_bbb(seen[seq]):
+                if seq not in seen or rank_key(r) < rank_key(seen[seq]):
                     seen[seq] = r
-    ranked = sorted(seen.values(), key=_eff_bbb, reverse=True)
+    ranked = sorted(seen.values(), key=rank_key)
     choice = next((e.data for e in events if e.kind == "choice"), None)
     if choice and not is_comparison_only(choice):
         cseq = choice.get("sequence")
@@ -352,7 +351,7 @@ def _extract_baseline(events):
     cpps = [r for e in events if e.kind == "evaluation"
             for r in e.data.get("rows", [])
             if not r.get("toxic") and is_comparison_only(r)]
-    return max(cpps, key=_eff_bbb) if cpps else None
+    return min(cpps, key=rank_key) if cpps else None
 
 def _render_agent_summary(events, cargo):
     """최적화 궤적 + 상위 3 후보 카드(+온디맨드 분석) + 보고서."""

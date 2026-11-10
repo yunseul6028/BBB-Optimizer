@@ -5,8 +5,10 @@
 LLM 없이 로컬 엔진(deepB3P·ToxinPred3)만으로 도는 핵심 지표 — 지금 바로 재현 가능:
   M1) 판별력(Discrimination): 알려진 BBB 투과 펩타이드(양성) vs 스크램블·무작위(음성)를
       deepB3P가 분리하는가 (AUC + 평균 분리). → 점수 엔진이 신호를 잡음.
-  M2) 탐색 공간 & 최적성: 라이브러리 전수 탐색(oracle)의 비독성 최적 vs 무작위 탐색 효율 곡선.
-      → "얼마나 탐색해야 최적에 근접하나"의 기준선. 에이전트는 이보다 적은 평가로 도달해야 가치.
+  M2) 탐색 공간 & 도달 가능 집합: 라이브러리 전수를 **에이전트와 동일한 지표 정의**로 채점해
+      후보 자격·근거 그룹 분포·Pareto 전선을 내고, **무작위 탐색이 최상위 전선에 닿을 확률**을
+      기저선으로 준다. (⚠️ 2026-11-10 재정의 — 옛 M2 는 "BBB oracle 최적의 몇 %"였으나
+      BBB 가 순위에서 빠져 그 분모가 사라졌다. M8·M10 근거: docs/experiments.md §17·§20.)
   M3) 결정론적 가드레일: 독성 펩타이드(멜리틴 등)를 파이프라인이 올바로 탈락시키는가.
 
 LLM이 필요한 지표(옵션, 여기선 미실행 — 쿼터 리셋/크레딧 후):
@@ -150,44 +152,64 @@ def is_cpp_row(r) -> bool:
 
 
 def m2_search(cargo, predictor, tox_pred, thr):
+    """도달 가능 집합 — 새 목적함수(근거 그룹 + 위험 축 Pareto)로 측정한다.
+
+    ⚠️ 옛 M2 는 `BBB oracle 최적 대비 %` 였다. BBB 는 셔틀 간(M6)·링커 간(M8) 순위를 매길 수
+    없음이 실측돼 순위에서 빠졌으므로 **그 분모 자체가 존재하지 않는다**. 대신 묻는 것:
+      ① 전수 중 후보 자격을 갖는 건 몇 개인가(독성·CPP 비교군·근거 등급 D/미등재 제외)
+      ② 달성 가능한 **최상위 근거 그룹**은 무엇이고 그 전선은 몇 개인가
+      ③ 위험 축의 **달성 한계**는 어디인가(심사가 '이상' 대신 이걸 기준으로 삼는다)
+      ④ **무작위 탐색**이 K번 평가로 그 전선에 닿을 확률은 얼마인가(에이전트가 넘어야 할 선)
+    ④ 는 초기하분포로 **정확히** 계산한다(시드 평균 추정보다 정확하고 재현 가능).
+    """
+    import math
+
+    from core.optimizer_agent import OptimizationAgent
+
     rows = _library_scores(cargo, predictor, tox_pred, thr)
     valid = [r for r in rows if not r["toxic"]]
-    opt = max(valid, key=lambda r: r["bbb"]) if valid else None
-    print("\n── M2. 탐색 공간 & 최적성 ──")
+    print("\n── M2. 탐색 공간 & 도달 가능 집합 ──")
     print(f"  화물: {cargo}  |  탐색 공간: 링커 {len(LINKER_LIBRARY)} × 셔틀 {len(SHUTTLES)} = {len(rows)}개 조합")
-    print(f"  비독성 후보: {len(valid)}/{len(rows)}")
-    if opt is None:
-        print("  (비독성 최적 없음)")
-        return
-    print(f"  🏆 전체 최적(oracle, 비교군 CPP 포함): {opt['linker']}+{opt['shuttle']}  "
-          f"BBB={opt['bbb']:.3f}  독성={opt['tox']:.3f}")
-    # CPP는 **비특이 흡수 비교군**이라 최종 선택 대상이 아니다(core.optimizer_agent.is_comparison_only).
-    # 따라서 '실제 달성 목표'는 후보군(RMT) 기준 최적이다 — 둘 다 보고해야 정직하다.
-    cand = [r for r in valid if not is_cpp_row(r)]
-    copt = max(cand, key=lambda r: r["bbb"]) if cand else None
-    if copt is not None:
-        print(f"  🎯 후보군 최적(RMT만, 실제 목표): {copt['linker']}+{copt['shuttle']}  "
-              f"BBB={copt['bbb']:.3f}  독성={copt['tox']:.3f}")
-        print(f"     (비교군 CPP {len(valid) - len(cand)}개 제외 → 후보군 {len(cand)}개)")
+    print(f"  비독성(하드 게이트 통과): {len(valid)}/{len(rows)}")
 
-    # 무작위 탐색 효율: K개 평가 시 최적의 몇 %에 도달 (여러 시드 평균)
-    #
-    # ⚠️ 기저선은 **에이전트와 같은 운동장**에서 재야 한다. 에이전트는 CPP를 최종
-    # 선택할 수 없으므로(비교군) 무작위도 **후보군(RMT)에서만 뽑고 후보군 최적을
-    # 분모로** 쓴다. 과거엔 CPP 포함 전수(0.960)를 분모로 써서 M4 효율과 분모가
-    # 어긋나 있었다 — 같은 수치를 나란히 놓으면 안 되는 비교였다.
-    pool = [r for r in rows if not is_cpp_row(r)]
-    denom = copt["bbb"] if copt is not None else opt["bbb"]
-    print(f"  무작위 탐색 효율(후보군 최적 {denom:.3f} 대비 도달률, 시드 20개 평균):")
-    for k in (3, 6, 12, 24):
-        reach = []
-        for seed in range(20):
-            rng = random.Random(seed)
-            sample = rng.sample(pool, min(k, len(pool)))
-            v = [r["bbb"] for r in sample if not r["toxic"]]
-            reach.append((max(v) / denom) if v else 0.0)
-        print(f"    {k:2d}개 평가 → 후보군 최적의 {100*sum(reach)/len(reach):5.1f}%")
-    print("  → 에이전트(M4)는 이보다 적은 평가로 최적 근접/초과해야 가치가 증명됨.")
+    agent = OptimizationAgent(get_settings())
+    fr = agent.reachable_front(cargo)
+    n_gate, n_all = fr["n_gate"], fr["n_gate_all"]
+    front, front_top = fr["front"], fr["front_top"]
+    print(f"  후보 자격(CPP 비교군·근거 등급 D·미등재 제외): {n_gate}/{n_all}")
+    print(f"  근거 그룹 분포(비독성, CPP 제외): {fr['by_group']}")
+    print(f"  🎯 달성 가능한 최상위 근거 그룹: {fr['best_group']}")
+    print(f"  Pareto 전선: 전체 {len(front)}개 · 최상위 그룹 전선(front_top) {len(front_top)}개")
+    for b in front_top[:12]:
+        print(f"     {b['label']:30s} 근거 {b['tier']} · liab {b['dev_liab']} · "
+              f"불안정 {b['instability']:6.1f} · off {b['sel_off']} · 응집 {b['dev_agg_hot']} "
+              f"(BBB 참고 {b['bbb_report']})")
+    print(f"  위험 축 달성 한계: {fr['best']}")
+    if fr.get("unsupported"):
+        print(f"  [근거 없음/미등재 참고] {[b['label'] for b in fr['unsupported']]}")
+    if fr.get("cpp_baseline"):
+        print(f"  [비교군 CPP 참고]      {[b['label'] for b in fr['cpp_baseline']]}")
+
+    # ── 무작위 탐색 기저선 (초기하분포, 정확계산) ──────────────────────────
+    # "K개를 무작위로 평가하면 최상위 그룹 전선(front_top)에 하나라도 닿을 확률"
+    #   = 1 - C(N-m, K)/C(N, K)
+    # 운동장을 둘 다 보고한다: ⑴ 전수(아무것도 모르는 탐색) ⑵ 후보군(자격 필터는 아는 탐색).
+    m = len(front_top)
+    print(f"  무작위 탐색이 최상위 그룹 전선({m}개)에 닿을 확률:")
+    for label, N in (("전수", n_all), ("후보군", n_gate)):
+        if N <= 0 or m <= 0:
+            continue
+        line = []
+        for k in (3, 6, 12, 24):
+            k = min(k, N)
+            p = 1.0 - (math.comb(N - m, k) / math.comb(N, k) if N - m >= k else 0.0)
+            line.append(f"{k:2d}개 → {100*p:5.1f}%")
+        print(f"    {label}(N={N}): " + " · ".join(line))
+    print("  → 에이전트(M4)는 이 확률보다 안정적으로 front_top 안에서 최종 후보를 내야 가치가 증명됨.")
+    print("  ⚠️ 참고(순위에 쓰지 않음): 옛 정의의 BBB 최댓값 "
+          f"{max((r['bbb'] for r in valid), default=0.0):.3f} "
+          f"({max(valid, key=lambda r: r['bbb'])['linker']}+{max(valid, key=lambda r: r['bbb'])['shuttle']})"
+          " — M6·M8 로 무효화된 축이므로 목표값이 아니다.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

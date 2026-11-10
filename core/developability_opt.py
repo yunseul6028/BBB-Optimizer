@@ -40,12 +40,19 @@ class ScrubResult:
 
 
 def _fitness(seq: str, rmt_floor: float):
-    """(liability 개수, 응집 a3v) 최소화. rmt_sim<floor면 무효(큰 값). (fit, rmt_sim) 반환."""
+    """(liability 개수, 응집 **핫스팟** a3v) 최소화. rmt_sim<floor면 무효. (fit, rmt_sim) 반환.
+
+    ⚠️ 응집 목표를 **전역 평균 → 국소 최대(핫스팟)** 로 바꿨다(2026-11-10). 전역 평균은
+    길이로 희석되고 이 최적화기에는 **삽입 변이**(`_try_insert`)가 있어서, 평균을 목표로
+    두면 "저응집 잔기를 끼워넣기"가 가장 싼 해가 된다 — 응집 위험 구간은 그대로 둔 채
+    점수만 내려간다. M10 실측의 길이 아티팩트(링커 길이↔응집 순위상관 평균 -0.697)와
+    **같은 함정**이다. 핫스팟은 국소 최대라 삽입으로 낮출 수 없다.
+    """
     sim = shuttle_similarity(seq).score
     if sim < rmt_floor:
         return (999, 999.0), sim
     dev = assess_developability(seq)
-    agg = dev.agg_a3v
+    agg = dev.agg_hotspot_a3v
     return (dev.n_liabilities, agg), sim
 
 
@@ -63,7 +70,7 @@ def scrub_liabilities(shuttle: str, rounds: int = 25, pop: int = 24,
     """보존적 치환으로 개발성 liability를 줄인다(기능=rmt_sim 보존)."""
     rng = random.Random(seed)
     dev0 = assess_developability(shuttle)
-    agg0 = dev0.agg_a3v
+    agg0 = dev0.agg_hotspot_a3v
     sim0 = shuttle_similarity(shuttle).score
 
     best_seq, best_fit, best_sim = shuttle, (dev0.n_liabilities, agg0), sim0
@@ -88,7 +95,7 @@ def scrub_liabilities(shuttle: str, rounds: int = 25, pop: int = 24,
         start_seq=shuttle, best_seq=best_seq,
         start_n=dev0.n_liabilities, best_n=devb.n_liabilities,
         start_liabilities=dev0.liabilities, best_liabilities=devb.liabilities,
-        start_agg=agg0, best_agg=devb.agg_a3v,
+        start_agg=agg0, best_agg=devb.agg_hotspot_a3v,
         start_rmt=sim0, best_rmt=best_sim, n_edits=n_edits)
 
 
@@ -111,7 +118,7 @@ def _instability(seq: str) -> float:
 def objectives(seq: str) -> tuple:
     """개발성 다목적 벡터 (모두 ↓ 좋음): (liability 개수, 응집 a3v, 불안정성지수)."""
     dev = assess_developability(seq)
-    agg = round(dev.agg_a3v, 3)
+    agg = round(dev.agg_hotspot_a3v, 3)
     return (dev.n_liabilities, agg, _instability(seq))
 
 

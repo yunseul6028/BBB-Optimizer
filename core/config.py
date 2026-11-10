@@ -74,11 +74,19 @@ TOXICITY_THRESHOLD = 0.38          # 부작용 탈락 기준선 (ToxinPred3 기�
 #               (라이브러리 밖 셔틀이 homopolymer·반복서열이면 스크램블이 0개 = 측정 불가 → REVISE).
 #    되살리지 말 것. 되살린다면 먼저 등급 A 셔틀이 통과하는지 확인할 것.
 
-# 유효점수 λ — eff_bbb = BBB − λ·off_target. **후보군 내부**의 선택성 저울질용이다.
-# (비교군 CPP 배제는 λ가 담당하지 않는다: 실측상 λ=0.25의 최대 영향력 0.25 < CPP↔RMT
-#  BBB 격차 0.434 → 어떤 off 값으로도 역전 불가. 그래서 배제는 역할 분리가 맡는다.
-#  optimizer_agent.is_comparison_only 참고.)
-OFF_TARGET_PENALTY = 0.25
+# ⚰️ OFF_TARGET_PENALTY (유효점수 λ, eff = BBB − λ·off_target) 는 2026-11-10 **폐지**했다.
+#    **파이프라인은 더 이상 이 값을 쓰지 않는다** — 과거 실험 스크립트(M2·M4·M6 등)를 당시
+#    기준으로 재현하기 위해서만 남긴다(scripts/ablation_*.py · directional_pairs.py).
+#    폐지 사유: λ가 저울질하던 'BBB' 쪽이 순위 근거가 될 수 없음이 두 번 확인됐다.
+#      · M6(셔틀 간) — 문헌 검증 셔틀이 자기 스크램블 분포의 39번째 백분위, 유의 0/9,
+#        문헌 음성 대조군(Angiopep-7) 역전
+#      · M8(링커 간) — 라이브러리 링커가 **같은 길이 무작위 링커**를 이긴 비율 **0/108**(0%,
+#        우연이면 5%), 경험 p 중위 ~0.86(= 설계 링커가 무작위보다 나쁘다),
+#        링커 길이↔BBB 순위상관 평균 **-0.495**(= '링커 선택'이 사실은 '짧게 하기'였다)
+#    대체: `optimizer_agent.rank_key` / `dominates` — **문헌 근거 그룹**(core/evidence.py)을
+#    사전식 1순위, 그 안에서 위험 축(liability·불안정성·off·응집) Pareto. BBB 는 보고치.
+#    되살리지 말 것. 되살린다면 먼저 M8 (C) 를 다시 돌려 0/108 이 바뀌는지 확인할 것.
+OFF_TARGET_PENALTY = 0.25   # ⚠️ 폐지됨 — 옛 실험 재현용. 새 코드에서 쓰지 말 것.
 MODEL_MAX_LEN = 50                 # deepB3P seq_len — 초과분은 잘림(truncate)
 
 # --- 링커 라이브러리 (융합체의 링커 축) ---

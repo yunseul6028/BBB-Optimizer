@@ -120,7 +120,15 @@ def main():
     # 올바른 분모는 **후보군(RMT) 라이브러리 최적** = 도달 가능 전선의 상한이다.
     cargo0 = recs[0]["cargo"]
     front = agent.reachable_front(cargo0)
-    orc_lib = front.get("front_eff_max") or 0.0
+    # ⚠️ `front_eff_max`(= 옛 유효점수 상한)는 2026-11-10 폐지됐다. `or 0.0` 으로 삼키면
+    # **측정 실패를 0 으로 인코딩**해 모든 조건이 ∞% 로 보인다 — 이 프로젝트가 세 번 데인
+    # 바로 그 버그 클래스다. 그래서 조용히 넘어가지 않고 크게 실패시킨다.
+    if "front_eff_max" not in front:
+        raise SystemExit(
+            "이 스크립트는 폐지된 목적함수(eff = BBB − 0.25·off)를 분모로 쓴다. "
+            "현재 전선은 '문헌 근거 그룹 + 위험 축 Pareto'이므로 %oracle 프레이밍이 "
+            "성립하지 않는다 — docs/experiments.md §19 참고. 재측정이 필요하다.")
+    orc_lib = front["front_eff_max"]
     orc_all = recs[0].get("oracle_eff") or 0.0
     print(f"분모(후보군 라이브러리 최적 eff) = {orc_lib:.4f}"
           f"   [참고: CPP 포함 전수 최적 {orc_all:.4f} — 비교군이라 선택 불가]")

@@ -16,15 +16,17 @@ from __future__ import annotations
 import time
 from typing import Generator
 
-from .config import (LINKER_LIBRARY, MODEL_MAX_LEN, OFF_TARGET_PENALTY,
-                     SHUTTLES, Settings)
+from .config import LINKER_LIBRARY, MODEL_MAX_LEN, SHUTTLES, Settings
 from .optimizer_agent import (AgentEvent, LIB_LINKERS, LIB_SHUTTLES, OptimizationAgent,
-                              is_candidate, is_comparison_only)
+                              dominates, is_candidate, is_comparison_only, is_unsupported,
+                              rank_key)
+from .evidence import INHERIT_SIM_MIN
 from .evidence import critic_rule as evidence_critic_rule
+from .evidence import group_of as evidence_group
+from .evidence import group_rank as evidence_group_rank
+from .evidence import inherit as evidence_inherit
 from .evidence import prompt_brief as evidence_brief
 from .evidence import tier_of as evidence_tier
-from .order_specificity import DELTA_MIN as ORDER_DELTA_MIN
-from .order_specificity import Z_MIN as ORDER_Z_MIN
 
 # 일시적 오류(모델 과부하·분당 레이트리밋·응답 지연) — 백오프 재시도 대상
 _TRANSIENT = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "overloaded", "high demand",
@@ -34,11 +36,14 @@ _TRANSIENT = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "overloaded", "
 # (미설정 시 stall된 연결에서 UI가 무한 "실행 중"에 걸린다.)
 _REQUEST_TIMEOUT_MS = 120_000
 
-# 양이온 편향 완화용 선택성 감점 계수 λ.
-# 유효 BBB = BBB − λ·off_target_risk. deepB3P가 양이온성 CPP를 고평가해 BBB만 좇으면
-# 비특이(off-target) 후보로 수렴하므로, off-target 위험을 소폭 감점해 RMT형에 기회를 준다.
-# λ↑ = 선택성 중시(BBB 지배↓), λ↓ = BBB 지배↑. 0.25 = "조금만" 낮춘 값.
-# OFF_TARGET_PENALTY 는 config 에서 가져온다(위 임포트) — 여기서 재노출만 유지.
+# ⚰️ 유효점수 `eff = BBB − λ·off_target` 은 2026-11-10 **폐지**했다(λ=OFF_TARGET_PENALTY).
+#    그 식의 전제는 "BBB 점수로 후보를 줄 세울 수 있다"였고, 그 전제가 두 번 반증됐다:
+#      · M6(셔틀 간) — 문헌 검증 셔틀이 자기 스크램블 분포의 39번째 백분위, 유의 0/9
+#      · M8(링커 간) — 라이브러리 링커가 **같은 길이 무작위 링커**를 이긴 비율 **0/108**(0%),
+#                     링커 길이↔BBB 순위상관 평균 **-0.495**(= '링커 선택'이 '짧게 하기'였다)
+#    대체: 순위는 `optimizer_agent.rank_key` / `dominates` — **문헌 근거 그룹**(merit)을
+#    사전식 1순위로 두고, 그 안에서 위험 축(liability·불안정성·off·응집)을 Pareto 로 본다.
+#    BBB 는 **보고치**로만 남는다. 되살리지 말 것.
 
 
 def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> str:
@@ -58,37 +63,53 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
         "오케스트레이션해 뇌혈관장벽(BBB)을 통과하는 항체-셔틀 융합 단백질을 설계하고, 그 결과는 "
         "독립 **심사(Critic) 에이전트**의 적대적 검증을 거칩니다.\n\n"
         f"고정 화물(cargo): {cargo}\n융합체 = cargo + linker + shuttle.\n\n"
-        "다중 목적 (모두 만족하는 최종 융합체 하나로 수렴):\n"
-        "  ① BBB 투과 점수(deepB3P 예측확률 0~1, 실제 투과율 아님·상대비교용)를 높이되, **BBB 단독이 "
-        f"아니라 선택성으로 감점된 '유효 점수 = BBB − {OFF_TARGET_PENALTY}×off_target_risk'를 최종 "
-        "기준으로 삼는다.** deepB3P는 양이온성 CPP를 고평가하는 편향이 있어, BBB만 좇으면 비특이"
-        "(off-target) 후보로 수렴하기 때문이다.\n"
-        f"  ② 독성(ToxinPred3) ≤ {tox_threshold:.2f}\n"
-        "  ③ **선택성(off-target 최소화)**: 비특이 양이온성 CPP보다 **수용체 선택적 RMT형"
-        "(Angiopep-2·ApoE·Leptin30 계열)**을 선호 — off-target 위험이 낮은 쪽.\n"
-        "  **[셔틀 역할 — 반드시 지킬 것] CPP(TAT·Penetratin·SynB1 등 양이온성 막투과)는 "
-        "비특이 흡수 **비교군(baseline)**이다. 비교 목적으로 채점하는 건 좋지만 **최종 후보로 "
-        "finish에 제출하지 마라.** 최종 선택은 RMT(수용체 매개) 후보 중에서 한다 — deepB3P가 "
-        "양이온성 CPP를 고평가하는 편향이 있어(실측 CPP 평균 BBB 0.357 vs RMT 0.058) 점수만 "
-        "좇으면 비특이 후보로 수렴하기 때문이다. CPP를 제출하면 심사가 자동 미승인한다.**\n"
-        "  ④ 검증 셔틀과 유사(수용체 메커니즘 근거 — bind match)\n"
-        "  ⑤ 융합체 자체 안정성: 불안정성 지수 < 40 선호\n\n"
-        "[BBB 점수 해석 — 중요] evaluate_candidates는 deepB3P를 **분해**해 보여준다: primary(융합 "
-        "연결부위 점수)·shuttleBBB(셔틀 단독)·mech(RMT/CPP)·preserv(융합 보존도). deepB3P는 짧은 "
-        "펩타이드의 막투과를 학습했으므로 **CPP 셔틀엔 비교적 유효하지만, RMT(수용체 매개) 셔틀엔 약한 "
-        "프록시**다(실제 전달 병목은 수용체 결합·avidity). 따라서 **RMT형은 primary 절대값만으로 줄 "
-        "세우지 말고 mech=RMT·preserv(셔틀 신호가 보존됐나)·match(수용체 유사도)를 함께 근거로 "
-        "삼아라. 최종 보고서엔 '이 셔틀의 전달은 무슨 메커니즘이고 deepB3P를 어느 정도 믿는지'를 밝혀라.\n"
-        "  **[중요 — BBB 점수에 하한은 없다]** 예전에는 융합 BBB < 0.15 를 자동 탈락시켰으나 "
-        "**폐지했다.** 그 하한은 실제로는 양이온성 필터였고, 문헌 근거 등급 **A**(임상 2상) "
-        "Angiopep-2 를 링커 13종 전조합에서 **전멸**시키면서 근거 등급 **D**(BBB 통과 근거 없음) "
-        "Tet1 은 통과시켰다. Angiopep-2 점수가 낮은 이유는 투과를 못 해서가 아니라 C말단이 "
-        "산성(…KTEEY)이라서다. 따라서 **융합 BBB 가 낮다는 것만으로 셔틀을 버리지 마라.**\n"
-        "  대신 이렇게 판단하라: ⑴ 셔틀 선택의 근거는 **문헌 근거 등급**(아래 블록)이다. "
-        "⑵ 셔틀 단독은 높은데 융합이 뭉갠 경우(preserv 낮음)는 **링커 교체·design_candidate 로 "
-        "보존도를 회복**할 여지가 있는 진짜 신호이므로 먼저 시도하라 — 이것이 이 시스템이 실제로 "
-        "기여하는 지점이다(셔틀을 발명하는 것이 아니라 **어떻게 붙이는지**). ⑶ 최종 보고서엔 "
-        "'이 셔틀을 고른 근거(등급·인용)'와 'deepB3P 를 어느 정도 믿는지'를 함께 밝혀라.\n\n"
+        "[목적 — 무엇을 최적화하는가. 2026-11-10 개편]\n"
+        "  이 시스템은 **BBB 투과도를 예측하지 않는다.** 문헌으로 검증된 셔틀을 붙이면 뇌 전달이 "
+        "올라간다는 것은 **문헌에서 빌려오는 전제**이고, 네가 할 일은 그 융합체를 **약으로 만들 수 "
+        "있게** 다듬는 것이다. 우리 BBB 점수(deepB3P)로 셔틀이나 링커의 순위를 매길 수 없음이 "
+        "실측으로 확인됐다 — 셔틀 간 M6(유의 0/9), 링커 간 M8(라이브러리 링커가 같은 길이 "
+        "**무작위** 링커를 이긴 비율 **0/108**, 링커 길이↔BBB 순위상관 평균 **-0.495**).\n"
+        "\n"
+        "  순위는 **사전식**이다 — 앞 단계가 뒤 단계를 지배한다:\n"
+        "  ① **문헌 근거 그룹** (유일한 양(陽)의 신호) — `근거 있음`(등급 A·B) > `주의`(C) > "
+        "`근거 없음`(D, **후보 자격 없음**) > `미등재`(**후보 자격 없음**).\n"
+        "     최종 후보는 **달성 가능한 최상위 그룹**에서 나와야 한다. 근거가 더 단단한 대안이 "
+        "존재하는데 아래 그룹을 고르면 심사가 자동 반려한다.\n"
+        "  ② **위험 스크린** (같은 그룹 안에서, 서로 우선순위 **없음** — Pareto):\n"
+        f"     · 독성(ToxinPred3) ≤ {tox_threshold:.2f} — 이건 **하드 게이트**다(탈락)\n"
+        "     · 개발성 liability 개수 ↓ · 불안정성 지수 <40 · off-target 위험 ↓ · 응집 ↓\n"
+        "     이 축들은 전부 **'나쁘지 않음'을 재는 스크린**이다. 좋음을 재지 않는다 — 그래서 "
+        "불활성 쓰레기(poly-Glu 등)가 전 축에서 이긴다. 그게 ①이 먼저 오는 이유다.\n"
+        "\n"
+        "  **[셔틀 역할] CPP(TAT·Penetratin·SynB1 등 양이온성 막투과)는 비특이 흡수 "
+        "**비교군(baseline)**이다. 비교로 채점하는 건 좋지만 **최종 후보로 제출하지 마라.** "
+        "등급 **D**(Tet1)와 **미등재** 설계체도 같은 취급이다 — 제출하면 자동 반려된다.\n"
+        "\n"
+        "  **[설계체의 자리 — 중요]** 라이브러리 밖 설계체에는 인용이 없다. 그래서 "
+        "**가장 닮은 라이브러리 셔틀의 등급을 상속**받는다 — 서열 유사도가 "
+        f"**{INHERIT_SIM_MIN:.2f} 이상**일 때만(실측 간극: 정당한 개발성 변이체 최소 0.830 vs "
+        "스크램블 0.529·무작위 0.136). 즉 **설계의 정당한 역할은 효능을 올리는 것이 아니라, "
+        "부모의 근거를 유지한 채 liability·응집·불안정성을 줄여 '만들 수 있게' 만드는 것**이다. "
+        "조성을 쌓거나 길이를 늘리는 방향은 **아무 효과가 없다** — 그 점수를 순위에 쓰지 않는다.\n\n"
+        "[BBB 점수 — 보고치다. 순위에 쓰지 마라]\n"
+        "  evaluate_candidates 는 deepB3P 를 분해해 보여준다: 융합 연결부위 점수·셔틀 단독·"
+        "mech(RMT/CPP)·preserv(융합 보존도). **이 값들은 최종 보고서의 '참고 수치'이고 선택 "
+        "근거가 아니다.** 반증 내역:\n"
+        "   · M1 — 양성 vs 무작위 AUC 0.807 인데 양성 vs **스크램블**(조성 동일)은 0.618 "
+        "→ 점수의 상당 부분이 **아미노산 조성**에서 온다(= 양이온 잔기를 쌓으면 오른다).\n"
+        "   · M6 — 융합 수준에서 문헌 검증 셔틀이 자기 스크램블 분포의 39번째 백분위, 유의 0/9, "
+        "문헌 음성 대조군(Angiopep-7) **역전**.\n"
+        "   · M8 — 링커조차 못 고른다. 라이브러리 링커가 같은 길이 **무작위** 링커를 이긴 비율 "
+        "**0/108**(우연이면 5%), 경험 p 중위 ~0.86 = 설계된 링커가 무작위보다 **나쁘다**. "
+        "그리고 길이↔점수 순위상관 -0.495 — 6/9 셔틀에서 '최적 링커'가 **직접융합(링커 없음)**"
+        "이었다. 즉 옛 시스템이 '링커 없음'을 권한 것은 **아티팩트**였다.\n"
+        "  👉 그래서 **'BBB 점수가 낮다/높다'를 선택 근거로 쓰면 심사가 반박한다.** "
+        "낮다고 버리지도, 높다고 고르지도 마라. 최종 보고서에는 보고치로 적고 "
+        "'이 셔틀을 고른 근거(등급·인용)'를 따로 밝혀라.\n"
+        "  링커는 무엇으로 고르나: **문헌·표준 관행**(GGGGS = 표준 유연 링커 / EAAAK = 강직 "
+        "α-헬릭스), **개발성**(GGGGS 는 응집 낮음 / 무작위 링커는 dibasic liability 유입), "
+        "**구조**(get_structure 로 셔틀이 노출됐나 — 링커의 실제 기능은 점수를 올리는 게 아니라 "
+        "**셔틀이 수용체에 닿게 하는 것**이다).\n\n"
         f"사용 가능한 도구: {tools}\n"
         "권장 워크플로우(자율 판단): evaluate_candidates로 라이브러리 조합(**링커 유무 — 직접융합"
         "(링커 빈칸)도 포함**)을 폭넓게 스크리닝 → "
@@ -223,7 +244,10 @@ class GeminiOptimizationAgent(OptimizationAgent):
             # 이 제약을 넣자 에이전트가 Y 를 셔틀 앞으로 옮겨 그대로 우회했다. 링커/셔틀 구분은
             # 장부상의 경계일 뿐 화학적 경계가 아니다.
             # 그래서 이 제약의 목적은 하나다: **모든 설계를 셔틀 필드로 모아** 구성체 수준
-            # 통제(순서 델타 + 접합부 길이 z)가 빠짐없이 걸리게 하는 것.
+            # 통제(= 근거 등급 상속 판정)가 빠짐없이 걸리게 하는 것.
+            # 2026-11-10 보강: BBB 점수를 순위에서 뺐으므로 "접합부를 긁어 점수를 올리는"
+            # 동기 자체가 사라졌다(M8: 링커 길이↔BBB 순위상관 -0.495 였던 그 신호를 더 이상
+            # 쓰지 않는다). 이 제약은 이제 **장부 정규화 목적만** 남는다.
             lk_raw = (args.get("linker", "") or "")
             lk = "".join(ch for ch in lk_raw.upper() if ch.isalpha())
             if lk and lk not in LIB_LINKERS:
@@ -248,17 +272,11 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 f"가설: {hyp}" if hyp else "",
                 f"예측: {pred}" if pred else "",
                 f"편집: {note}" if note else "") if x)
-            # ── 순서 특이성 즉시 피드백 ──
-            # deepB3P 점수의 상당 부분은 조성에서 온다(M1: 스크램블 AUC 0.618). 설계체가
-            # 단순 조성 쌓기인지 **그 자리에서** 알려준다 — 심사까지 끌고 가면 라운드를 낭비한다.
-            note, delta = self._order_note(args.get("shuttle", ""))
-            text += note
-            inote, iz = self._insertion_note(cargo, args.get("shuttle", ""))
-            text += inote
-            for r in rows:
-                # 원장·심사·러닝베스트가 모두 같은 값을 보게 행에 실어둔다.
-                r["order_delta"] = delta
-                r["insert_z"] = iz
+            # ── 근거 상속 즉시 피드백 ──
+            # 설계체가 **최종 후보 자격이 있나**(= 부모 셔틀의 근거를 물려받았나)를 그 자리에서
+            # 알려준다. 심사까지 끌고 가면 라운드를 낭비한다. (등급은 이미 `_evaluate` 가
+            # 행에 실어 두므로 여기서는 설명만 붙인다.)
+            text += self._inherit_note(args.get("shuttle", ""))
             reflect = ("\n\n[반성 요구] 위 실제 점수를 네 **예측과 대조**하라: 예측이 맞았나? "
                        "틀렸다면 어느 축에서 왜 빗나갔나? 그 교훈으로 다음 가설을 세워 설계를 "
                        "이어가거나, 충분히 수렴했으면 finish하라. (점수를 우기지 말고 오라클 결과를 따르라.)")
@@ -269,104 +287,66 @@ class GeminiOptimizationAgent(OptimizationAgent):
             return self._optimize_developability(args, cargo)
         return f"unknown tool: {name}", None
 
-    def _order_specificity(self, shuttle: str):
-        """셔틀의 순서 특이성 → (delta, 라이브러리 여부, 통과, 설명). 실패해도 예외 없음."""
-        from .order_specificity import order_delta, verdict
-        sh = "".join(ch for ch in (shuttle or "").upper() if ch.isalpha())
-        is_lib = sh in LIB_SHUTTLES
-        delta, _real, _mean, _n = order_delta(sh, self.predictor)
-        ok, msg = verdict(delta, is_lib)
-        return delta, is_lib, ok, msg
-
-    def _insertion_check(self, cargo: str, shuttle: str):
-        """접합부 길이 통제 → (통과, 설명, z). 대상이 아니면 (True, "", None)."""
-        from .order_specificity import insertion_verdict, insertion_z
-        r = insertion_z(cargo, shuttle, self.predictor, LIB_SHUTTLES)
-        ok, msg = insertion_verdict(*r)
-        return ok, msg, r[0]
-
-    def _insertion_note(self, cargo: str, shuttle: str):
-        """design_candidate 응답에 붙일 접합부 길이 통제 한 단락 → (문구, z)."""
+    # ── 문헌 근거 등급 상속 — "이 설계체가 어느 셔틀의 후손인가" ──────────────
+    # 이 장치가 옛 **순서 특이성(스크램블 델타)** + **접합부 길이 z** 게이트를 승계한다.
+    #
+    # 왜 교체했나: 두 게이트가 묻던 것은 "이 BBB 점수가 서열 순서에서 왔나 / 조성·길이에서
+    # 왔나"였다. 즉 둘 다 **BBB 점수를 순위 근거로 쓴다는 전제** 위에 서 있었다. 그 전제가
+    # 두 번 반증됐다 — M6(셔틀 간 순위 무의미) · M8(링커 간도 무의미: 라이브러리 링커가 같은
+    # 길이 무작위 링커를 이긴 비율 **0/108**). 전제가 사라지면 질문도 사라진다. 점수를 아예
+    # 순위에 쓰지 않으므로 "조성으로 점수를 올리는" 해킹 경로 자체가 닫힌다.
+    #
+    # 남는 진짜 질문은 하나다: **설계체가 문헌 근거를 물려받을 자격이 있나.**
+    # 등급은 우리가 가진 유일한 양(陽)의 신호이고 설계체에는 인용이 없다. 그대로 두면 모든
+    # 설계체가 후보 자격을 잃어 **개발성 liability 스크러빙처럼 정당한 기여까지** 막힌다.
+    # 그래서 '가장 닮은 라이브러리 셔틀의 등급을 상속'시키되, 유사도 하한을 둔다 — 하한이
+    # 없으면 등급이 다시 해킹 가능한 축이 된다.
+    # 임계값 0.70 은 측정값이다(M9, docs/experiments.md §18): 정당한 개발성 변이체 55개의
+    # 부모 유사도 최소 **0.830** vs 스크램블 0.529 · homopolymer 0.429 · 무작위 0.136 ·
+    # 타 셔틀 간 0.088 → 간극 [0.529, 0.830] 안쪽. 최근접이 부모가 아닌 양성 **0/55**.
+    def _inherit_note(self, shuttle: str) -> str:
+        """design_candidate 응답에 붙일 근거 상속 한 단락. 실패해도 예외 없음."""
         try:
-            ok, msg, z = self._insertion_check(cargo, shuttle)
-        except Exception:  # noqa: BLE001
-            return "", None
-        if not msg:
-            return "", None
-        tail = ("" if ok else " 길이를 늘리는 대신 셔틀 **내부 잔기를 치환**하라.")
-        return f"\n\n[접합부 길이 통제] {'✅' if ok else '⚠️'} {msg}{tail}", z
+            tier, parent, sim = evidence_inherit(shuttle)
+        except Exception:  # noqa: BLE001 — 보조 표시다. 실패가 본 평가를 막아선 안 된다.
+            return ""
+        if sim >= 1.0 and tier:
+            return (f"\n\n[문헌 근거] ✅ 라이브러리 셔틀 **{parent}** — 등급 **{tier}**"
+                    f"({evidence_group(tier)}).")
+        if tier:
+            return (f"\n\n[문헌 근거] ✅ **{parent}** 의 후손으로 인정 — 유사도 {sim:.2f} ≥ "
+                    f"{INHERIT_SIM_MIN:.2f} → 등급 **{tier}**({evidence_group(tier)}) 상속. "
+                    f"부모의 결합 모티프를 보존했다는 뜻이다(기능 보존 제약).")
+        near = f"최근접 {parent}·유사도 {sim:.2f}" if parent else "닮은 셔틀 없음"
+        return (f"\n\n[문헌 근거] ⚠️ **미등재** — {near} < {INHERIT_SIM_MIN:.2f} 이라 등급을 "
+                f"상속받지 못했다. 이 서열은 **최종 후보가 될 수 없다**(심사가 자동 반려). "
+                f"문헌 근거는 이 프로젝트에서 '좋다'를 말할 수 있는 **유일한** 근거이고, "
+                f"설계체에는 인용이 없으므로 부모 셔틀의 모티프를 보존해야만 물려받는다. "
+                f"→ 라이브러리 셔틀에서 **보존적으로** 편집하라(liability 치환 등). "
+                f"조성을 쌓거나 길이를 늘리는 방향은 효과가 없다 — BBB 점수는 순위에 쓰지 않는다.")
 
-    @staticmethod
-    def _order_ok_row(r) -> bool:
-        """이 행이 순서 특이성 요건을 만족하나 — **이미 계산된 값만** 쓴다(예측 호출 0회).
+    def _inherit_gate(self, choice) -> tuple[bool, str]:
+        """심사용 근거 상속 게이트 → (미승인시키나, 게이트 문구).
 
-        라이브러리 셔틀은 면제(근거가 문헌에 있다). `order_delta` 가 없는 행은
-        `evaluate_candidates`(라이브러리 전용) 유래이거나 측정 실패이므로 통과시킨다 —
-        **보조 지표의 실패로 후보를 떨어뜨리지 않는다**는 원칙이다.
-
-        단 **동일잔기 반복(homopolymer)은 예외**다. 그 경우 `order_delta` 가 None 인 이유는
-        측정이 실패한 게 아니라 **스크램블 대조가 존재하지 않는다**는 것이고(순열이 자기 자신뿐),
-        최종 심사의 순서 게이트는 이를 REVISE 한다. 여기서 통과시키면 `RRRRRRRRR` 같은
-        조성 쌓기 해킹(§13)이 running best 로 올라와 복구 경로로 제출되고 곧바로 REVISE 되는
-        낭비가 생긴다. 서열만으로 판별 가능하므로(예측 호출 0회) 여기서 막는다.
+        **하드 게이트다.** 측정이 아니라 자격 판정이므로 '실패 시 통과'가 아니다 —
+        등급을 확인할 수 없으면 후보로 올리지 않는다.
         """
-        sh = (r.get("shuttle") or "").upper()
-        if sh in LIB_SHUTTLES:
-            return True
-        if sh and len(set(sh)) <= 1:
-            return False
-        d = r.get("order_delta")
-        if d is not None and d < ORDER_DELTA_MIN:
-            return False
-        z = r.get("insert_z")
-        if z is not None and z < ORDER_Z_MIN:
-            return False
-        return True
-
-    def _order_gate(self, cargo, choice) -> tuple[bool, str]:
-        """심사용 순서 특이성 게이트 → (미승인시키나, 게이트 문구).
-
-        라이브러리 셔틀이면 **예측을 호출하지 않고** 즉시 통과시킨다(게이트 면제 + 비용 0).
-        측정이 실패하면 통과시킨다 — 보조 지표의 실패로 후보를 떨어뜨리지 않는다.
-        """
-        try:
-            delta, is_lib, ok, msg = self._order_specificity(choice.get("shuttle", ""))
-        except Exception:  # noqa: BLE001
+        tier = choice.get("tier")
+        if tier:
             return False, ""
-        if is_lib:
-            return False, ""
-        if ok:
-            # 순서는 통과했어도 **길이로 올린 것**일 수 있다. 실측: `YHAIYPRH` 는 순서 델타
-            # +0.273 으로 통과하는데, 같은 분자인 `링커 Y + T7` 과 점수가 똑같다(0.875).
-            # 두 통제는 서로 다른 널을 쓰므로 **둘 다** 걸어야 한다.
-            try:
-                iok, imsg, _z = self._insertion_check(cargo, choice.get("shuttle", ""))
-            except Exception:  # noqa: BLE001
-                return False, ""
-            if iok:
-                return False, ""
-            return True, f"\n\n[시스템 게이트] 최종 후보가 **설계체**인데 {imsg}"
+        parent, sim = choice.get("tier_parent"), choice.get("tier_sim") or 0.0
+        near = f"가장 닮은 라이브러리 셔틀은 **{parent}**(유사도 {sim:.2f})" if parent else \
+               "닮은 라이브러리 셔틀이 없다"
         return True, (
-            f"\n\n[시스템 게이트] 최종 후보가 **설계체**(라이브러리 밖)인데 {msg}\n"
-            f"deepB3P 점수는 서열 순서보다 **조성**에 끌리는 성향이 있다(M1 실측: 양성 vs 무작위 "
-            f"AUC 0.807 vs 양성 vs 스크램블 0.618). 그래서 조성만 바꿔 쌓은 서열도 높은 점수를 "
-            f"받는다 → 자동 미승인(REVISE). 요구: 설계체는 자기 스크램블 대조보다 "
-            f"**{ORDER_DELTA_MIN:+.3f} 이상** 높아야 한다. 양이온 잔기를 쌓는 방향이 아니라 "
-            f"**결합 모티프의 배치·간격**을 설계하거나, 라이브러리 셔틀로 되돌아가라.")
-
-    def _order_note(self, shuttle: str):
-        """design_candidate 응답에 붙일 순서 특이성 한 단락 → (문구, delta)."""
-        try:
-            delta, is_lib, ok, msg = self._order_specificity(shuttle)
-        except Exception:  # noqa: BLE001
-            return "", None   # 보조 지표다. 실패가 본 평가를 막아선 안 된다.
-        if is_lib:
-            return f"\n\n[순서 특이성] {msg}", delta
-        head = "✅" if ok else "⚠️"
-        tail = ("" if ok else
-                " 조성(아르기닌 등 양이온 잔기 쌓기)으로 올린 점수는 **심사에서 자동 미승인**된다. "
-                "특정 잔기를 쌓는 대신 **결합 모티프의 배치**를 설계하라.")
-        return f"\n\n[순서 특이성] {head} {msg}{tail}", delta
+            f"\n\n[시스템 게이트] 최종 후보의 셔틀이 **문헌 근거 미등재**다 — {near}로 "
+            f"상속 하한 {INHERIT_SIM_MIN:.2f} 에 미달 → 자동 미승인(REVISE).\n"
+            f"이 프로젝트에서 '이 셔틀이 좋다'를 말할 수 있는 근거는 **문헌 인용뿐**이다"
+            f"(우리 BBB 점수는 셔틀 간·링커 간 순위를 매길 수 없음이 M6·M8 로 확인됐다). "
+            f"설계체는 부모 셔틀의 결합 모티프를 보존했을 때만 그 근거를 물려받는다. "
+            f"하한 {INHERIT_SIM_MIN:.2f} 은 실측 간극에서 왔다(정당한 개발성 변이체 최소 0.830 "
+            f"vs 스크램블 0.529·homopolymer 0.429·무작위 0.136).\n"
+            f"요구: 라이브러리 셔틀에서 **보존적 치환**(liability 제거 등)으로 다시 설계하거나, "
+            f"라이브러리 셔틀을 그대로 쓰라.")
 
     def _optimize_developability(self, args, cargo=""):
         """셔틀의 개발성(liability·응집·불안정성)을 다목적 Pareto로 최적화 — 기능 보존.
@@ -382,74 +362,73 @@ class GeminiOptimizationAgent(OptimizationAgent):
             return (f"개발성 최적화 실패: {type(exc).__name__}",
                     AgentEvent("text", text="🧪 개발성 최적화 실패"))
         seed = objectives(sh)
-        front, n_dropped, seed_bbb = self._filter_front_by_efficacy(sh, front, cargo)
+        front, n_dropped, parent = self._filter_front_by_inheritance(sh, front)
         if not front:
-            msg = (f"셔틀 {sh}의 개발성 전선이 **전부 효능 하한에 걸려 비었다**(시드 BBB {seed_bbb:.3f}의 "
-                   f"{int(self.DEV_BBB_FLOOR_RATIO * 100)}% 미만). 이 셔틀은 개발성으로 더 다듬을 여지가 "
-                   "없다 — 원본을 그대로 쓰거나 다른 셔틀을 고려하라.")
-            return msg, AgentEvent("text", text=f"🧪 개발성 최적화: 효능 하한으로 전선 없음 (셔틀 `{sh}`)")
+            msg = (f"셔틀 {sh}의 개발성 전선이 **전부 근거 상속 하한에 걸려 비었다**"
+                   f"(부모 유사도 < {INHERIT_SIM_MIN:.2f}). 변이체가 부모 셔틀의 모티프를 "
+                   "너무 많이 잃었다는 뜻이다 — 원본을 그대로 쓰거나 다른 셔틀을 고려하라.")
+            return msg, AgentEvent("text", text=f"🧪 개발성 최적화: 근거 상속 미달로 전선 없음 (셔틀 `{sh}`)")
 
         def _fmt(o):
             return f"liability {o['liability']}·응집 {o['aggregation']}·불안정 {o['instability']}"
         rows = [f"- `{m['seq']}` — {_fmt(m['objectives'])} · rmt_sim {m['rmt_sim']} · "
-                f"**융합BBB {m['bbb']:.3f}**(시드 {seed_bbb:.3f}) · 편집 {m['n_edits']}"
+                f"**근거 {m['tier']}**(부모 유사도 {m['tier_sim']:.2f}) · 편집 {m['n_edits']}"
                 for m in front[:6]]
         body = "\n".join(rows)
-        drop = (f" · 효능 하한 미달 **{n_dropped}개 제외**" if n_dropped else "")
-        md = (f"**🧪 개발성 다목적(Pareto) 최적화** — 셔틀 `{sh}`\n"
-              f"시드: liability {seed[0]}·응집 {seed[1]}·불안정 {seed[2]}·BBB {seed_bbb:.3f}. "
-              f"기능 보존(rmt_sim≥0.85) + **효능 보존(융합BBB ≥ 시드의 "
-              f"{int(self.DEV_BBB_FLOOR_RATIO * 100)}%)**하며 liability·응집·불안정성 동시 최소화 "
+        drop = (f" · 근거 상속 미달 **{n_dropped}개 제외**" if n_dropped else "")
+        pn = f"`{parent}`" if parent else "(라이브러리 밖 시드)"
+        md = (f"**🧪 개발성 다목적(Pareto) 최적화** — 셔틀 `{sh}` {pn}\n"
+              f"시드: liability {seed[0]}·응집 {seed[1]}·불안정 {seed[2]}. "
+              f"기능 보존(rmt_sim≥0.85) + **근거 상속 보존(부모 유사도 ≥ "
+              f"{INHERIT_SIM_MIN:.2f})**하며 liability·응집·불안정성 동시 최소화 "
               f"→ 비지배 전선 {len(front)}개{drop}:\n{body}")
         llm = (f"셔틀 {sh}의 개발성 Pareto 전선 {len(front)}개{drop}. "
-               f"제약: rmt_sim≥0.85 **및 융합BBB ≥ 시드({seed_bbb:.3f})의 "
-               f"{int(self.DEV_BBB_FLOOR_RATIO * 100)}%**. 트레이드오프 변이체:\n{body}\n"
-               "하나를 골라 design_candidate/finish의 셔틀로 쓰면 개발성(제조·안정성)이 개선된다. "
-               "**주의: 개발성은 부차 축이다.** 효능(유효점수)이 지금 best보다 떨어지는 변이체를 "
-               "최종안으로 제출하면 심사가 자동 반려한다 — 개발성을 위해 효능을 팔지 마라.")
+               f"제약: rmt_sim≥0.85 **및 부모({pn}) 유사도 ≥ {INHERIT_SIM_MIN:.2f}"
+               f"(= 문헌 근거 등급을 물려받을 수 있는 선)**. 트레이드오프 변이체:\n{body}\n"
+               "하나를 골라 design_candidate/finish의 셔틀로 쓰면 개발성(제조·안정성)이 개선되고, "
+               "**부모의 근거 등급은 그대로 유지된다**. 이것이 이 시스템에서 설계가 기여하는 "
+               "정당한 자리다 — 효능을 주장하는 것이 아니라 **같은 근거를 더 만들 수 있게** 만드는 것. "
+               "⚠️ BBB 점수가 변하는 것은 신경 쓰지 마라(순위에 쓰지 않는다).")
         return llm, AgentEvent("text", text=md)
 
-    # 개발성 편집이 지켜야 할 **효능 하한** — 시드 셔틀 단독 BBB 대비 비율.
-    # 근거(docs/experiments.md §11): pareto_scrub 은 liability·응집·불안정성 3축만 줄이고
-    # 제약은 rmt_sim 하나뿐이라 **효능을 보지 않는다.** 그래서 T7(HAIYPRH)을 다듬은
-    # HAVYPNH 가 유사도는 지키면서 융합 BBB를 0.526 → 0.104 로 떨어뜨렸고, 에이전트가 그걸
-    # 그대로 제출했다. 실측상 이 도구가 있는 조건은 (래칫을 가정해도) 없는 조건보다 eff 가
-    # 약 0.12 낮았다. 도구를 지우는 대신 **범위를 좁힌다** — 제조 가능성은 진짜 과제다.
-    DEV_BBB_FLOOR_RATIO = 0.80
+    # ⚰️ DEV_BBB_FLOOR_RATIO(=0.80, 시드 융합 BBB 대비) 는 2026-11-10 **폐지**했다.
+    # 그 하한의 목적은 "개발성으로 다듬다가 **효능을 팔아버리는 것**"을 막는 것이었고
+    # (실측 §11: T7→HAVYPNH 가 유사도는 지키면서 융합 BBB 를 0.526→0.104 로 떨어뜨렸다),
+    # 그 '효능'의 측정자가 BBB 였다. M6·M8 이 그 측정자를 무효화했으므로 하한도 함께 폐지한다.
+    # 대체: **근거 등급 상속 하한**(유사도 ≥ INHERIT_SIM_MIN). 지키려던 것이 원래
+    # "부모 셔틀의 기능을 잃지 않았나"였으므로, 그걸 BBB 대신 **모티프 보존**으로 직접 잰다.
+    # (M9 실측: pareto_scrub 변이체 55개 전부 부모 유사도 ≥0.830 이고 최근접이 부모였다
+    #  → 정당한 스크러빙은 이 하한에 걸리지 않는다. 즉 상방을 막지 않는다.)
 
-    def _filter_front_by_efficacy(self, seed_seq, front, cargo=""):
-        """개발성 전선에서 **효능이 시드보다 크게 떨어진 변이체**를 걷어낸다.
+    def _filter_front_by_inheritance(self, seed_seq, front):
+        """개발성 전선에서 **부모 셔틀의 근거를 물려받지 못한 변이체**를 걷어낸다.
 
-        ⚠️ **셔틀 단독 BBB로 재면 안 된다.** 실측: `HAIYPRH`→`HAVYPNH` 편집은 셔틀 단독
-        BBB가 1.000→0.940(6% 하락)이라 통과하는데, **융합체** BBB는 0.526→0.104로 무너진다.
-        효능 손실이 셔틀이 아니라 **접합부(cargo+shuttle)**에서 일어나기 때문이다.
-        그래서 `_evaluate` 와 **같은 채점 서열**(bbb_scoring_seq)로 융합체를 잰다.
-        링커는 아직 정해지지 않았으므로 직접융합(링커 없음)을 공통 기준으로 쓴다.
-
-        탐색 중에 거르지 않고 **결과만 한 번에 배치 채점**한다 — deepB3P 는 subprocess 라
-        변이체마다 부르면 수백 번 호출이 되지만, 전선은 보통 ≤40개라 1회 배치로 끝난다.
-        반환: (살아남은 전선[bbb 포함], 제외 개수, 시드 융합 BBB)
+        BBB 를 부르지 않으므로 deepB3P subprocess 호출이 **0회**다(옛 구현은 전선 전체를
+        배치 채점했다). 반환: (살아남은 전선[등급·유사도 포함], 제외 개수, 부모 셔틀 이름)
         """
-        from .config import bbb_scoring_seq
-        def _fuse(x):
-            return bbb_scoring_seq(cargo, "", x) if cargo else x
-        seqs = [_fuse(seed_seq)] + [_fuse(m["seq"]) for m in front]
-        try:
-            preds = self.predictor.predict_many(seqs)
-        except Exception:  # noqa: BLE001 — 채점 실패 시 거르지 않고 원본 전선을 돌려준다
-            return front, 0, 0.0
-        seed_bbb = preds[0].bbb_permeability
-        floor = seed_bbb * self.DEV_BBB_FLOOR_RATIO
+        from .evidence import name_of_seq, similarity
+        parent = name_of_seq(seed_seq)
         kept = []
-        for m, p in zip(front, preds[1:]):
-            if p.bbb_permeability >= floor:
-                kept.append({**m, "bbb": p.bbb_permeability})
-        return kept, len(front) - len(kept), seed_bbb
+        for m in front:
+            tier, par, sim = evidence_inherit(m["seq"])
+            if tier is None:
+                continue
+            # 부모가 바뀐 변이체도 버린다 — 다른 셔틀의 근거를 물려받는 건 상속이 아니다.
+            if parent is not None and par != parent:
+                continue
+            kept.append({**m, "tier": tier, "tier_sim": sim})
+        return kept, len(front) - len(kept), parent
 
     @staticmethod
-    def _eff_bbb(r):
-        """양이온 편향 완화용 유효 점수 = BBB − λ·off_target_risk. best 선정/수렴에 사용."""
-        return r.get("bbb", 0.0) - OFF_TARGET_PENALTY * r.get("sel_off", 0.0)
+    def _summary(r) -> str:
+        """후보 한 줄 요약 — **근거 등급 + 위험 축**. BBB 는 괄호에 참고로만 적는다."""
+        t = r.get("tier")
+        ev = f"근거 {t}" if t else "근거 미등재"
+        if (r.get("tier_sim") or 1.0) < 1.0 and r.get("tier_parent"):
+            ev += f"←{r['tier_parent']}·{r['tier_sim']:.2f}"
+        return (f"{ev} · liab {r.get('dev_liab', '?')} · 불안정성 {r.get('instability', '?')} · "
+                f"off {r.get('sel_off', 0):.2f} · 응집핫스팟 {r.get('dev_agg_hot', '?')} "
+                f"(BBB 참고 {r.get('bbb', 0):.3f})")
 
     def _score_choice(self, cargo, fa):
         """finish가 제출한 최종 후보를 채점해 row(dict)로 반환. 실패 시 None."""
@@ -470,44 +449,50 @@ class GeminiOptimizationAgent(OptimizationAgent):
     def _front_text(front: dict) -> str:
         """도달 가능 집합(Pareto 전선)을 심사자에게 줄 텍스트로 만든다."""
         b = front.get("best") or {}
+        bg = front.get("best_group")
+        grp = front.get("by_group") or {}
         lines = [
             f"[도달 가능 집합 — 라이브러리 전수 {front.get('n_total', '?')}조합을 **동일 지표**로 채점한 결과]",
-            f"  비독성 {front.get('n_nontoxic', '?')}개 → 하드 게이트(**독성뿐** — BBB 하한은 "
-            f"폐지됨) 통과 {front.get('n_gate_all', '?')}개"
-            f" → 그중 **후보군(CPP 비교군 제외) {front.get('n_gate', '?')}개**"
-            f" (엄밀 RMT {front.get('n_gate_rmt', 0)}개)",
-            f"  축별 **달성 한계**: BBB 최대 {b.get('bbb_max')} · off_target 최소 {b.get('off_min')}"
-            f" · 불안정성 최소 {b.get('instability_min')}",
-            f"  **전선의 유효점수(eff = BBB − {OFF_TARGET_PENALTY}×off) 범위: "
-            f"{front.get('front_eff_min')} ~ {front.get('front_eff_max')}**"
-            " — 제출 후보가 이 하한보다 낮으면, 사소한 축(예: 불안정성)에서만 앞서는 "
-            "'전선 이탈'이므로 REVISE 대상이다.",
+            f"  비독성 {front.get('n_nontoxic', '?')}개 → 하드 게이트(**독성뿐**) 통과 "
+            f"{front.get('n_gate_all', '?')}개 → 그중 **후보군 {front.get('n_gate', '?')}개** "
+            f"(CPP 비교군·근거 등급 D·미등재 제외. 엄밀 RMT {front.get('n_gate_rmt', 0)}개)",
+            "  후보군의 **문헌 근거 그룹 분포**: "
+            + " · ".join(f"{g} {n}개" for g, n in grp.items() if n) or "—",
+            f"  → **달성 가능한 최상위 근거 그룹 = `{bg}`**. 최종 후보는 여기서 나와야 합니다.",
+            f"  위험 축별 **달성 한계**: liability 최소 {b.get('liab_min')} · "
+            f"불안정성 최소 {b.get('instability_min')} · off_target 최소 {b.get('off_min')} · "
+            f"응집 최소 {b.get('agg_min')}",
         ]
-        fr = front.get("front") or []
-        if fr:
-            lines.append(f"  **후보군 Pareto 전선**(BBB↑ · off↓ · 불안정성↓ 비지배) {len(fr)}개 "
-                         f"— 비교군(CPP)은 제외된 전선이다:")
-            for r in fr[:8]:
-                lines.append(f"    · {r['label']}: BBB {r['bbb']} · off {r['off']} · 불안정성 "
-                             f"{r['instability']} · {r['mechanism']} · 개발성 {r['dev_risk']}")
-        opts = front.get("rmt_options") or []
-        if opts:
-            lines.append(f"  게이트 통과 **RMT 후보(후보군)** {front.get('n_gate_rmt', len(opts))}개:")
-            for r in opts:
-                lines.append(f"    · {r['label']}: BBB {r['bbb']} · off {r['off']} · 불안정성 "
-                             f"{r['instability']} · 개발성 {r['dev_risk']}")
-        else:
-            lines.append("  ⚠️ 게이트를 통과한 RMT 후보가 **없다** — 이 경우에만 CPP(비교군) 선택이 "
-                         "조건부로 허용된다.")
+        ft = front.get("front_top") or []
+        if ft:
+            lines.append(f"  **최상위 근거 그룹(`{bg}`)의 Pareto 전선** {len(ft)}개 "
+                         "— 최종 후보가 여기 있거나, 이들에게 지배당하지 않아야 합니다:")
+            for r in ft[:8]:
+                lines.append(
+                    f"    · {r['label']}: 근거 **{r['tier']}** · liab {r['dev_liab']} · 불안정성 "
+                    f"{r['instability']} · off {r['sel_off']} · 응집 {r['dev_agg_hot']} · {r['mechanism']} "
+                    f"(BBB 참고 {r['bbb_report']})")
+        lower = [r for r in (front.get("front") or []) if r.get("group") != bg]
+        if lower:
+            lines.append("  [아래 근거 그룹의 비지배 후보 — 참고. 위 그룹에 후보가 있으면 "
+                         "이쪽을 최종안으로 쓸 수 없습니다]")
+            for r in lower[:4]:
+                lines.append(f"    · {r['label']}: 근거 **{r['tier']}**({r['group']}) · "
+                             f"liab {r['dev_liab']} · off {r['sel_off']}")
+        unsup = front.get("unsupported") or []
+        if unsup:
+            lines.append("  [근거 등급 D(= BBB 통과 단독 근거 없음) — **최종 선택 대상 아님**]")
+            for r in unsup:
+                lines.append(f"    · {r['label']}: 근거 **{r['tier']}** (BBB 참고 "
+                             f"{r['bbb_report']}) — 점수가 높아도 근거가 없습니다")
         cpp = front.get("cpp_baseline") or []
         if cpp:
-            lines.append("  [비교군(CPP) 참고치 — **최종 선택 대상 아님**. 비특이 흡수 상한을 "
-                         "보여줄 뿐이다]")
+            lines.append("  [비교군(CPP) 참고치 — **최종 선택 대상 아님**. 비특이 흡수 상한]")
             for r in cpp:
-                lines.append(f"    · {r['label']}: BBB {r['bbb']} · off {r['off']} · 불안정성 "
-                             f"{r['instability']} (비교군)")
-            lines.append("    ※ CPP의 높은 BBB를 이유로 후보군을 깎지 마십시오 — 비교군은 "
-                         "달성 목표가 아닙니다.")
+                lines.append(f"    · {r['label']}: off {r['sel_off']} · 불안정성 "
+                             f"{r['instability']} (BBB 참고 {r['bbb_report']}, 비교군)")
+            lines.append("    ※ CPP·등급 D 의 **BBB 점수가 높은 것이 바로 그 점수를 순위에 "
+                         "쓸 수 없는 이유**입니다(M1 조성 편향). 그걸 이유로 후보군을 깎지 마십시오.")
         lines.append("  → **이 집합 밖의 값을 요구하지 마십시오.** 여기 적힌 **후보군** 수치가 "
                      "이 문제에서 실제로 달성 가능한 최선입니다.")
         return "\n".join(lines)
@@ -520,58 +505,70 @@ class GeminiOptimizationAgent(OptimizationAgent):
             "[판정 원칙 — 가장 중요]\n"
             "**절대적 이상과 비교하지 마십시오.** 아래 '도달 가능 집합'이 이 문제에서 실제로 달성 "
             "가능한 최선입니다. 판정 기준은 '이상적인가'가 아니라 **'달성 가능한 최선 대비 합리적인 "
-            "선택인가'**입니다. 이 축들은 서로 **적대적**입니다 — BBB를 올리는 양이온성이 off-target과 "
-            "불안정성을 함께 올립니다(실측 상관: BBB↔off +0.62, BBB↔불안정성 +0.50). 따라서 **모든 "
-            "축의 동시 만족을 요구하지 마십시오. 그런 후보는 존재하지 않습니다.**\n\n"
+            "선택인가'**입니다.\n\n"
+            "[이 시스템이 무엇을 주장하고 무엇을 주장하지 않는가 — 반드시 숙지]\n"
+            "  이 시스템은 **BBB 투과도를 예측하지 않습니다.** 문헌 검증 셔틀을 붙이면 뇌 전달이 "
+            "올라간다는 것은 **문헌에서 빌려온 전제**이고, 최적화 대상은 그 융합체의 "
+            "**개발성·안전성**입니다. 우리 BBB 점수(deepB3P)는 순위를 매기는 데 쓸 수 없습니다:\n"
+            "   · M1 — 양성 vs 무작위 AUC 0.807 vs 양성 vs **스크램블** 0.618 → 점수의 상당 부분이 "
+            "**아미노산 조성**에서 온다.\n"
+            "   · M6 — 융합 수준에서 문헌 검증 셔틀이 자기 스크램블 분포의 39번째 백분위, 유의 0/9, "
+            "문헌 음성 대조군 **역전**.\n"
+            "   · M8 — 링커 선택도 불가. 라이브러리 링커가 같은 길이 **무작위** 링커를 이긴 비율 "
+            "**0/108**(우연이면 5%), 길이↔점수 순위상관 **-0.495**.\n"
+            "  👉 따라서 **설계자가 'BBB 점수가 높다/낮다'를 선택 근거로 들면 반박하십시오.** "
+            "그리고 **당신도 BBB 점수가 낮다는 이유로 REVISE 하지 마십시오** — 탈락 사유가 아닙니다.\n\n"
             f"{front_text}\n\n"
             "[하드 게이트 — 이 둘만 탈락 사유. 위반하면 예외 없이 REVISE]\n"
             f"  ① **독성**: ToxinPred3 > {thr:.2f} → 탈락.\n"
-            "  ② **순서 특이성 측정 가능성**: 최종 후보가 **설계체**(라이브러리 밖)인데 자기 "
-            "스크램블 대조를 만들 수 없으면(동일잔기 반복·homopolymer) 탈락. 측정할 수 없는 것을 "
-            "통과시키지 않는다.\n"
-            "  ⚠️ **융합 BBB 점수에 하한은 없다**(2026-11-10 폐지). 그 하한은 양이온성 필터였고 "
-            "근거 등급 A 셔틀(Angiopep-2)을 전멸시켰다. **BBB 점수가 낮다는 이유만으로 REVISE "
-            "하지 마십시오** — 그건 더 이상 탈락 사유가 아닙니다.\n\n"
-            "[셔틀 역할 — CPP는 비교군이다]\n"
-            "  **RMT**(수용체 매개: Angiopep·T7·B6·ApoE·Leptin30 계열)가 **후보군**이고, "
-            "**CPP**(TAT·SynB1·Penetratin 등 양이온성 막투과)는 **비특이 흡수 비교군(baseline)**입니다. "
-            "최종 후보가 CPP라면: 위 집합에 게이트를 통과한 RMT가 **하나라도 있으면 REVISE**하고 그 RMT "
-            "대안을 지목하십시오. 게이트 통과 RMT가 전혀 없을 때만 CPP를 조건부 승인할 수 있고, 그때도 "
-            "'비교군을 최종안으로 쓴 이유'를 한계로 명시해야 합니다.\n\n"
+            "  ② **문헌 근거 등급 보유**: 최종 후보의 셔틀이 라이브러리 셔틀이거나, 설계체라면 "
+            f"가장 닮은 라이브러리 셔틀과 유사도 **{INHERIT_SIM_MIN:.2f} 이상**으로 그 등급을 "
+            "**상속**받아야 합니다. 미등재(상속 실패)·등급 **D**(BBB 통과 단독 근거 없음)는 탈락.\n"
+            "    왜: 문헌 인용은 이 시스템에서 '이 후보가 좋다'를 말할 수 있는 **유일한 근거**입니다. "
+            "신뢰하는 나머지 축(독성·응집·liability·불안정성·off-target)은 전부 **'나쁘지 않음'만** "
+            "재므로, 근거를 요구하지 않으면 **불활성 쓰레기가 모든 축에서 이깁니다** "
+            "(실측: poly-Glu 는 off 0.00·선택성 1.00·응집 0.12·liability 0 으로 Angiopep-2 를 "
+            "전 축에서 이깁니다).\n\n"
+            "[셔틀 역할 — CPP·등급 D 는 비교군이다]\n"
+            "  **RMT**(수용체 매개)가 후보군이고, **CPP**(TAT·SynB1·Penetratin)는 비특이 흡수 "
+            "**비교군**입니다. 최종 후보가 CPP라면: 게이트를 통과한 RMT가 **하나라도 있으면 REVISE**"
+            "하고 그 대안을 지목하십시오.\n\n"
             f"{evidence_critic_rule()}"
-        "[트레이드오프 축 — 탈락 사유가 아니라 '한계로 명시할' 사유]\n"
-            "  불안정성 · 개발성 liability/양이온 · off-target 정도 · "
-            "설계의 실질(라이브러리의 뻔한 선택인가 근거 있는 정밀 설계인가).\n"
+            "[트레이드오프 축 — 탈락 사유가 아니라 '한계로 명시할' 사유]\n"
+            "  불안정성 · 개발성 liability/양이온 · off-target · 응집 · 설계의 실질.\n"
             "  이 축들에서는 제출 후보가 전선에서 **지배당하는지만** 보십시오.\n"
-            "   · **지배당함** = 모든 축에서 더 나은 **달성 가능** 후보가 실제로 존재 → REVISE, 그 후보를 "
-            "지목.\n"
+            "   · **지배당함** = 근거 그룹이 같거나 더 좋고 위험 축 전부가 같거나 더 나은 "
+            "**달성 가능** 후보가 실재 → REVISE, 그 후보를 지목.\n"
             "   · **비지배** = 트레이드오프 상의 합리적 지점 → 한계를 명시하고 조건부 승인.\n"
-            "   · **전선 이탈** = 비지배이더라도 **유효점수가 전선의 하한보다 낮으면** REVISE. "
-            "불안정성 같은 부차 축에서만 앞서고 결정축(효능·선택성)에서 전선보다 크게 뒤처지는 "
-            "후보를 승인해서는 안 된다.\n\n"
+            "   · **근거 하향** = 비지배여도 **달성 가능한 최상위 근거 그룹보다 낮은 그룹**을 "
+            "골랐으면 REVISE. 위험 축이 조금 좋다는 이유로 근거가 약한 셔틀을 고를 수는 없습니다 "
+            "— 위험 축은 '좋음'을 재지 않기 때문입니다.\n"
+            "   · 등급 **C(주의)** 후보를 승인할 때는 **왜 주의인지**(문헌의 고효율 형태가 이 서열과 "
+            "다름·정량값 미확보 등)를 한계로 **반드시 명시**하게 하십시오.\n\n"
             "[판정 — 마지막 줄에 정확히 하나]\n"
-            "  `VERDICT: APPROVE`              하드 게이트 통과 + 비지배 + 특별히 명시할 한계도 없음\n"
+            "  `VERDICT: APPROVE`              하드 게이트 통과 + 비지배 + 최상위 근거 그룹 + 명시할 한계 없음\n"
             "  `VERDICT: APPROVE_WITH_LIMITS`  하드 게이트 통과 + 비지배이나 명시할 한계가 있음 "
             "(정상적인 승인 형태)\n"
-            "  `VERDICT: REVISE`               하드 게이트 위반, 전선에서 지배당함, 또는 RMT 대안이 "
-            "있는데 CPP를 고름\n"
+            "  `VERDICT: REVISE`               하드 게이트 위반, 전선에서 지배당함, 근거 하향, "
+            "또는 RMT 대안이 있는데 CPP를 고름\n"
             "**애매하면 REVISE가 아니라 `APPROVE_WITH_LIMITS`로 하고 한계를 적으십시오.** 단 하드 게이트 "
-            "위반과 'RMT 대안이 있는데 CPP 선택'은 예외 없이 REVISE입니다.\n"
+            "위반·근거 하향·'RMT 대안이 있는데 CPP 선택'은 예외 없이 REVISE입니다.\n"
             "3~5문장으로 핵심 평가(무엇이 한계이고 그래도 왜 합리적인지, 또는 어느 후보에 지배당하는지)를 "
             "쓰고 **마지막 줄에 VERDICT**를 쓰십시오."
         )
 
-    # 세션 중 이미 채점해 본 후보보다 **못한 것을 제출**하면 막는 여유폭.
-    # 0.02는 오라클 잡음보다 크고 의미 있는 효능 차이보다 작게 잡은 값이다.
-    RATCHET_MARGIN = 0.02
+    # ⚰️ RATCHET_MARGIN(=0.02) 은 2026-11-10 **폐지**했다. 그것은 유효점수(BBB 기반)
+    # **차이**를 재던 여유폭이고, 잡음 있는 연속 점수를 비교하니 필요했다. 래칫을 **지배 관계**
+    # (근거 그룹 + 위험 축 Pareto)로 바꾸면서 사라졌다 — 축들이 전부 결정론적 측정이라
+    # 잡음 여유폭이 필요 없고, 축 사이의 임의 가중도 함께 없어진다.
 
     def _critic_review(self, client, model, types, cargo, choice, best_seen=None):
         """최종 후보를 별도 컨텍스트로 적대적 검증.
 
         반환 `(approve: bool, critique_text: str, tier: str)`.
         tier ∈ {APPROVE, APPROVE_WITH_LIMITS, REVISE} — **계층 판정**이다.
-        하드 게이트(독성·BBB 하한)만 탈락 사유이고, 나머지 축은 '도달 가능 집합(Pareto 전선)
-        대비 지배당하는가'로만 본다. 절대적 이상과 비교하면 승인 가능 영역이 비기 때문이다
+        하드 게이트(**독성 · 문헌 근거 등급 보유**)만 탈락 사유이고, 나머지 축은
+        '도달 가능 집합(Pareto 전선) 대비 지배당하는가'로만 본다. 절대적 이상과 비교하면 승인 가능 영역이 비기 때문이다
         (실측: 심사 기준 AND → 130조합 중 0개. `reachable_front` 주석 참고).
         """
         front = self.reachable_front(cargo)
@@ -585,7 +582,9 @@ class GeminiOptimizationAgent(OptimizationAgent):
              f"전달 분해 — 메커니즘={choice.get('mechanism', '?')}, 셔틀단독BBB={choice.get('shuttle_bbb', '?')}, "
              f"융합보존={choice.get('preservation', 'n/a')}, deepB3P 타당도=\"{choice.get('deepb3p_valid', '?')}\"\n"
              f"개발성 — 위험={choice.get('dev_risk', '?')}, 순전하={choice.get('dev_charge', '?')}, "
-             f"응집={choice.get('dev_agg', '?')}, liability({len(dev_list)}): "
+             f"응집 핫스팟(설계모듈)={choice.get('dev_agg_hot', '?')}"
+             f"/전체구성체={choice.get('dev_agg_hot_full', '?')}, "
+             f"liability({len(dev_list)}): "
              + ("; ".join(dev_list) if dev_list else "없음") + "\n"
              f"선택성/off-target — 위험={choice.get('sel_level', '?')}"
              f"(선택성 {choice.get('selectivity', '?')}), {choice.get('sel_mech', '?')}\n"
@@ -610,68 +609,89 @@ class GeminiOptimizationAgent(OptimizationAgent):
             tier = "REVISE"
 
         # ── 결정론적 게이트 (LLM 판정을 덮어쓴다) ─────────────────────────
-        # 하드 게이트는 둘뿐: ① 독성 ② 순서 특이성 측정 가능성(= 설계체의 스크램블 대조 존재).
-        # BBB 하한(옛 ②)은 폐지했다 — 근거: `core/config.py` 의 MIN_BBB_SIGNAL 폐지 주석.
-        # 나머지 축은 트레이드오프이므로 탈락시키지 않는다.
+        # 하드 게이트는 둘뿐: ① 독성 ② **문헌 근거 등급 보유**(상속 포함).
+        # 옛 ②(순서 특이성 측정 가능성)·전선 이탈(유효점수 하한)은 2026-11-10 폐지했다 —
+        # 둘 다 "BBB 점수로 순위를 매길 수 있다"는 전제에 서 있었고 M6·M8 이 반증했다.
+        # 그 역할은 ②가 승계한다: 미등재(상속 실패) 설계체 = homopolymer·조성 쌓기·무작위가
+        # 전부 여기서 걸린다(M9 실측 간극 [0.529, 0.830]).
+        from .evidence import group_rank as _grank
         if choice.get("toxic"):
             text = (text or "") + (
                 f"\n\n[시스템 게이트] 독성 {choice.get('tox', 0.0):.3f} > 임계값 "
                 f"{self.settings.toxicity_threshold:.2f} → 안전성 하드 게이트 위반으로 자동 미승인(REVISE).")
             tier = "REVISE"
+        elif (ig := self._inherit_gate(choice))[0]:
+            # ── 근거 등급 보유 게이트 — '인용 없는 서열' 금지 ──
+            # 이 게이트가 옛 BBB 하한·순서 특이성·접합부 길이 통제의 역할을 **한꺼번에** 맡는다.
+            # 근거: 신뢰하는 나머지 축은 전부 '나쁘지 않음'만 재므로(위험 스크린), 근거를
+            # 요구하지 않으면 불활성 쓰레기가 전 축에서 이긴다 — 실측 poly-Glu(off 0.00·
+            # 선택성 1.00·응집 0.12·liability 0)가 Angiopep-2(0.09·0.91·0.44·2)를 전부 이긴다.
+            text = (text or "") + ig[1]
+            tier = "REVISE"
+        elif is_unsupported(choice):
+            # 등급 D = **BBB 통과 단독 근거 없음**(Tet1). 상속은 됐지만 물려받은 근거가 없다.
+            # 실측 근거: M2·M4 에서 우리 효능 축의 후보군 1위가 `직접융합+Tet1`(BBB 0.568)이었다
+            # — 점수 1위가 라이브러리에서 BBB 근거가 가장 약한 셔틀이었다.
+            alts = ", ".join(f"{r['label']}(근거 {r['tier']})"
+                             for r in (front.get("front_top") or [])[:3])
+            text = (text or "") + (
+                f"\n\n[시스템 게이트] 최종 후보의 셔틀이 **근거 등급 "
+                f"{choice.get('tier')}(= BBB 통과 단독 근거 없음)**이다 → 자동 미승인(REVISE). "
+                f"BBB 점수가 높게 나오는 것은 선택 근거가 아니다(M1 조성 편향·M6·M8). "
+                f"달성 가능한 대안: {alts}.")
+            tier = "REVISE"
         elif (str(choice.get("mechanism") or "").upper().startswith("CPP")
               and (front.get("n_gate_rmt") or 0) > 0):
             # CPP는 비특이 흡수 **비교군**이다. 게이트를 통과한 RMT 후보가 실제로 존재하면
             # 비교군을 최종안으로 확정할 이유가 없다 → 대안을 지목해 REVISE.
-            alts = ", ".join(f"{r['label']}(BBB {r['bbb']}·off {r['off']})"
+            alts = ", ".join(f"{r['label']}(근거 {r['tier']}·liab {r['dev_liab']})"
                              for r in (front.get("rmt_options") or [])[:3])
             text = (text or "") + (
                 f"\n\n[시스템 게이트] 최종 후보가 **CPP(비특이 흡수 비교군)**인데, 하드 게이트를 통과한 "
                 f"**RMT 후보가 {front.get('n_gate_rmt')}개 실재**한다 → 비교군을 최종안으로 확정할 수 "
                 f"없으므로 자동 미승인(REVISE). 달성 가능한 RMT 대안: {alts}.")
             tier = "REVISE"
-        elif (og := self._order_gate(cargo, choice))[0]:
-            # ── 순서 특이성 게이트 — '조성 쌓기로 올린 점수' 금지 ──
-            # 2026-11-10 부터 이 게이트가 **옛 BBB 하한의 역할도 대신한다**: 측정 불가
-            # (homopolymer → 스크램블 0개)인 설계체를 막는 것이 near-zero 쓰레기 설계를
-            # 막는 결정론 장치다. 점수의 절대값이 아니라 '측정 가능성·순서 의존성'을 보므로
-            # M6 로 무효화된 축에 의존하지 않는다.
-            # M1 실측: 양성 vs 무작위 AUC 0.807 인데 양성 vs 스크램블(조성 동일·순서 파괴)은
-            # 0.618 뿐이다 → deepB3P 점수의 상당 부분이 **아미노산 조성**에서 온다. 그래서
-            # 아르기닌을 쌓으면 점수가 오른다(보상 해킹의 메커니즘).
-            # 교정 실측(core/order_specificity.py): 조성 쌓기 프로브 델타 +0.000~+0.018 vs
-            # 정당한 RMT 셔틀 중위 +0.289 → 셔틀 단독 기준으로는 분리가 명확하다.
-            # **라이브러리 셔틀은 면제**한다 — 그 서열의 근거는 deepB3P 가 아니라 문헌이고,
-            # 모델의 조성 성분을 못 믿는다는 이유로 published 셔틀을 떨어뜨릴 수는 없다
-            # (실제로 THR 의 델타는 +0.014 로 프로브 수준이다). 게이트는 **설계체 전용**이다.
-            text = (text or "") + og[1]
-            tier = "REVISE"
-        elif (front.get("front_eff_min") is not None
-              and self._eff_bbb(choice) < front["front_eff_min"] - 1e-9):
-            # '전선 이탈' — 비지배(부차 축에서만 앞섬)여도 결정축에서 달성 가능 하한보다 낮으면
-            # 승인하지 않는다. 하한은 임의 상수가 아니라 **전선 자체에서 도출**된 값이다.
-            alts = ", ".join(f"{r['label']}(eff {r['bbb'] - OFF_TARGET_PENALTY * r['off']:.3f})"
-                             for r in (front.get("front") or [])[:3])
+        elif (front.get("best_group") is not None
+              and _grank(choice.get("tier")) > _grank((front.get("front_top") or [{}])[0].get("tier"))):
+            # ── 근거 하향 게이트 — 옛 '전선 이탈'의 승계자 ──
+            # 비지배여도 **달성 가능한 최상위 근거 그룹보다 낮은 그룹**을 골랐으면 승인하지 않는다.
+            # 위험 축(liability·off·불안정성·응집)이 조금 좋다는 이유로 근거가 약한 셔틀을 고를 수
+            # 없다 — 그 축들은 '좋음'을 재지 않기 때문이다. 하한은 임의 상수가 아니라
+            # **전선 자체에서 도출**된 값이다(달성 가능한 최상위 그룹).
+            alts = ", ".join(f"{r['label']}(근거 {r['tier']}·liab {r['dev_liab']}·off {r['sel_off']})"
+                             for r in (front.get("front_top") or [])[:3])
             text = (text or "") + (
-                f"\n\n[시스템 게이트] 유효점수 {self._eff_bbb(choice):.3f} < 도달 가능 전선의 하한 "
-                f"{front['front_eff_min']:.3f} → 불안정성 등 부차 축에서만 앞설 뿐 **결정축(효능·"
-                f"선택성)에서 전선 밖으로 이탈**했으므로 자동 미승인(REVISE). 달성 가능한 대안: {alts}.")
+                f"\n\n[시스템 게이트] 제출 후보의 문헌 근거 그룹이 "
+                f"**`{evidence_group(choice.get('tier'))}`**(등급 {choice.get('tier')})인데, "
+                f"이 문제에서 달성 가능한 최상위 그룹은 **`{front.get('best_group')}`**이다 → "
+                f"**근거 하향**이므로 자동 미승인(REVISE). 달성 가능한 대안: {alts}.")
             tier = "REVISE"
-        elif (best_seen is not None
-              and self._eff_bbb(choice) < self._eff_bbb(best_seen) - self.RATCHET_MARGIN):
+        elif (dom := next((r for r in (front.get("front_top") or [])
+                           if dominates(r, choice)), None)) is not None:
+            # ── 지배 게이트 — 모든 축에서 더 나은 '달성 가능' 후보가 실재 ──
+            # 근거 그룹 + 위험 축 전부에서 같거나 낫고 하나는 엄격히 나은 후보가 있으면
+            # 트레이드오프가 아니라 **그냥 못한 선택**이다. BBB 는 축에 들어가지 않는다.
+            text = (text or "") + (
+                f"\n\n[시스템 게이트] 제출 후보가 전선의 **`{dom['label']}`**"
+                f"(근거 {dom['tier']}·liab {dom['dev_liab']}·불안정성 {dom['instability']}·"
+                f"off {dom['sel_off']}·응집 {dom['dev_agg_hot']})에게 **모든 축에서 지배당한다** → "
+                f"트레이드오프가 아니라 열등한 선택이므로 자동 미승인(REVISE). 그 후보를 쓰거나, "
+                f"그것이 지배하지 못하는 설계를 제출하라.")
+            tier = "REVISE"
+        elif best_seen is not None and dominates(best_seen, choice):
             # ── 래칫(ratchet) 게이트 — '이미 본 더 좋은 후보를 버리고 제출' 금지 ──
             # 애블레이션 실측(docs/experiments.md §11): 16세션 중 **7세션이 퇴행**했고
-            # 최대 낙폭은 -0.395였다. 편집 채널(design_candidate·optimize_developability)이
-            # 있는 조건에서만 일어나고, 라이브러리 선택만 하는 조건은 퇴행 0건이었다.
-            # 원인은 **되돌아갈 장치가 없는 것**이다. 개발성으로 다듬은 변이체가 효능을 깎아도
-            # 에이전트가 그대로 제출해 버린다. 탐색은 자유롭게 하되 **제출은 최고치 아래로
-            # 내려가지 못하게** 막는다 — 설계의 상방은 살리고 하방만 자른다.
+            # 편집 채널이 있는 조건에서만 일어났다(라이브러리 선택만 하는 조건은 퇴행 0건).
+            # 원인은 **되돌아갈 장치가 없는 것**이다. 탐색은 자유롭게 하되 **제출은 이미 본
+            # 최고치에 지배당하지 못하게** 막는다 — 설계의 상방은 살리고 하방만 자른다.
+            # 2026-11-10: 비교를 유효점수 차이(여유폭 0.02)에서 **지배 관계**로 바꿨다.
+            # 축들이 전부 결정론적 측정이라 잡음 여유폭이 필요 없고, 축 간 임의 가중도 사라진다.
             text = (text or "") + (
-                f"\n\n[시스템 게이트] 제출 후보의 유효점수 {self._eff_bbb(choice):.3f} < "
-                f"**이 세션이 이미 채점해 본** 최고 후보 "
-                f"`{best_seen.get('linker') or '직접융합'}+{best_seen.get('shuttle', '?')}`의 "
-                f"{self._eff_bbb(best_seen):.3f} → 더 좋은 걸 **이미 손에 쥐고도** 더 나쁜 것을 "
-                "확정하려 했으므로 자동 미승인(REVISE). 그 후보로 되돌아가거나, 그보다 나은 설계를 "
-                "찾아 제출하라.")
+                f"\n\n[시스템 게이트] 제출 후보가 **이 세션이 이미 채점해 본** 후보 "
+                f"`{best_seen.get('linker') or '직접융합'}+{best_seen.get('shuttle', '?')}`"
+                f"({self._summary(best_seen)})에게 **모든 축에서 지배당한다** → 더 좋은 걸 "
+                f"**이미 손에 쥐고도** 더 나쁜 것을 확정하려 했으므로 자동 미승인(REVISE). "
+                f"그 후보로 되돌아가거나, 그보다 나은 설계를 찾아 제출하라.")
             tier = "REVISE"
 
         return tier != "REVISE", text, tier
@@ -853,13 +873,13 @@ class GeminiOptimizationAgent(OptimizationAgent):
                                 # CPP는 비교 근거로만 쓰고 best_cpp에 따로 보관한다.
                                 # 순서 특이성 탈락 후보는 러닝 베스트가 될 수 없다 —
                                 # 그래야 최종 교체(복구)가 **통과하는** 후보로 되돌아간다.
-                                if (is_candidate(r) and self._order_ok_row(r)
-                                        and (best is None
-                                             or self._eff_bbb(r) > self._eff_bbb(best))):
+                                # `is_candidate` 가 독성·CPP·**근거 미등재/등급 D** 를 모두
+                                # 걸러낸다. 순위는 rank_key(근거 그룹 → 위험 축).
+                                if is_candidate(r) and (best is None
+                                                        or rank_key(r) < rank_key(best)):
                                     best = r
                                 elif is_comparison_only(r) and not r.get("toxic") and (
-                                        best_cpp is None
-                                        or self._eff_bbb(r) > self._eff_bbb(best_cpp)):
+                                        best_cpp is None or rank_key(r) < rank_key(best_cpp)):
                                     best_cpp = r
                     fr_parts.append(types.Part.from_function_response(
                         name=fc.name, response={"result": text}))
@@ -923,41 +943,40 @@ class GeminiOptimizationAgent(OptimizationAgent):
                     f"`{choice.get('shuttle', '?')}`는 비특이 흡수 **비교군(CPP)**이므로 최종 결과로 "
                     "확정하지 않습니다." + (
                         f" 후보군(RMT) 중 최고 후보 `{best.get('shuttle', '?')}`"
-                        f"(유효점수 {self._eff_bbb(best):.3f})로 대체해 제시합니다."
+                        f"({self._summary(best)})로 대체해 제시합니다."
                         if swapped else
                         " 후보군(RMT)에서 유효한 후보를 찾지 못해 최종 후보 없이 종료합니다."))
                 choice = None
-            # ── 퇴행 제출은 러닝 베스트로 되돌린다(래칫의 '복구' 절반) ──────────
-            # 래칫 게이트(_critic_review)는 퇴행을 **검출**해 REVISE를 내지만, 재설계 기회를
-            # 소진하면 퇴행 후보가 그대로 최종이 된다. 실측(verify 4세션): 전부 미승인인데도
-            # 3/4가 퇴행 상태로 종료됐다(0.725를 이미 보고 0.461을 제출). 검출만으로는 못 고친다.
-            # 그래서 CPP 대체와 **같은 방식으로** 이미 채점해 본 최고 후보로 바꿔 제시한다.
-            # 탐색 기록(best)은 오라클 실측이므로 임의 추정이 아니다.
-            elif choice is not None and not self._order_ok_row(choice) and best is not None:
-                # ── 순서 특이성 '복구' 절반 ──
-                # 게이트가 REVISE를 내도 재설계 기회(MAX_CRITIQUES)를 다 쓰면 그 후보가
-                # 그대로 최종이 돼 버린다 → 승인 0건으로 끝난다(실측: 2세션 모두 그랬다).
-                # 래칫에서 이미 겪은 '검출은 하는데 복구가 없다'와 **같은 구멍**이라
-                # 같은 방식으로 막는다: 순서 특이성을 통과한 러닝 베스트로 되돌린다.
+            # ── 근거 없는 제출은 러닝 베스트로 되돌린다 (게이트의 '복구' 절반) ──
+            # 게이트는 위반을 **검출**해 REVISE를 내지만, 재설계 기회(MAX_CRITIQUES)를 소진하면
+            # 그 후보가 그대로 최종이 된다 → 승인 0건으로 끝난다(실측: 순서 게이트 때 2세션 모두,
+            # 래칫 때 4세션 중 3세션). 검출만으로는 못 고친다. 그래서 CPP 대체와 **같은 방식으로**
+            # 이미 채점해 본 최고 후보로 바꿔 제시한다. 탐색 기록(best)은 오라클 실측이다.
+            elif choice is not None and best is not None and (
+                    choice.get("tier") is None or is_unsupported(choice)):
+                why = ("문헌 근거 **미등재**(가장 닮은 라이브러리 셔틀과 유사도 "
+                       f"{(choice.get('tier_sim') or 0.0):.2f} < {INHERIT_SIM_MIN:.2f})"
+                       if choice.get("tier") is None else
+                       f"근거 등급 **{choice.get('tier')}**(= BBB 통과 단독 근거 없음)")
                 final_report = (final_report or "") + (
-                    f"\n\n> **[시스템] 조성 쌓기 대체** — 제출 후보 "
+                    f"\n\n> **[시스템] 근거 미달 대체** — 제출 후보 "
                     f"`{(choice.get('linker') or '직접융합')}+{choice.get('shuttle', '?')}`는 "
-                    f"BBB {choice.get('bbb', 0):.3f}이지만 **순서 특이성 미달**(스크램블 대조 대비 "
-                    f"{(choice.get('order_delta') or 0):+.3f} < {ORDER_DELTA_MIN:+.3f})로, 점수가 "
-                    f"서열 순서가 아니라 아미노산 조성에서 왔다. 순서 특이성을 통과한 "
+                    f"{why}이므로 최종 결과로 확정하지 않습니다. 이 시스템에서 '좋다'를 말할 수 "
+                    f"있는 근거는 문헌 인용뿐이고(우리 BBB 점수는 M6·M8 로 순위 근거가 될 수 "
+                    f"없음이 확인됐습니다), 근거를 요구하지 않으면 불활성 서열이 모든 위험 축에서 "
+                    f"이깁니다. 근거를 보유한 "
                     f"`{(best.get('linker') or '직접융합')}+{best.get('shuttle', '?')}`"
-                    f"(BBB {best.get('bbb', 0):.3f})로 대체한다.")
+                    f"({self._summary(best)})로 대체해 제시합니다.")
                 choice = None
                 swapped_out = True
-            elif (choice is not None and best is not None
-                  and self._eff_bbb(choice) < self._eff_bbb(best) - self.RATCHET_MARGIN):
+            elif choice is not None and best is not None and dominates(best, choice):
                 final_report = (final_report or "") + (
                     "\n\n> **[시스템] 퇴행 대체** — 제출된 최종 후보 "
                     f"`{choice.get('linker') or '직접융합'}+{choice.get('shuttle', '?')}`"
-                    f"(유효점수 {self._eff_bbb(choice):.3f})보다 **이 세션이 이미 채점해 본** "
+                    f"({self._summary(choice)})가 **이 세션이 이미 채점해 본** "
                     f"`{best.get('linker') or '직접융합'}+{best.get('shuttle', '?')}`"
-                    f"(유효점수 {self._eff_bbb(best):.3f})가 더 좋으므로 후자로 대체해 제시합니다. "
-                    "설계 탐색 중 더 나쁜 후보로 확정되는 것을 막는 장치입니다.")
+                    f"({self._summary(best)})에게 **모든 축에서 지배당하므로** 후자로 대체해 "
+                    "제시합니다. 설계 탐색 중 더 나쁜 후보로 확정되는 것을 막는 장치입니다.")
                 choice = None          # → final_pick = best
                 swapped_out = True
             final_pick = choice or best
@@ -989,11 +1008,12 @@ class GeminiOptimizationAgent(OptimizationAgent):
                         if not sh or sh in LIB_SHUTTLES:
                             continue
                         k = ((r.get("linker") or "").upper(), sh)
-                        d, z = r.get("order_delta"), r.get("insert_z")
-                        if d is not None and d < ORDER_DELTA_MIN:
-                            notes[k] = f"순서 특이성 미달(델타 {d:+.3f}) — 조성 쌓기"
-                        elif z is not None and z < ORDER_Z_MIN:
-                            notes[k] = f"접합부 길이 통제 미달(z {z:+.2f}) — 길이로 올린 점수"
+                        if r.get("tier") is None:
+                            par, sim = r.get("tier_parent"), r.get("tier_sim") or 0.0
+                            notes[k] = (f"문헌 근거 미등재 — 최근접 {par or '없음'}·유사도 "
+                                        f"{sim:.2f} < {INHERIT_SIM_MIN:.2f} (후보 자격 없음)")
+                        elif is_unsupported(r):
+                            notes[k] = f"근거 등급 {r.get('tier')} = 근거 없음 (후보 자격 없음)"
                     _ledger_record(cargo, seen_rows, final_pick, notes)
                 except Exception:  # noqa: BLE001
                     pass    # 기록 실패가 결과를 무효화하진 않는다
@@ -1002,9 +1022,10 @@ class GeminiOptimizationAgent(OptimizationAgent):
             if best_cpp is not None:
                 final_report = (final_report or "") + (
                     f"\n\n> **비교군 참고선(CPP, 최종 선택 대상 아님)** — "
-                    f"`{best_cpp.get('shuttle', '?')}` BBB {best_cpp.get('bbb', 0):.3f} · "
-                    f"off-target {best_cpp.get('sel_off', 0):.2f}. 비특이 흡수 상한을 보여주는 "
-                    "대조군이며, 선택성 때문에 후보군에서 제외됩니다.")
+                    f"`{best_cpp.get('shuttle', '?')}` — {self._summary(best_cpp)}. "
+                    "비특이 흡수 상한을 보여주는 대조군이며, 기전(비수용체)과 선택성 때문에 "
+                    "후보군에서 제외됩니다. **BBB 점수가 높게 나오는 것이 바로 그 점수를 "
+                    "순위에 쓸 수 없는 이유입니다**(M1 조성 편향).")
 
             # ── 결과 방출 (한 번씩): 설계자 결론 + 심사 판정 ──
             # 심사 최종 판정을 최종 후보에 각인 → UI가 "승인/미승인"을 정직하게 표시한다.

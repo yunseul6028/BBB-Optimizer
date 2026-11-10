@@ -39,8 +39,31 @@ from dataclasses import dataclass
 
 from .config import SHUTTLES
 
-# 등급이 높은 순. 순위 정당화에 쓸 수 있는 **유일한** 정렬 키다.
+# 등급 글자(보고용). ⚠️ **순위 계산에 직접 쓰지 말 것** — 아래 GROUP_ORDER 를 쓴다.
 TIER_ORDER = ("A", "B", "C", "D")
+
+# ── 순위에 실제로 쓰는 **거친 3단계** ───────────────────────────────────────
+# 왜 글자 4단계를 그대로 쓰지 않는가: A/B/C/D 매핑은 1인·1세션 큐레이션이고,
+# 특히 **A/B 경계가 가장 무르다.** 그런데 후보군(RMT) 9종 중 A 는 1종뿐이라
+# 그 경계 하나가 "Angiopep-2 단독 1위" vs "여러 종 동급 경쟁"을 혼자 결정해 버린다.
+# 즉 **가장 약한 판단이 결과를 단독으로 정한다.** 그래서 주장의 해상도를 증거의
+# 해상도에 맞춘다 — 글자는 표시하되, 순위는 아래 3단계로만 가른다.
+# (이것은 이 프로젝트가 세 번 데인 함정 — "비교 불가능한 값을 정렬 가능한 타입으로
+#  인코딩" — 의 같은 얼굴이다. MIN_BBB_SIGNAL 폐지·`fold: str` 과 같은 이유다.)
+GROUP_ORDER = ("근거 있음", "주의", "근거 없음")
+#: 등급 글자 → 순위용 그룹
+TIER_GROUP = {"A": "근거 있음", "B": "근거 있음", "C": "주의", "D": "근거 없음"}
+#: 등급이 아예 없는 서열(라이브러리 밖이고 상속도 못 한 설계체)
+GROUP_UNLISTED = "미등재"
+
+# 설계체가 라이브러리 셔틀의 **등급을 상속**받기 위한 서열 유사도 하한.
+# 임의 상수가 아니라 측정값이다 (M9, docs/experiments.md §18):
+#   · 양성(pareto_scrub 개발성 변이체 55개) 부모 유사도 **최소 0.830**
+#   · 음성 최대 — 스크램블 0.529 · 같은 길이 무작위 0.136 · homopolymer 0.429
+#   · 타 라이브러리 셔틀 간 최대 **0.088** (교차 오상속 위험 사실상 없음)
+#   · 최근접 라이브러리 셔틀이 부모가 아닌 양성: **0/55**
+# → 간극 [0.529, 0.830] 안쪽. 음성 쪽으로 여유를 더 두어 0.70.
+INHERIT_SIM_MIN = 0.70
 
 
 @dataclass(frozen=True)
@@ -52,6 +75,47 @@ class Evidence:
     context: str         # 그 수치가 '무엇 대 무엇'인지 — 종·화물·운반체·측정법·비교군
     ref: str             # 1차 출처(확인 가능한 수준까지)
     caveat: str = ""     # 정직하게 같이 읽어야 하는 한계
+
+
+@dataclass(frozen=True)
+class Criteria:
+    """등급을 **도출**하는 5개 감사 항목. 각 항목은 예/아니오이고 출처로 확인 가능하다.
+
+    왜 이렇게 두는가: 등급을 **단언**하면 "내가 그렇게 봤다"가 근거가 된다. 그러면
+    이견이 취향 다툼이 되고, 1인 큐레이션의 오류가 드러나지 않는다. 5개 불리언에서
+    **계산**하면 이견이 "②가 예라고 본다"는 **확인 가능한 다툼**이 된다.
+
+    판정 기준(엄격하게 적용할 것):
+      quant      1차 문헌의 **정량 뇌 전달값**을 확인했나. 비교군이 명시돼야 하고,
+                 효능 판독값(유전자 침묵률 등)·2차 인용만 있는 값은 **아니오**다.
+      mech       수용체 매개 **기전이 실험으로 확인**됐나 — 차단 항체·경쟁 저해·
+                 포화성·수용체 KO 중 하나. 단순히 "표적이 X다"는 **아니오**다.
+      clinical   임상 단계에 진입했나(등록번호로 확인 가능).
+      form_match 문헌에서 **효율이 입증된 형태**가 라이브러리 서열과 같은가.
+                 D형·retro-enantio·분지형이 효능 형태인데 우리가 선형 L형이면 아니오.
+      bbb_alone  **BBB 통과 단독 근거**가 있나. BBB를 우회하는 투여 경로(ICV 등)나
+                 다른 셔틀과의 병용이 전제면 아니오.
+    """
+
+    quant: bool
+    mech: bool
+    clinical: bool
+    form_match: bool
+    bbb_alone: bool
+    why: str = ""        # 각 항목을 그렇게 판정한 근거 한 줄
+
+
+def derive_tier(c: Criteria) -> str:
+    """5개 감사 항목 → 등급 글자. **이 함수가 등급의 정의다**(위 표는 그 결과일 뿐)."""
+    if not c.bbb_alone:
+        return "D"                      # BBB 통과 단독 근거 없음
+    if not c.form_match:
+        return "C"                      # 문헌의 효능 형태가 우리 서열과 다름
+    if c.quant and c.mech and c.clinical:
+        return "A"
+    if c.quant or c.mech:
+        return "B"
+    return "C"                          # 정량값·기전 모두 미확보
 
 
 #: 셔틀 이름 → 근거. 키는 `config.SHUTTLES` 와 정확히 일치한다(아래 임포트 시 검증).
@@ -106,7 +170,7 @@ SHUTTLE_EVIDENCE: dict[str, Evidence] = {
                "7aa로 가장 짧아 개발성은 유리하다.",
     ),
     "B6": Evidence(
-        tier="B",
+        tier="C",
         fold=None,
         context="B6-PEG-PLA 나노입자가 무표적 입자보다 뇌 축적이 '훨씬 높음'(형광, 정성). "
                 "AD 모델에서 **저용량으로도** 학습장애·콜린성 손상·해마 신경 손실 개선.",
@@ -117,7 +181,7 @@ SHUTTLE_EVIDENCE: dict[str, Evidence] = {
                "라이브러리 내 TfR 셔틀(T7·B6·THR) 서열 간 근거 비교는 그 논문으로 메울 수 있다.",
     ),
     "RVG29": Evidence(
-        tier="B",
+        tier="C",
         fold="~70×",
         context="RVG29-LNP의 **뇌 루시페라제 mRNA 형질도입** vs 무표적 LNP, 정맥 투여, "
                 "건강 성체 마우스. (2025 리뷰의 2차 인용 — 원 논문 미확인.)",
@@ -190,7 +254,7 @@ SHUTTLE_EVIDENCE: dict[str, Evidence] = {
                "(0.985 vs 0.986).",
     ),
     "SynB1": Evidence(
-        tier="C",
+        tier="B",
         fold="~6× / ~20× / ~30×",
         context="SynB1 접합 독소루비신 뇌 흡수 ~6×, 모세혈관 고갈 기준 실질 ~20×(랫 in situ "
                 "perfusion); 마우스 perfusion 연구에서는 ~30×. 두 수치는 종·설계가 달라 "
@@ -202,6 +266,95 @@ SHUTTLE_EVIDENCE: dict[str, Evidence] = {
                "(직접융합+SynB1, 0.960)이 바로 이 비교군이다.",
     ),
 }
+
+
+#: 셔틀 이름 → 등급 **감사 항목**. `SHUTTLE_EVIDENCE[n].tier` 는 여기서 도출되며,
+#: 둘이 어긋나면 임포트가 실패한다(아래 검증). 등급을 바꾸고 싶으면 **여기를** 고칠 것.
+SHUTTLE_CRITERIA: dict[str, Criteria] = {
+    "Angiopep-2": Criteria(
+        quant=True, mech=True, clinical=True, form_match=True, bbb_alone=True,
+        why="정량: Demeule 2008 JPET 의 Angiopep-7 점변이쌍 대비 ~9.5×(같은 실험 내 대조). "
+            "기전: LRP1 매개 확인. 임상: ANG1005 2상. 형태: 선형 L 19aa 그대로.",
+    ),
+    "ApoE(159-167)2": Criteria(
+        quant=True, mech=False, clinical=False, form_match=True, bbb_alone=True,
+        why="정량: IDUA 융합 3.6×(세포 pulse-chase)·뇌 IDUA ~20×(마우스). "
+            "기전: 이량체>단량체는 보였으나 수용체 차단·경쟁 실험을 확인하지 못했다. "
+            "형태: LAVYQAGAR 탠덤 이량체 = 라이브러리 서열(Wang 2013).",
+    ),
+    "Leptin30": Criteria(
+        quant=False, mech=True, clinical=False, form_match=True, bbb_alone=True,
+        why="정량: 절대값 없음 — 뇌:혈장 비의 **상대 비교**만. "
+            "기전: 흡수가 **포화성**이고 61-90 절단 시 뇌 축적 유의 감소(서열 의존) → 수용체 매개.",
+    ),
+    "T7": Criteria(
+        quant=False, mech=True, clinical=False, form_match=True, bbb_alone=True,
+        why="정량: 2.17× 는 **유전자 침묵 효능 판독값**이고 뇌 흡수량이 아니다 → 아니오. "
+            "기전: TfR1 의 Tf 와 **다른 에피토프**에 결합(내인성 Tf 비경쟁) 확인.",
+    ),
+    "B6": Criteria(
+        quant=False, mech=False, clinical=False, form_match=True, bbb_alone=True,
+        why="정량: 무표적 입자 대비 '훨씬 높음'(형광 **정성**)뿐. 기전: hTfR 파지디스플레이 "
+            "유래라 표적은 알지만 차단·경쟁 실험 미확인. head-to-head 원문(PubMed 34933080) "
+            "**미확보** — 이 두 칸이 채워지면 B 로 올라간다.",
+    ),
+    "RVG29": Criteria(
+        quant=False, mech=False, clinical=False, form_match=True, bbb_alone=True,
+        why="정량: ~70× 는 2025 리뷰의 **2차 인용**이고 원 논문을 확인하지 못했다 → 아니오. "
+            "기전: nAChR 표적이라고만 되어 있고 차단 실험 미확인. "
+            "⚠️ 별도로 '겉보기 전달은 늘었으나 치료 효능 이득 없음' 보고가 있다.",
+    ),
+    "CDX": Criteria(
+        quant=False, mech=True, clinical=False, form_match=False, bbb_alone=True,
+        why="기전: α-bungarotoxin 으로 **차단**됨 = 수용체 특이 확인. "
+            "형태: 문헌에서 작동하는 형태는 **D-retro-inverso(DCDX)** 이고 라이브러리는 선형 L형 "
+            "→ form_match 아니오이므로 기전이 확인돼도 C.",
+    ),
+    "THR": Criteria(
+        quant=False, mech=False, clinical=False, form_match=False, bbb_alone=True,
+        why="정량: 2.6× 는 **분지형 retro-enantio(THRre)** 의 세포 모델 수치로 우리 형태가 아니다. "
+            "형태: 고효율 형태가 retro-enantio·분지형 → 아니오. 선형 L-THR 은 혈청 안정성도 낮다.",
+    ),
+    "Tet1": Criteria(
+        quant=False, mech=False, clinical=False, form_match=True, bbb_alone=False,
+        why="bbb_alone **아니오**: 형질도입 58% 수치는 **ICV(뇌실내)** 투여로 BBB 를 우회한 경로이고, "
+            "문헌에서 Tet1 은 거의 항상 BBB 투과 펩타이드(B6·TGN)와 **병용**된다. Tet1 의 역할은 "
+            "BBB 통과가 아니라 통과 후 **뉴런 선택**이다 → 등급 D.",
+    ),
+    "TAT": Criteria(
+        quant=False, mech=False, clinical=False, form_match=True, bbb_alone=True,
+        why="정량: AuNP-TAT 0.02-0.06 %ID/g 로 낮고 같은 실험 내 정량 쌍을 확보하지 못했다. "
+            "기전: **비특이 막투과**라 수용체 기전이 애초에 없다. (CPP = 비교군)",
+    ),
+    "Penetratin": Criteria(
+        quant=False, mech=False, clinical=False, form_match=False, bbb_alone=True,
+        why="형태: ~6×/~20× 는 **D-penetratin** 수치이고 라이브러리는 L형 → 아니오. (CPP = 비교군)",
+    ),
+    "SynB1": Criteria(
+        quant=True, mech=False, clinical=False, form_match=True, bbb_alone=True,
+        why="정량: **L-SynB1** 자체의 랫 ~6×/실질 ~20×(Rousselle 2000)·마우스 ~30×(2001) → 예. "
+            "기전: 증가분이 **P-gp 유출 회피**로 설명돼 수용체 매개가 아니다. "
+            "⚠️ 등급은 '근거의 단단함'이지 '선택해도 된다'가 아니다 — **CPP 는 비교군**이라 "
+            "최종 후보 자격은 기전 분리(is_comparison_only)가 따로 막는다.",
+    ),
+}
+
+
+# --- 등급은 **도출값**이다: 선언(Evidence.tier)과 감사 항목이 어긋나면 임포트 실패 ---
+_cmiss = set(SHUTTLES) - set(SHUTTLE_CRITERIA)
+_cextra = set(SHUTTLE_CRITERIA) - set(SHUTTLES)
+if _cmiss or _cextra:
+    raise RuntimeError(
+        f"SHUTTLE_CRITERIA 가 SHUTTLES 와 어긋난다 — 누락 {sorted(_cmiss)} / 잉여 {sorted(_cextra)}")
+_drift = {n: (SHUTTLE_EVIDENCE[n].tier, derive_tier(SHUTTLE_CRITERIA[n]))
+          for n in SHUTTLES
+          if SHUTTLE_EVIDENCE[n].tier != derive_tier(SHUTTLE_CRITERIA[n])}
+if _drift:
+    raise RuntimeError(
+        "등급 글자가 감사 항목에서 도출되지 않는다(선언, 도출): "
+        + ", ".join(f"{n}{v}" for n, v in sorted(_drift.items()))
+        + " — 등급은 SHUTTLE_CRITERIA 를 고쳐서 바꿀 것이고, 글자만 손으로 바꾸지 말 것.")
+del _cmiss, _cextra, _drift
 
 
 # --- 드리프트 방지: 두 딕셔너리는 전부 정적 리터럴이므로 임포트 시 검사해도 안전하다 ---
@@ -311,3 +464,111 @@ def critic_rule() -> str:
         "없을 때만 조건부 승인하되 **'BBB 셔틀로서 문헌 근거가 없다'를 한계로 반드시 명시**하게 "
         "하십시오. 등급은 탈락 사유가 아니라 **명시 사유**입니다(하드 게이트는 독성·효능 신호 둘뿐).\n\n"
     )
+
+
+# ── 서열 → 등급 (행의 `shuttle` 키는 **서열**이라 이름 조회로는 닿지 않는다) ──────
+#: 라이브러리 셔틀 서열 → 이름. 동일 서열이 둘이면 먼저 선언된 쪽.
+_SEQ_TO_NAME: dict[str, str] = {}
+for _n, _v in SHUTTLES.items():
+    _SEQ_TO_NAME.setdefault(_v["seq"].upper(), _n)
+del _n, _v
+
+
+def _clean(seq: str) -> str:
+    return "".join(ch for ch in (seq or "").upper() if ch.isalpha())
+
+
+def name_of_seq(seq: str) -> str | None:
+    """라이브러리 셔틀 **서열**로 이름을 찾는다(정확 일치만)."""
+    return _SEQ_TO_NAME.get(_clean(seq))
+
+
+def similarity(seq: str, ref: str) -> float:
+    """정규화 서열 유사도 0~1. `binding.shuttle_similarity` 와 **같은 정의**(BLOSUM62 전역정렬)."""
+    a, b = _clean(seq), _clean(ref)
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    try:
+        from .binding import _aligner
+        aln = _aligner()
+        selfs = aln.score(b, b)
+        return max(0.0, min(1.0, aln.score(a, b) / selfs)) if selfs > 0 else 0.0
+    except Exception:  # noqa: BLE001 — 정렬기 없으면 상속을 주지 않는다(보수적)
+        return 0.0
+
+
+def inherit(seq: str) -> tuple[str | None, str | None, float]:
+    """이 셔틀 서열의 **근거 등급**을 구한다 → (등급, 부모 셔틀 이름, 유사도).
+
+    · 라이브러리 서열이면 자기 등급 그대로 (유사도 1.0).
+    · 라이브러리 밖(설계체)이면 **가장 닮은 라이브러리 셔틀의 등급을 상속**한다.
+      단 유사도가 `INHERIT_SIM_MIN` 이상일 때만 — 아니면 (None, 최근접, 유사도).
+
+    왜 상속이 필요한가: 등급은 **문헌에서 빌려온 유일한 양(陽)의 신호**이고 설계체에는
+    인용이 없다. 그러면 모든 설계체가 등급 0 이 되어 **개발성 liability 스크러빙처럼
+    정당한 기여까지 후보 자격을 잃는다**(그 편집은 효능을 주장하지 않고 '만들 수 있게'
+    다듬는 것이므로 부모의 근거를 그대로 물려받는 것이 맞다).
+
+    왜 유사도 하한이 필요한가: 하한이 없으면 아무 서열이나 '가장 닮은' 셔틀의 등급을
+    물려받아 **등급이 다시 해킹 가능한 축이 된다.** 하한은 측정값이다 — M9 실측에서
+    정당한 개발성 변이체(55개)의 부모 유사도 최소 0.830 vs 스크램블 최대 0.529 ·
+    homopolymer 0.429 · 무작위 0.136 · 타 셔틀 간 0.088 로 간극이 비어 있다.
+    """
+    s = _clean(seq)
+    if not s:
+        return None, None, 0.0
+    n = _SEQ_TO_NAME.get(s)
+    if n is not None:
+        return SHUTTLE_EVIDENCE[n].tier, n, 1.0
+    best_n, best_s = None, 0.0
+    for nm, v in SHUTTLES.items():
+        sc = similarity(s, v["seq"])
+        if sc > best_s:
+            best_n, best_s = nm, sc
+    if best_n is None:
+        return None, None, 0.0
+    if best_s >= INHERIT_SIM_MIN:
+        return SHUTTLE_EVIDENCE[best_n].tier, best_n, round(best_s, 3)
+    return None, best_n, round(best_s, 3)
+
+
+# ── 순위용 거친 3단계 ────────────────────────────────────────────────────────
+def group_of(tier: str | None) -> str:
+    """등급 글자 → 순위용 그룹. None(미등재)도 받는다."""
+    return TIER_GROUP.get(tier or "", GROUP_UNLISTED)
+
+
+def group_rank(tier: str | None) -> int:
+    """정렬용 그룹 순위(작을수록 근거가 강함). 미등재는 맨 뒤.
+
+    ⚠️ **등급 글자(A/B/C/D)로 직접 정렬하지 말고 이 함수를 쓸 것.** A/B 경계는
+    1인 큐레이션에서 가장 무른 판단이고, 후보군 9종 중 A 가 1종뿐이라 그 경계가
+    결과를 단독으로 결정해 버린다(GROUP_ORDER 주석 참고).
+    """
+    g = group_of(tier)
+    return GROUP_ORDER.index(g) if g in GROUP_ORDER else len(GROUP_ORDER)
+
+
+def rubric_report() -> str:
+    """감사용 표 — 등급이 **어떤 항목에서 도출됐는지** 사람이 검토할 수 있게."""
+    cols = [("quant", "정량"), ("mech", "기전"), ("clinical", "임상"),
+            ("form_match", "형태일치"), ("bbb_alone", "BBB단독")]
+    out = ["| 셔틀 | " + " | ".join(c[1] for c in cols) + " | → 등급 | 순위 그룹 |",
+           "|---|" + "---|" * (len(cols) + 2)]
+    for n in sorted(SHUTTLES, key=lambda k: (tier_rank(k), k)):
+        c = SHUTTLE_CRITERIA[n]
+        cells = ["✅" if getattr(c, k) else "—" for k, _ in cols]
+        t = derive_tier(c)
+        out.append(f"| {n} | " + " | ".join(cells) + f" | **{t}** | {group_of(t)} |")
+    out += [
+        "",
+        "판정 규칙(`derive_tier`): BBB단독 아니오 → **D** · 형태일치 아니오 → **C** · "
+        "정량·기전·임상 전부 → **A** · 정량 또는 기전 → **B** · 그 외 → **C**",
+        "",
+        "⚠️ 이 표는 **1인·1세션 큐레이션**이고 외부 검증을 받지 않았다. 각 칸은 출처로 "
+        "확인 가능하도록 `SHUTTLE_CRITERIA[*].why` 에 판정 근거를 적어 두었다 — 이견이 "
+        "있으면 **칸을 걸고** 다투면 된다(등급 글자를 손으로 바꾸면 임포트가 실패한다).",
+    ]
+    return "\n".join(out)

@@ -46,6 +46,18 @@ _AGGRESCAN_A3V = {
 }
 _A3V_MIN, _A3V_MAX = -1.836, 1.822     # 척도 자체의 극값(정규화용 — 설계가 아니라 척도 고유)
 
+# 응집 **핫스팟** 창 길이(aa). AGGRESCAN 이 응집 경향을 다루는 방식은 전역 평균이 아니라
+# **연속 구간(hot spot)** 이다. 5 는 AGGRESCAN 의 a4v/HSA 창 길이를 따른다(자유 파라미터 아님).
+#
+# ⚠️ 왜 전역 평균을 순위 축에서 뺐나 (M10 실측, docs/experiments.md §20)
+# 전역 평균 a3v 는 **길이로 희석된다** — 저응집 잔기(G·S·E·K·D)를 붙이면 분모만 커져
+# 점수가 내려간다. 실측: 후보군 셔틀 8종 전부에서 링커 길이↔응집 점수 순위상관이 음수
+# (평균 **-0.697**, 8/8)이고, 그 결과 도달 가능 전선이 **가장 긴 링커 A(EAAAK)3A 로
+# 전원 수렴**했다. 이것은 M8 이 BBB 에서 찾은 길이 아티팩트와 **구조가 같다** — 지표를
+# 길이로 정규화해 두면 "무해한 잔기를 붙이기"가 항상 이긴다.
+# 핫스팟(국소 최대)은 이 희석에 면역이다: 링커를 끼워도 셔틀·화물의 국소 최대는 그대로다.
+_AGG_WINDOW = 5
+
 
 @dataclass
 class DevelopabilityResult:
@@ -55,8 +67,10 @@ class DevelopabilityResult:
     net_charge: float = 0.0        # pH 7.4 순전하
     charge_density: float = 0.0    # 순전하 / 길이
     pI: float = 0.0
-    agg_a3v: float = 0.0           # 평균 AGGRESCAN a3v (raw, 높을수록 응집↑) — Pareto/편집 목표
-    agg_score: float = 0.0         # 0~1 정규화 응집 경향(a3v 기반, 높을수록 응집↑)
+    agg_a3v: float = 0.0           # 평균 AGGRESCAN a3v (raw, 높을수록 응집↑)
+    agg_score: float = 0.0         # 0~1 정규화 **전역 평균** 응집 — ⚠️ 보고용(길이로 희석됨)
+    agg_hotspot_a3v: float = 0.0   # 창 _AGG_WINDOW 슬라이딩 **최대** a3v (raw)
+    agg_hotspot: float = 0.0       # 0~1 정규화 국소 최대 — **순위·Pareto 축은 이것**
     gravy: float = 0.0             # 소수성(양수=소수성)
     sol_score: float = 0.5         # 0~1 용해도 상대지표(높을수록 가용)
     sol_level: str = "보통"         # 낮음 | 보통 | 높음
@@ -109,11 +123,23 @@ def assess_developability(sequence: str) -> DevelopabilityResult:
     if density >= 0.30:
         liab.append(f"과도한 양전하(밀도 {density}) — 비특이 결합·독성·빠른 청소 위험")
 
-    # 3) 응집 경향 — AGGRESCAN a3v 평균 → 척도 극값으로 [0,1] 정규화(높을수록 응집↑)
-    mean_a3v = sum(_AGGRESCAN_A3V.get(c, 0.0) for c in seq) / len(seq)
+    # 3) 응집 경향 — AGGRESCAN a3v
+    #    · agg_score  = 전역 평균 (보고용. **순위에 쓰지 말 것** — 길이로 희석된다)
+    #    · agg_hotspot = 길이 _AGG_WINDOW 슬라이딩 창의 **최대** 평균 (순위 축)
+    vals = [_AGGRESCAN_A3V.get(c, 0.0) for c in seq]
+    mean_a3v = sum(vals) / len(vals)
     agg = round(_clamp((mean_a3v - _A3V_MIN) / (_A3V_MAX - _A3V_MIN)), 2)
-    if agg >= 0.55:
-        liab.append(f"응집 경향 높음(AGGRESCAN a3v {mean_a3v:.2f})")
+    w = min(_AGG_WINDOW, len(vals))
+    run = sum(vals[:w])
+    hot_raw = run / w
+    for i in range(w, len(vals)):
+        run += vals[i] - vals[i - w]
+        hot_raw = max(hot_raw, run / w)
+    hot = round(_clamp((hot_raw - _A3V_MIN) / (_A3V_MAX - _A3V_MIN)), 2)
+    # liability 판정은 **핫스팟**으로 한다 — 응집은 국소 현상이고, 전역 평균으로 보면
+    # 긴 구성체의 실제 응집 위험 구간이 희석돼 사라진다.
+    if hot >= 0.70:
+        liab.append(f"응집 핫스팟(AGGRESCAN a3v 국소최대 {hot_raw:.2f}, 창 {w}aa)")
 
     # 4) 용해도 상대지표(0~1) — 친수성 + 전하보너스 + (1−응집)
     hydrophil = _clamp((-gravy + 0.8) / 1.5)      # 친수성↑ = 용해도↑
@@ -125,10 +151,11 @@ def assess_developability(sequence: str) -> DevelopabilityResult:
         liabilities=liab, n_liabilities=len(liab), free_cys=free_cys,
         net_charge=net, charge_density=density, pI=pI,
         agg_a3v=round(mean_a3v, 3), agg_score=agg,
+        agg_hotspot_a3v=round(hot_raw, 3), agg_hotspot=hot,
         gravy=gravy, sol_score=sol_score, sol_level=sol_level,
     )
     # 위험 등급: liability 수 + 강한 신호 가중
-    strong = sum(1 for x in liab if "과도한 양전하" in x or "응집 경향" in x or "자유 시스테인" in x)
+    strong = sum(1 for x in liab if "과도한 양전하" in x or "응집 핫스팟" in x or "자유 시스테인" in x)
     if len(liab) >= 4 or strong >= 2:
         r.risk_level = "높음"
     elif len(liab) >= 2 or strong >= 1:
