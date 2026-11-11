@@ -29,7 +29,14 @@ float 로 두면 누군가(사람이든 LLM이든) 반드시 정렬한다. 이 �
     D — **BBB 통과 단독 근거 없음.** 다른 표적(뉴런 등)용 리간드이거나,
         문헌에서 BBB 투과 펩타이드와 **병용**을 전제로 쓰인다
 
-조사 시점: 2026-11-10. 전부 2차 확인(리뷰·초록·서지) 수준이며 원문 표/그림의 수치를
+⚠️ 등급은 **두 단계**로 결정된다(2026-11-11 추가) — ① 근거의 단단함 ② **간접성 하향**.
+②는 GRADE 의 indirectness 를 가져온 것으로, **근거의 전달 포맷이 우리 구성체와
+다르면 등급을 내린다.** 등급은 셔틀 속성으로 붙는데 순위가 매기는 것은 구성체라서,
+그 사이에 검증되지 않은 외삽이 있었다. 라이브러리 RMT 9종 중 **유전자 융합 근거를
+가진 것은 ApoE 하나**이고, 등급 A 를 만들던 Angiopep-2 의 `clinical` 은 **소분자
+접합체**(ANG1005)에서 온 것이었다. 상세는 `derive_tier` 독스트링.
+
+조사 시점: 2026-11-10 (간접성 축 2026-11-11). 전부 2차 확인(리뷰·초록·서지) 수준이며 원문 표/그림의 수치를
 직접 대조한 것은 아니다. 수치를 논문에 쓰려면 1차 출처를 열어 확인해야 한다.
 """
 
@@ -95,6 +102,10 @@ class Criteria:
                  D형·retro-enantio·분지형이 효능 형태인데 우리가 선형 L형이면 아니오.
       bbb_alone  **BBB 통과 단독 근거**가 있나. BBB를 우회하는 투여 경로(ICV 등)나
                  다른 셔틀과의 병용이 전제면 아니오.
+
+    그리고 **간접성(indirectness)** — 위 5개와 성격이 다르다. 5개는 "근거가 얼마나
+    단단한가"를 재고, 간접성은 "**그 근거가 우리 구성체에 대한 것인가**"를 잰다.
+    GRADE 의 indirectness 영역을 그대로 가져왔다 (아래 `derive_tier` 주석 참조).
     """
 
     quant: bool
@@ -102,11 +113,18 @@ class Criteria:
     clinical: bool
     form_match: bool
     bbb_alone: bool
+    #: 전달 포맷 간접성 단계. 우리 구성체는 **단일 폴리펩타이드 유전자 융합체**
+    #: (화물 + 링커 + 셔틀, 셔틀 1벌)이다. 근거가 그것과 얼마나 먼 포맷에서 나왔나:
+    #:   0 = 직접   — 유전자 융합 단백질(셔틀 1벌)
+    #:   1 = 1단계  — 공유 접합체(소분자·약물) 또는 화물 없는 펩타이드 단독 수송
+    #:   2 = 2단계  — **다가 나노캐리어**(나노입자·리포솜·LNP·폴리머솜·AAV·덴드리머)
+    #:                또는 BBB 우회 투여 경로
+    indirectness: int = 0
     why: str = ""        # 각 항목을 그렇게 판정한 근거 한 줄
 
 
-def derive_tier(c: Criteria) -> str:
-    """5개 감사 항목 → 등급 글자. **이 함수가 등급의 정의다**(위 표는 그 결과일 뿐)."""
+def _base_tier(c: Criteria) -> str:
+    """간접성 하향 **이전**의 등급 — 근거 자체가 얼마나 단단한가만 본다."""
     if not c.bbb_alone:
         return "D"                      # BBB 통과 단독 근거 없음
     if not c.form_match:
@@ -118,10 +136,59 @@ def derive_tier(c: Criteria) -> str:
     return "C"                          # 정량값·기전 모두 미확보
 
 
+def derive_tier(c: Criteria) -> str:
+    """감사 항목 → 등급 글자. **이 함수가 등급의 정의다**(위 표는 그 결과일 뿐).
+
+    두 단계다: ① 근거의 단단함(`_base_tier`) → ② **간접성 하향**.
+
+    왜 ②가 필요한가 (GRADE indirectness)
+    -------------------------------------
+    등급은 **셔틀의 속성**으로 붙는데, 순위가 매기는 것은 **구성체**(화물+링커+셔틀)다.
+    그 사이에 아무도 검증하지 않은 외삽이 있었다 — 근거의 **전달 포맷**이 우리가 만드는
+    것과 다르다. 실제로 라이브러리 RMT 9종의 근거 포맷을 열어 보면:
+
+        · 유전자 융합 단백질 … ApoE(159-167)2 (IDUA 융합) — **1종뿐**
+        · 공유 접합체/펩타이드 단독 … Angiopep-2(ANG1005=파클리탁셀 접합) · Leptin30 · SynB1
+        · 다가 나노캐리어 … T7(DGL-PEG 벡터) · B6(PEG-PLA 입자) · RVG29(LNP) ·
+                            CDX(리포솜) · THR(금나노입자·AAV) · Tet1(폴리머솜·ICV)
+
+    즉 **최상위 등급 A 를 만드는 `clinical` 이 소분자 접합체에서 왔고**, 포맷이 일치하는
+    근거를 가진 셔틀은 등급 B 하나였다. 나노캐리어 근거는 **표면에 셔틀을 여러 벌 제시한
+    avidity** 에 의존하는데 우리 구성체는 셔틀이 **1벌**이라 기전 수준에서 다르다.
+
+    이 분야도 이미 알고 있다 — BBB 셔틀 리뷰는 "**화물이 셔틀 효율에 영향을 주고 그 역도
+    성립한다**"고 명시하고(Chem Soc Rev 2016), 항체에 셔틀을 유전자 융합한 최근 연구는
+    **펩타이드 복제 수를 늘려도 BBB 수송이 개선되지 않고** 수율·안정성만 떨어졌다고
+    보고한다(Mol Pharmaceutics 2026, cyclic SLS–trastuzumab). 포맷 간 이전은 방향도
+    크기도 보장되지 않는다.
+
+    GRADE 를 그대로 따른다
+    ----------------------
+    GRADE 는 목표 질문(target PICO)과 근거의 PICO 가 다를 때를 **간접성**으로 보고
+    확실성 등급을 내린다. **몇 단계 내릴지에 대한 수치 규칙은 없다** — 판단이고, 대신
+    그 판단을 **명시·감사 가능하게** 남기도록 요구한다. 그래서 여기서도 단계를 셔틀별로
+    선언하고 `why` 에 이유를 적는다. (GRADE 는 "직접 근거를 찾다가 없는 것"과 "애초에
+    간접 근거를 가져다 쓰는 것"을 구별해 **후자**를 하향 대상으로 본다 — 우리는 후자다.)
+
+    왜 C 에서 멈추나 (floor)
+    ------------------------
+    D 는 확실성 단계가 아니라 **범위 실패**("BBB 통과 단독 근거가 없다")라서 의미가
+    다르다. 간접성으로 D 까지 내리면 두 뜻이 섞인다. 그래서 하향은 **A→B→C 안에서만**
+    하고 C 를 바닥으로 둔다. C 로 내려가면 순위 그룹이 「근거 있음」→「주의」로 바뀌므로
+    (TIER_GROUP) **최종 후보 자격을 잃는 것과 같은 효과**다 — 충분히 센 결과다.
+    """
+    base = _base_tier(c)
+    if base == "D" or c.indirectness <= 0:
+        return base
+    # A → B → C, C 가 바닥
+    i = TIER_ORDER.index(base)
+    return TIER_ORDER[min(i + c.indirectness, TIER_ORDER.index("C"))]
+
+
 #: 셔틀 이름 → 근거. 키는 `config.SHUTTLES` 와 정확히 일치한다(아래 임포트 시 검증).
 SHUTTLE_EVIDENCE: dict[str, Evidence] = {
     "Angiopep-2": Evidence(
-        tier="A",
+        tier="B",
         fold="~9.5× / 86×",
         context="**~9.5×** = Angiopep-2 의 뇌 전달이 음성 대조군 **Angiopep-7**(K10R·K15R) 대비 "
                 "우세한 배수 — 같은 실험 안의 **점 변이 쌍**이라 라이브러리에서 가장 해석이 깨끗한 "
@@ -149,7 +216,7 @@ SHUTTLE_EVIDENCE: dict[str, Evidence] = {
                "근거와 점수가 둘 다 어긋난다.",
     ),
     "Leptin30": Evidence(
-        tier="B",
+        tier="C",
         fold=None,
         context="렙틴 단편 스크리닝에서 **뇌:혈장 비가 최고**이고 전장 렙틴과 동등. 흡수가 "
                 "**포화성**(=수용체 매개)이고, 방사능이 모세혈관보다 **뇌 실질**에 분포. "
@@ -160,7 +227,7 @@ SHUTTLE_EVIDENCE: dict[str, Evidence] = {
                "개발성·합성 부담이 크다.",
     ),
     "T7": Evidence(
-        tier="B",
+        tier="C",
         fold="2.17×",
         context="DGL-PEG-T7 벡터의 **in vivo 유전자 침묵 효율** vs T7 없는 벡터. "
                 "⚠️ 뇌 흡수량이 아니라 **효능 판독값**이다.",
@@ -254,7 +321,7 @@ SHUTTLE_EVIDENCE: dict[str, Evidence] = {
                "(0.985 vs 0.986).",
     ),
     "SynB1": Evidence(
-        tier="B",
+        tier="C",
         fold="~6× / ~20× / ~30×",
         context="SynB1 접합 독소루비신 뇌 흡수 ~6×, 모세혈관 고갈 기준 실질 ~20×(랫 in situ "
                 "perfusion); 마우스 perfusion 연구에서는 ~30×. 두 수치는 종·설계가 달라 "
@@ -273,69 +340,93 @@ SHUTTLE_EVIDENCE: dict[str, Evidence] = {
 SHUTTLE_CRITERIA: dict[str, Criteria] = {
     "Angiopep-2": Criteria(
         quant=True, mech=True, clinical=True, form_match=True, bbb_alone=True,
+        indirectness=1,
         why="정량: Demeule 2008 JPET 의 Angiopep-7 점변이쌍 대비 ~9.5×(같은 실험 내 대조). "
-            "기전: LRP1 매개 확인. 임상: ANG1005 2상. 형태: 선형 L 19aa 그대로.",
+            "기전: LRP1 매개 확인. 임상: ANG1005 2상. 형태: 선형 L 19aa 그대로."
+        "간접성 1: 임상(ANG1005)은 **파클리탁셀 접합체**이고 ~9.5× 는 화물 없는 **펩타이드 단독** 수송이다. 단일 복제 유전자 융합 근거는 없다.",
     ),
     "ApoE(159-167)2": Criteria(
         quant=True, mech=False, clinical=False, form_match=True, bbb_alone=True,
+        indirectness=0,
         why="정량: IDUA 융합 3.6×(세포 pulse-chase)·뇌 IDUA ~20×(마우스). "
             "기전: 이량체>단량체는 보였으나 수용체 차단·경쟁 실험을 확인하지 못했다. "
-            "형태: LAVYQAGAR 탠덤 이량체 = 라이브러리 서열(Wang 2013).",
+            "형태: LAVYQAGAR 탠덤 이량체 = 라이브러리 서열(Wang 2013)."
+        "간접성 0: IDUA **유전자 융합 단백질** = 우리 구성체와 같은 포맷.",
     ),
     "Leptin30": Criteria(
         quant=False, mech=True, clinical=False, form_match=True, bbb_alone=True,
+        indirectness=1,
         why="정량: 절대값 없음 — 뇌:혈장 비의 **상대 비교**만. "
-            "기전: 흡수가 **포화성**이고 61-90 절단 시 뇌 축적 유의 감소(서열 의존) → 수용체 매개.",
+            "기전: 흡수가 **포화성**이고 61-90 절단 시 뇌 축적 유의 감소(서열 의존) → 수용체 매개."
+        "간접성 1: 뇌:혈장 비·포화성은 **방사표지 펩타이드 단독** 수치이고, 유전자 전달은 PEG-PLL 덴드리그라프트(다가)였다.",
     ),
     "T7": Criteria(
         quant=False, mech=True, clinical=False, form_match=True, bbb_alone=True,
+        indirectness=2,
         why="정량: 2.17× 는 **유전자 침묵 효능 판독값**이고 뇌 흡수량이 아니다 → 아니오. "
-            "기전: TfR1 의 Tf 와 **다른 에피토프**에 결합(내인성 Tf 비경쟁) 확인.",
+            "기전: TfR1 의 Tf 와 **다른 에피토프**에 결합(내인성 Tf 비경쟁) 확인."
+        "간접성 2: 2.17× 는 **DGL-PEG-T7 다가 나노벡터**의 효능 판독값이다. 나노입자 표면 다가 제시의 avidity 에 의존 → 셔틀 1벌 융합으로 이전 미보장.",
     ),
     "B6": Criteria(
         quant=False, mech=False, clinical=False, form_match=True, bbb_alone=True,
+        indirectness=2,
         why="정량: 무표적 입자 대비 '훨씬 높음'(형광 **정성**)뿐. 기전: hTfR 파지디스플레이 "
             "유래라 표적은 알지만 차단·경쟁 실험 미확인. head-to-head 원문(PubMed 34933080) "
-            "**미확보** — 이 두 칸이 채워지면 B 로 올라간다.",
+            "**미확보** — 이 두 칸이 채워지면 B 로 올라간다."
+        "간접성 2: **B6-PEG-PLA 나노입자** 뇌 축적.",
     ),
     "RVG29": Criteria(
         quant=False, mech=False, clinical=False, form_match=True, bbb_alone=True,
+        indirectness=2,
         why="정량: ~70× 는 2025 리뷰의 **2차 인용**이고 원 논문을 확인하지 못했다 → 아니오. "
             "기전: nAChR 표적이라고만 되어 있고 차단 실험 미확인. "
-            "⚠️ 별도로 '겉보기 전달은 늘었으나 치료 효능 이득 없음' 보고가 있다.",
+            "⚠️ 별도로 '겉보기 전달은 늘었으나 치료 효능 이득 없음' 보고가 있다."
+        "간접성 2: **RVG29-LNP** mRNA 형질도입.",
     ),
     "CDX": Criteria(
         quant=False, mech=True, clinical=False, form_match=False, bbb_alone=True,
+        indirectness=2,
         why="기전: α-bungarotoxin 으로 **차단**됨 = 수용체 특이 확인. "
             "형태: 문헌에서 작동하는 형태는 **D-retro-inverso(DCDX)** 이고 라이브러리는 선형 L형 "
-            "→ form_match 아니오이므로 기전이 확인돼도 C.",
+            "→ form_match 아니오이므로 기전이 확인돼도 C."
+        "간접성 2: **DCDX-PEG 리포솜** transcytosis (게다가 D형).",
     ),
     "THR": Criteria(
         quant=False, mech=False, clinical=False, form_match=False, bbb_alone=True,
+        indirectness=2,
         why="정량: 2.6× 는 **분지형 retro-enantio(THRre)** 의 세포 모델 수치로 우리 형태가 아니다. "
-            "형태: 고효율 형태가 retro-enantio·분지형 → 아니오. 선형 L-THR 은 혈청 안정성도 낮다.",
+            "형태: 고효율 형태가 retro-enantio·분지형 → 아니오. 선형 L-THR 은 혈청 안정성도 낮다."
+        "간접성 2: 분지형 THRre 세포 모델 / 선형 THR 은 **금나노입자·AAV** 비리온 결합.",
     ),
     "Tet1": Criteria(
         quant=False, mech=False, clinical=False, form_match=True, bbb_alone=False,
+        indirectness=2,
         why="bbb_alone **아니오**: 형질도입 58% 수치는 **ICV(뇌실내)** 투여로 BBB 를 우회한 경로이고, "
             "문헌에서 Tet1 은 거의 항상 BBB 투과 펩타이드(B6·TGN)와 **병용**된다. Tet1 의 역할은 "
-            "BBB 통과가 아니라 통과 후 **뉴런 선택**이다 → 등급 D.",
+            "BBB 통과가 아니라 통과 후 **뉴런 선택**이다 → 등급 D."
+        "간접성 2: **폴리머솜** 복합 구성체 + ICV 우회 경로. (이미 bbb_alone 아니오로 D)",
     ),
     "TAT": Criteria(
         quant=False, mech=False, clinical=False, form_match=True, bbb_alone=True,
+        indirectness=2,
         why="정량: AuNP-TAT 0.02-0.06 %ID/g 로 낮고 같은 실험 내 정량 쌍을 확보하지 못했다. "
-            "기전: **비특이 막투과**라 수용체 기전이 애초에 없다. (CPP = 비교군)",
+            "기전: **비특이 막투과**라 수용체 기전이 애초에 없다. (CPP = 비교군)"
+        "간접성 2: **AuNP-TAT** 입자. (CPP = 비교군)",
     ),
     "Penetratin": Criteria(
         quant=False, mech=False, clinical=False, form_match=False, bbb_alone=True,
-        why="형태: ~6×/~20× 는 **D-penetratin** 수치이고 라이브러리는 L형 → 아니오. (CPP = 비교군)",
+        indirectness=1,
+        why="형태: ~6×/~20× 는 **D-penetratin** 수치이고 라이브러리는 L형 → 아니오. (CPP = 비교군)"
+        "간접성 1: **독소루비신 공유 접합체**. (CPP = 비교군)",
     ),
     "SynB1": Criteria(
         quant=True, mech=False, clinical=False, form_match=True, bbb_alone=True,
+        indirectness=1,
         why="정량: **L-SynB1** 자체의 랫 ~6×/실질 ~20×(Rousselle 2000)·마우스 ~30×(2001) → 예. "
             "기전: 증가분이 **P-gp 유출 회피**로 설명돼 수용체 매개가 아니다. "
             "⚠️ 등급은 '근거의 단단함'이지 '선택해도 된다'가 아니다 — **CPP 는 비교군**이라 "
-            "최종 후보 자격은 기전 분리(is_comparison_only)가 따로 막는다.",
+            "최종 후보 자격은 기전 분리(is_comparison_only)가 따로 막는다."
+        "간접성 1: **독소루비신 공유 접합체** — 단백질 융합 근거 아님. (CPP = 비교군)",
     ),
 }
 
@@ -401,6 +492,12 @@ def prompt_brief(max_chars: int = 2600) -> str:
         "  A = 정량 뇌 전달 + 기전 확인 + 임상 진행 · B = 정량값 또는 포화성 근거 있음",
         "  C = 문헌의 고효율 형태가 이 서열과 다름(D형·분지형) 또는 정량값 미확보",
         "  D = **BBB 통과 단독 근거 없음** (다른 표적용 리간드이거나 병용 전제)",
+        "  ⚠️ 여기에 **간접성 하향**이 더해진다 — 근거의 전달 포맷이 우리 구성체"
+        "(단일 폴리펩타이드 유전자 융합, 셔틀 1벌)와 멀면 등급을 내린다. "
+        "다가 나노캐리어(나노입자·리포솜·LNP·AAV) 근거는 −2단계, 공유 접합체·펩타이드 "
+        "단독 근거는 −1단계다. 그래서 **현재 등급 A 는 없다** — 유전자 융합 포맷의 "
+        "근거를 가진 셔틀은 ApoE(159-167)2 하나이고, Angiopep-2 의 임상 근거는 "
+        "파클리탁셀 접합체(ANG1005)다. 포맷이 다른 근거를 '임상 통과'로 내세우지 마십시오.",
         "",
     ]
     for tier in TIER_ORDER:
@@ -555,17 +652,25 @@ def rubric_report() -> str:
     """감사용 표 — 등급이 **어떤 항목에서 도출됐는지** 사람이 검토할 수 있게."""
     cols = [("quant", "정량"), ("mech", "기전"), ("clinical", "임상"),
             ("form_match", "형태일치"), ("bbb_alone", "BBB단독")]
-    out = ["| 셔틀 | " + " | ".join(c[1] for c in cols) + " | → 등급 | 순위 그룹 |",
-           "|---|" + "---|" * (len(cols) + 2)]
+    out = ["| 셔틀 | " + " | ".join(c[1] for c in cols)
+           + " | 기본등급 | 간접성 | → 최종등급 | 순위 그룹 |",
+           "|---|" + "---|" * (len(cols) + 4)]
     for n in sorted(SHUTTLES, key=lambda k: (tier_rank(k), k)):
         c = SHUTTLE_CRITERIA[n]
         cells = ["✅" if getattr(c, k) else "—" for k, _ in cols]
-        t = derive_tier(c)
-        out.append(f"| {n} | " + " | ".join(cells) + f" | **{t}** | {group_of(t)} |")
+        base, t = _base_tier(c), derive_tier(c)
+        ind = "직접" if c.indirectness == 0 else f"−{c.indirectness}단계"
+        out.append(f"| {n} | " + " | ".join(cells)
+                   + f" | {base} | {ind} | **{t}** | {group_of(t)} |")
     out += [
         "",
-        "판정 규칙(`derive_tier`): BBB단독 아니오 → **D** · 형태일치 아니오 → **C** · "
+        "판정 규칙(`derive_tier`) — **두 단계**:",
+        "① 기본등급: BBB단독 아니오 → **D** · 형태일치 아니오 → **C** · "
         "정량·기전·임상 전부 → **A** · 정량 또는 기전 → **B** · 그 외 → **C**",
+        "② **간접성 하향**(GRADE indirectness): 근거의 **전달 포맷**이 우리 구성체"
+        "(단일 폴리펩타이드 유전자 융합, 셔틀 1벌)와 멀수록 단계를 내린다 — "
+        "0 직접(유전자 융합) / −1 공유 접합체·펩타이드 단독 / −2 다가 나노캐리어·BBB 우회. "
+        "**C 가 바닥**이다(D 는 확실성 단계가 아니라 범위 실패라서 섞지 않는다).",
         "",
         "⚠️ 이 표는 **1인·1세션 큐레이션**이고 외부 검증을 받지 않았다. 각 칸은 출처로 "
         "확인 가능하도록 `SHUTTLE_CRITERIA[*].why` 에 판정 근거를 적어 두었다 — 이견이 "
