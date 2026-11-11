@@ -677,3 +677,65 @@ def rubric_report() -> str:
         "있으면 **칸을 걸고** 다투면 된다(등급 글자를 손으로 바꾸면 임포트가 실패한다).",
     ]
     return "\n".join(out)
+
+
+# ---------------------------------------------------------------------------
+# 문헌이 **기능 필수**라고 지목한 잔기 위치 (1-based, 셔틀 서열 기준)
+# ---------------------------------------------------------------------------
+#: 왜 이게 필요한가 (2026-11-11, `docs/experiments.md` §25)
+#:
+#: `pareto_scrub` 의 기능 보존 제약은 `rmt_sim ≥ 0.85` — BLOSUM62 **전역 정렬 평균**이다.
+#: 평균이라 **치명적 치환 2~3개가 동일 잔기 16개 뒤에 희석된다.** M10 에서 배운 병과
+#: 같은 병이다("길이로 정규화된 지표는 희석된다 → 국소 핫스팟으로 교체"). 실측:
+#:
+#:   · 목적함수 3축일 때  Angiopep-2 변이체 165개 중 **20개(12.1%)** 가 K10/K15 를 바꿨다
+#:   · off-target 을 목적에 넣자 254개 중 **47개(18.5%)**, 그중 **전하 역전 27건**
+#:
+#: 악화 메커니즘이 분명하다 — `off = (전하밀도 ∨ 소수성) × (1 − 0.6·rmt_sim)` 이므로
+#: off 를 최소화하면 **양전하를 지우는 것이 보상**되고, 하필 K10·K15 가 라이신이다.
+#: 즉 **옵티마이저가 문헌이 기능이라고 말한 잔기를 정확히 지우는 법을 배웠다.**
+#:
+#: 그리고 **BLOSUM 으로는 못 막는다**: 알려진 기능 상실 돌연변이가 `K10R/K15R`
+#: (Angiopep-7)이고 K→R 은 BLOSUM62 **+2 = 보존적 치환**이다. 즉 *우리 옵티마이저가
+#: 하도록 설계된 종류의 편집*이 그 기능 상실을 만든다. 유사도 축으로는 구별 불가이고
+#: (README: "선택성·BLOSUM 등 모든 서열 축이 Angiopep-2 와 Angiopep-7 을 구별하지 못했다"),
+#: ECHA read-across 가 화학 유사성만으로 풀지 않고 **기전 유사성**을 함께 요구하는 것과
+#: 같은 이유다. 그래서 제약의 출처를 **유사도에서 문헌으로** 옮긴다.
+#:
+#: ⚠️ **문헌이 집어 준 곳만 적는다.** 비어 있는 셔틀은 "보존할 필요가 없다"가 아니라
+#: **"어디가 중요한지 우리가 모른다"**는 뜻이다 — 이 간극 자체가 한계로 보고돼야 한다.
+CONSERVED_POSITIONS: dict[str, tuple[int, ...]] = {
+    # Angiopep-2 `TFFYGGSRGKRNNFKTEEY` — K10·K15.
+    # 근거: **Angiopep-7 = K10R/K15R** 이고 문헌상 뇌 전달이 ~9.5배 낮다(Demeule 2008 JPET,
+    # 같은 실험 내 점 변이 쌍 = 라이브러리에서 가장 깨끗한 음성 대조). 두 라이신을
+    # **같은 양전하 잔기(R)로만 바꿔도** 기능이 무너진다면, 그 자리는 건드리지 않는다.
+    "Angiopep-2": (10, 15),
+}
+
+
+def conserved_positions(shuttle_seq: str) -> tuple[int, ...]:
+    """이 셔틀(또는 그 변이체)에서 **건드리면 안 되는 1-based 위치**.
+
+    라이브러리 셔틀과 길이가 같을 때만 위치가 1:1 로 대응하므로, 길이가 다르면
+    보수적으로 **빈 튜플**을 돌려준다(틀린 위치를 동결하는 것이 더 나쁘다).
+    """
+    nm = name_of_seq(shuttle_seq)
+    if nm is None:
+        nm, _, _sim = None, None, 0.0
+        best, bname = 0.0, None
+        for cand, ev in SHUTTLE_EVIDENCE.items():
+            if cand not in CONSERVED_POSITIONS:
+                continue
+            sq = SHUTTLES[cand]["seq"] if isinstance(SHUTTLES[cand], dict) else SHUTTLES[cand]
+            if len(sq) != len(shuttle_seq):
+                continue
+            sc = similarity(shuttle_seq, sq)
+            if sc > best:
+                best, bname = sc, cand
+        nm = bname if best >= INHERIT_SIM_MIN else None
+    if nm is None:
+        return ()
+    sq = SHUTTLES[nm]["seq"] if isinstance(SHUTTLES[nm], dict) else SHUTTLES[nm]
+    if len(sq) != len(shuttle_seq):
+        return ()
+    return CONSERVED_POSITIONS.get(nm, ())

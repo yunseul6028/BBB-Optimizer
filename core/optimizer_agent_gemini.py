@@ -19,7 +19,7 @@ from typing import Generator
 from .config import LINKER_LIBRARY, MODEL_MAX_LEN, SHUTTLES, Settings
 from .optimizer_agent import (AgentEvent, OptimizationAgent,
                               dominates, is_candidate, is_comparison_only, is_unsupported,
-                              rank_key)
+                              rank_key, risk_axes)
 from .evidence import INHERIT_SIM_MIN
 from .evidence import critic_rule as evidence_critic_rule
 from .evidence import group_of as evidence_group
@@ -226,13 +226,19 @@ class GeminiOptimizationAgent(OptimizationAgent):
         # (아래 run()의 구조 증거 단계) — 에이전트의 의사결정에는 들어가지 않는다.
         decls.append(types.FunctionDeclaration(
             name="optimize_developability",
-            description=("한 셔틀 서열의 **개발성**(liability·응집·불안정성)을 신뢰 가능한 규칙/척도 "
-                         "오라클로 **다목적(Pareto) 최적화**한다. 검증 기능을 보존(rmt_sim 하한)하는 "
-                         "보존적 잔기 치환으로, 서로 상충하는 세 축을 동시에 줄인 변이체들의 트레이드오프 "
-                         "전선을 반환. **BBB 효능이 아니라 '만들 수 있게(제조·안정성)' 다듬는 용도** — "
-                         "최종 후보 셔틀을 확정 전에 개발성으로 다듬을 때 호출."),
+            description=("한 셔틀 서열을 **순위 위험 4축**(liability·응집·불안정성·**off-target**)에서 "
+                         "신뢰 가능한 규칙/척도 오라클로 **다목적(Pareto) 최적화**한다. 검증 기능을 "
+                         "보존(rmt_sim 하한) + **문헌 근거 등급 상속 보존**하는 보존적 잔기 치환으로, "
+                         "서로 상충하는 네 축을 동시에 줄인 변이체들의 트레이드오프 전선을 반환하고 "
+                         "**그 전선을 실제로 채점해 러닝 베스트·래칫에 반영한다**. "
+                         "목적함수가 심사의 축과 **같다** — 네가 직접 편집할 때 자주 잃는 off-target 까지 "
+                         "함께 본다. **BBB 효능이 아니라 '만들 수 있게(제조·안정성·선택성)' 다듬는 용도** — "
+                         "최종 후보 셔틀을 확정하기 전에 호출하라."),
             parameters=S(type=T.OBJECT, properties={
                 "shuttle": S(type=T.STRING, description="개발성을 다듬을 셔틀 서열"),
+                "linker": S(type=T.STRING, description=(
+                    "함께 쓸 링커 서열(선택). liability·불안정성은 구성체 전체, 응집은 "
+                    "모듈에서 재므로 링커가 채점 결과를 바꾼다. 생략하면 직접융합으로 채점한다.")),
             }, required=["shuttle"]),
         ))
         decls.append(types.FunctionDeclaration(
@@ -430,25 +436,75 @@ class GeminiOptimizationAgent(OptimizationAgent):
             return msg, AgentEvent("text", text=f"🧪 개발성 최적화: 근거 상속 미달로 전선 없음 (셔틀 `{sh}`)")
 
         def _fmt(o):
-            return f"liability {o['liability']}·응집 {o['aggregation']}·불안정 {o['instability']}"
+            return (f"liability {o['liability']}·응집 {o['aggregation']}"
+                    f"·불안정 {o['instability']}·**off {o['off_target']}**")
         rows = [f"- `{m['seq']}` — {_fmt(m['objectives'])} · rmt_sim {m['rmt_sim']} · "
                 f"**근거 {m['tier']}**(부모 유사도 {m['tier_sim']:.2f}) · 편집 {m['n_edits']}"
                 for m in front[:6]]
         body = "\n".join(rows)
         drop = (f" · 근거 상속 미달 **{n_dropped}개 제외**" if n_dropped else "")
         pn = f"`{parent}`" if parent else "(라이브러리 밖 시드)"
+
+        # ── 전선을 **실제로 채점한다** (2026-11-11, `docs/experiments.md` §25) ──────
+        # 옛 구현은 전선을 **텍스트로만** 보여주고 끝냈다. 그래서 그 후보들은
+        # `seen_rows`·러닝 베스트·원장에 **한 번도 들어가지 않았고**, 래칫 게이트도
+        # 그것들을 몰랐다. 실측(M4 콜드 3세션 원장): 설계체 5건이 전부 에이전트의
+        # `design_candidate` 산출물(`F2Y·F3R·E18Q`, off 0.20~0.23)이고 **스크럽 전선
+        # 모양의 후보는 한 건도 없다** — 도구 출력이 결정에 닿지 않았다는 증거다.
+        # 이제 채점해 `evaluation` 이벤트로 내보내면 세 가지가 같이 해결된다:
+        #   ⑴ 러닝 베스트가 스크럽 후보를 본다 → 래칫이 **퇴행을 잡을 수 있다**
+        #   ⑵ 원장에 남아 **다음 세션이 물려받는다**
+        #   ⑶ UI 랭킹·심사가 같은 행 형식으로 함께 본다
+        # 링커는 에이전트가 쓰려는 것을 받고(없으면 직접융합) — liability·불안정성은
+        # **구성체 전체**, 응집은 **모듈**에서 재므로 링커가 결과를 바꾼다.
+        lk = "".join(ch for ch in (args.get("linker", "") or "").upper() if ch.isalpha())
+        scored: list[dict] = []
+        try:
+            _, scored = self._evaluate(cargo, {"constructs": [
+                {"label": f"스크럽{i + 1}", "linker": lk, "shuttle": m["seq"]}
+                for i, m in enumerate(front[:6])]})
+        except Exception:  # noqa: BLE001
+            scored = []   # 채점이 실패해도 전선 제시는 유지한다(보고는 끊기지 않게)
+
+        # 순위 축에서 **동일한 점은 하나만** 남긴다 — 옵티마이저는 불안정성을 연속으로
+        # 보지만 순위는 임계 40 이진이라, 전선에 "순위 관점에서 같은" 후보가 여럿 생긴다.
+        uniq, seen_ax = [], set()
+        for r in scored:
+            ax = risk_axes(r)
+            if ax in seen_ax:
+                continue
+            seen_ax.add(ax)
+            uniq.append(r)
+        dedup = (f" · 순위 축 중복 {len(scored) - len(uniq)}개 접음"
+                 if len(uniq) < len(scored) else "")
+        score_note = ""
+        if uniq:
+            best_line = min(uniq, key=rank_key)
+            score_note = (
+                f"\n\n**채점 결과**(순위 축 = 근거 그룹 → liab·불안정성(이진)·off·응집){dedup}: "
+                + " / ".join(f"`{r['shuttle']}` {self._summary(r)}" for r in uniq[:4])
+                + f"\n→ 이 중 순위 최상은 `{best_line['shuttle']}` 이다. "
+                  "**채점됐으므로 러닝 베스트·원장·래칫이 이 후보들을 본다** — "
+                  "이보다 나쁜 것을 제출하면 래칫에 걸린다.")
+
         md = (f"**🧪 개발성 다목적(Pareto) 최적화** — 셔틀 `{sh}` {pn}\n"
-              f"시드: liability {seed[0]}·응집 {seed[1]}·불안정 {seed[2]}. "
+              f"시드: liability {seed[0]}·응집 {seed[1]}·불안정 {seed[2]}·**off {seed[3]}**. "
               f"기능 보존(rmt_sim≥0.85) + **근거 상속 보존(부모 유사도 ≥ "
-              f"{INHERIT_SIM_MIN:.2f})**하며 liability·응집·불안정성 동시 최소화 "
-              f"→ 비지배 전선 {len(front)}개{drop}:\n{body}")
+              f"{INHERIT_SIM_MIN:.2f})**하며 **순위 위험 4축**(liability·응집·불안정성·"
+              f"off-target) 동시 최소화 → 비지배 전선 {len(front)}개{drop}:\n{body}"
+              f"{score_note}")
         llm = (f"셔틀 {sh}의 개발성 Pareto 전선 {len(front)}개{drop}. "
                f"제약: rmt_sim≥0.85 **및 부모({pn}) 유사도 ≥ {INHERIT_SIM_MIN:.2f}"
                f"(= 문헌 근거 등급을 물려받을 수 있는 선)**. 트레이드오프 변이체:\n{body}\n"
+               f"{score_note}\n"
                "하나를 골라 design_candidate/finish의 셔틀로 쓰면 개발성(제조·안정성)이 개선되고, "
                "**부모의 근거 등급은 그대로 유지된다**. 이것이 이 시스템에서 설계가 기여하는 "
                "정당한 자리다 — 효능을 주장하는 것이 아니라 **같은 근거를 더 만들 수 있게** 만드는 것. "
+               "🔴 **off-target 을 함께 보라** — 양이온 잔기(R·K)를 더하면 off 가 올라가고 "
+               "그것은 순위 축이다. 네가 직접 편집할 때 가장 자주 잃는 축이 이것이다. "
                "⚠️ BBB 점수가 변하는 것은 신경 쓰지 마라(순위에 쓰지 않는다).")
+        if uniq:
+            return llm, AgentEvent("evaluation", text=md, data={"rows": uniq})
         return llm, AgentEvent("text", text=md)
 
     # ⚰️ DEV_BBB_FLOOR_RATIO(=0.80, 시드 융합 BBB 대비) 는 2026-11-10 **폐지**했다.
