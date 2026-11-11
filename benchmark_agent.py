@@ -23,8 +23,15 @@ from benchmark import _library_scores, is_cpp_row
 
 # max_rounds=6 은 의도적 선택 — "타이트한 예산에서도 에이전트가 효율적인가"를 보는 실측이다.
 # (운영 기본값은 10 = 안전 상한, get_gemini_agent 참고. 여기 6은 수렴 바닥을 재는 프로브다.)
-def m4_agent_efficiency(cargo="GSNKGAIIGLM", max_rounds=6):
+def m4_agent_efficiency(cargo="GSNKGAIIGLM", max_rounds=6, use_ledger=False,
+                        seed_ledger=False, tag=""):
     """에이전트 효율/최적성 갭.
+
+    `use_ledger`: **콜드 스타트(False)가 M4 의 정의다.** True 는 누적 모드(원장 ON)의
+    별도 실험용이며, 두 모드는 **비교 불가**이므로 반드시 나눠 보고한다(core/ledger.py).
+    `seed_ledger`: 콜드 세션의 실측을 원장에 **기록만** 한다(읽지는 않는다). 누적 모드
+    실험의 바닥을 실제 세션 결과로 깔기 위한 것이고, 콜드 측정 자체에는 영향이 없다
+    (원장은 `use_ledger=True` 일 때만 읽힌다).
 
     ⚠️ 2026-11-10 재정의: 옛 판정은 **`최종 BBB / 후보군 oracle BBB`** 였다. 폐지했다 —
     분모와 분자가 모두 BBB 이고, BBB 로는 후보를 줄 세울 수 없음이 두 번 확인됐다
@@ -39,37 +46,58 @@ def m4_agent_efficiency(cargo="GSNKGAIIGLM", max_rounds=6):
     ③이 이 시스템이 기여를 주장할 수 있는 유일한 자리다(부모 근거를 유지한 liability 스크러빙).
     """
     settings = get_settings()
-    agent = get_gemini_agent(settings, max_rounds=max_rounds, use_ledger=False)
+    agent = get_gemini_agent(settings, max_rounds=max_rounds, use_ledger=use_ledger)
     if agent is None:
         print("⚠️ Gemini 에이전트 비활성(GEMINI_API_KEY 필요) — M4 생략.")
-        return
+        return None
     from core.evidence import group_of, group_rank
     from core.optimizer_agent import dominates, is_candidate, rank_key
 
     front = agent.reachable_front(cargo)
     ft = front.get("front_top") or []
     fr = front.get("front") or []
-    print("── M4. 에이전트 효율 (라이브 실행) ──")
+    mode = "누적 모드(원장 ON)" if use_ledger else "콜드 스타트"
+    print(f"── M4. 에이전트 효율 (라이브 실행 · {mode}{tag}) ──")
+    if use_ledger:
+        from core import ledger as _ledger
+        _d = _ledger.load(cargo)
+        _fl = _ledger.floor_entry(cargo)
+        print(f"  원장: {_d.get('sessions')}세션 기록 · 승자 {len(_d.get('wins') or [])}개 · "
+              f"실패 {len(_d.get('fails') or [])}개 · 바닥 "
+              + (f"`{(_fl.get('linker') or '직접융합')}+{_fl.get('shuttle')}`"
+                 f"(근거 {_fl.get('tier')}·liab {_fl.get('dev_liab')}·off {_fl.get('sel_off')})"
+                 if _fl else "없음(빈 원장 → 사실상 콜드)"))
     print(f"  도달 가능 집합: 후보군 {front.get('n_gate')}개 · 근거 그룹 "
           f"{front.get('by_group')} · 최상위 그룹 `{front.get('best_group')}`")
     print(f"  최상위 그룹 전선 {len(ft)}개 / 전체 전선 {len(fr)}개")
 
     n_eval, choice, best_seen = 0, None, None
+    rows_seen = []
     for ev in agent.run(cargo):
         if ev.kind == "evaluation":
-            n_eval += len(ev.data.get("rows", []))
-            for r in ev.data["rows"]:
+            rows = ev.data.get("rows", [])
+            n_eval += len(rows)
+            rows_seen.extend(rows)
+            for r in rows:
                 if is_candidate(r) and (best_seen is None or rank_key(r) < rank_key(best_seen)):
                     best_seen = r
         elif ev.kind in ("choice", "optimum"):
             choice = ev.data
         elif ev.kind == "error":
             print(f"  에이전트 오류: {ev.text}")
-            return
+            return None
     pick = choice if choice is not None else best_seen
     if pick is None:
         print("  ⚠️ 최종 후보 없음 — 모든 후보가 게이트에 걸렸다.")
-        return
+        return None
+
+    # 콜드 세션의 실측을 원장에 **기록만** 한다(이 세션은 원장을 읽지 않았다).
+    # 누적 모드 실험의 바닥이 실제 세션에서 나오게 하는 용도다.
+    if seed_ledger and not use_ledger:
+        from core.ledger import failure_notes, record
+        d = record(cargo, rows_seen, pick, failure_notes(rows_seen))
+        print(f"  📒 원장 시딩: 누적 {d.get('sessions')}세션 · 승자 {len(d.get('wins') or [])}개 · "
+              f"실패 {len(d.get('fails') or [])}개")
 
     g = group_of(pick.get("tier"))
     on_top = group_rank(pick.get("tier")) <= group_rank((ft[0].get("tier") if ft else None))
@@ -100,6 +128,13 @@ def m4_agent_efficiency(cargo="GSNKGAIIGLM", max_rounds=6):
     else:
         verdict = "전선 도달(라이브러리 내 비지배)"
     print(f"  판정: {verdict}")
+    return {"verdict": verdict, "q1_on_top": on_top, "q2_nondominated": not dom_by,
+            "q3_outside_front": not in_front, "n_eval": n_eval,
+            "linker": pick.get("linker") or "", "shuttle": pick.get("shuttle"),
+            "tier": pick.get("tier"), "group": g, "dev_liab": pick.get("dev_liab"),
+            "instability": pick.get("instability"), "sel_off": pick.get("sel_off"),
+            "dev_agg_hot": pick.get("dev_agg_hot"), "bbb_report": pick.get("bbb"),
+            "dominated_by": dom_by, "use_ledger": use_ledger}
 
 
 def m5_critic_effectiveness():
@@ -200,12 +235,77 @@ def m5_critic_effectiveness():
         print("     → REVISE는 났지만 **겨냥한 게이트를 검증하지 못했다**. 프로브를 고쳐야 한다.")
 
 
-def main():
+def _summarize(results, title):
+    """여러 세션의 M4 결과를 **분산까지** 요약한다.
+
+    1세션치로 효율을 주장하면 안 된다 — 옛 기준 4세션 재현에서 유효점수가 0.408~0.635 로
+    흩어졌다(docs/experiments.md §11.2). 판정은 백분율이 아니라 예/아니오 세 개이므로,
+    요약도 **세션별 판정의 분포**와 평가 횟수 범위로 낸다(평균 하나로 뭉개지 않는다).
+    """
+    ok = [r for r in results if r]
+    if not ok:
+        print(f"\n── {title}: 유효 세션 없음 ──")
+        return
+    print(f"\n── {title} — {len(ok)}세션 요약 ──")
+    print(f"  {'#':>2}  {'①근거최상위':<12} {'②비지배':<9} {'③전선밖':<9} {'평가':>4}  "
+          f"판정 / 최종 선택")
+    for i, r in enumerate(ok, 1):
+        print(f"  {i:>2}  {'예' if r['q1_on_top'] else '아니오':<12} "
+              f"{'예' if r['q2_nondominated'] else '아니오':<9} "
+              f"{'예' if r['q3_outside_front'] else '아니오':<9} {r['n_eval']:>4}  "
+              f"{r['verdict']}  [{r['linker'] or '직접융합'}+{r['shuttle']} · 근거 {r['tier']} · "
+              f"liab {r['dev_liab']} · II {r['instability']} · off {r['sel_off']}]")
+    n = len(ok)
+    evals = [r["n_eval"] for r in ok]
+    print(f"  ① 최상위 근거 그룹 : {sum(r['q1_on_top'] for r in ok)}/{n}")
+    print(f"  ② 비지배           : {sum(r['q2_nondominated'] for r in ok)}/{n}")
+    print(f"  ③ 전선 밖(설계체)  : {sum(r['q3_outside_front'] for r in ok)}/{n}")
+    import statistics
+    print(f"  평가 횟수          : {min(evals)}~{max(evals)} (중앙값 "
+          f"{statistics.median(evals):g})")
+    uniq = {(r["linker"], r["shuttle"]) for r in ok}
+    print(f"  서로 다른 최종 선택: {len(uniq)}종 / {n}세션"
+          + ("  ← 세션 간 변동 있음" if len(uniq) > 1 else "  ← 전 세션 동일"))
+
+
+def main(argv=None):
+    import argparse
+
+    p = argparse.ArgumentParser(description="M4/M5 에이전트 벤치마크 (LLM 필요)")
+    p.add_argument("--sessions", type=int, default=1,
+                   help="M4 콜드 스타트 세션 수 (분산 추정에 2~3 권장)")
+    p.add_argument("--cumulative", type=int, default=0, metavar="N",
+                   help="누적 모드(원장 ON) 세션 수. 콜드와 **따로** 보고한다")
+    p.add_argument("--seed-ledger", action="store_true",
+                   help="콜드 세션 결과를 원장에 기록(읽지는 않음) — 누적 실험의 바닥용")
+    p.add_argument("--cargo", default="GSNKGAIIGLM")
+    p.add_argument("--skip-m4", action="store_true")
+    p.add_argument("--skip-m5", action="store_true")
+    args = p.parse_args(argv)
+
     print("=" * 68)
     print("BBB-Optimizer 에이전트 벤치마크 — M4/M5 (LLM 필요)")
     print("=" * 68)
-    m4_agent_efficiency()
-    m5_critic_effectiveness()
+
+    cold = []
+    if not args.skip_m4:
+        for i in range(max(1, args.sessions)):
+            cold.append(m4_agent_efficiency(cargo=args.cargo, seed_ledger=args.seed_ledger,
+                                            tag=f" · 세션 {i + 1}/{args.sessions}"))
+            print()
+        if args.sessions > 1:
+            _summarize(cold, "M4 콜드 스타트")
+
+    warm = []
+    for i in range(args.cumulative):
+        warm.append(m4_agent_efficiency(cargo=args.cargo, use_ledger=True,
+                                        tag=f" · 세션 {i + 1}/{args.cumulative}"))
+        print()
+    if warm:
+        _summarize(warm, "누적 모드(원장 ON) — 콜드와 비교 불가, 별도 보고")
+
+    if not args.skip_m5:
+        m5_critic_effectiveness()
 
 
 if __name__ == "__main__":

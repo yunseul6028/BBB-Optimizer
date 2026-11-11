@@ -17,7 +17,7 @@ import time
 from typing import Generator
 
 from .config import LINKER_LIBRARY, MODEL_MAX_LEN, SHUTTLES, Settings
-from .optimizer_agent import (AgentEvent, LIB_LINKERS, LIB_SHUTTLES, OptimizationAgent,
+from .optimizer_agent import (AgentEvent, LIB_LINKERS, OptimizationAgent,
                               dominates, is_candidate, is_comparison_only, is_unsupported,
                               rank_key)
 from .evidence import INHERIT_SIM_MIN
@@ -1001,20 +1001,9 @@ class GeminiOptimizationAgent(OptimizationAgent):
             # 같이 남겨 같은 벽에 다시 부딪히는 라운드를 아낀다.
             if self.use_ledger:
                 try:
+                    from .ledger import failure_notes as _ledger_notes
                     from .ledger import record as _ledger_record
-                    notes = {}
-                    for r in seen_rows:
-                        sh = (r.get("shuttle") or "").upper()
-                        if not sh or sh in LIB_SHUTTLES:
-                            continue
-                        k = ((r.get("linker") or "").upper(), sh)
-                        if r.get("tier") is None:
-                            par, sim = r.get("tier_parent"), r.get("tier_sim") or 0.0
-                            notes[k] = (f"문헌 근거 미등재 — 최근접 {par or '없음'}·유사도 "
-                                        f"{sim:.2f} < {INHERIT_SIM_MIN:.2f} (후보 자격 없음)")
-                        elif is_unsupported(r):
-                            notes[k] = f"근거 등급 {r.get('tier')} = 근거 없음 (후보 자격 없음)"
-                    _ledger_record(cargo, seen_rows, final_pick, notes)
+                    _ledger_record(cargo, seen_rows, final_pick, _ledger_notes(seen_rows))
                 except Exception:  # noqa: BLE001
                     pass    # 기록 실패가 결과를 무효화하진 않는다
 

@@ -195,6 +195,34 @@ def record(cargo: str, rows: list[dict], final: dict | None = None,
     return d
 
 
+def failure_notes(rows: list[dict]) -> dict:
+    """채점한 행들에서 **(링커,셔틀) → 실패 사유** 표를 만든다.
+
+    `record()` 의 `notes` 인자로 그대로 넣는다. 라이브러리 셔틀은 제외한다 — 사유를
+    남길 대상은 에이전트가 **새로 만든** 후보다(라이브러리 조합은 전선 계산이 이미 판정한다).
+
+    세션 종료 경로(`optimizer_agent_gemini`)와 원장 시딩(`benchmark_agent --seed-ledger`)이
+    **같은 함수**를 쓰도록 여기 둔다. 두 곳에 복제하면 사유 문구가 갈라지고, 그러면
+    원장이 세션마다 다른 기준으로 실패를 기록한다(§19-4 의 상수 복제와 같은 계열의 함정).
+    """
+    from .evidence import INHERIT_SIM_MIN
+    from .optimizer_agent import LIB_SHUTTLES, is_unsupported
+
+    notes: dict = {}
+    for r in rows or []:
+        sh = (r.get("shuttle") or "").upper()
+        if not sh or sh in LIB_SHUTTLES:
+            continue
+        k = ((r.get("linker") or "").upper(), sh)
+        if r.get("tier") is None:
+            par, sim = r.get("tier_parent"), r.get("tier_sim") or 0.0
+            notes[k] = (f"문헌 근거 미등재 — 최근접 {par or '없음'}·유사도 "
+                        f"{sim:.2f} < {INHERIT_SIM_MIN:.2f} (후보 자격 없음)")
+        elif is_unsupported(r):
+            notes[k] = f"근거 등급 {r.get('tier')} = 근거 없음 (후보 자격 없음)"
+    return notes
+
+
 def floor_entry(cargo: str) -> dict | None:
     """이 화물에서 지금까지 확인된 **최선 후보** = 이번 세션이 넘어야 할 바닥.
 
