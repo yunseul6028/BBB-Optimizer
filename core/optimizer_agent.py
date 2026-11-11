@@ -37,6 +37,46 @@ MAX_CANDIDATES_PER_STEP = 24
 LIB_LINKERS = frozenset((v["seq"] or "").upper() for v in LINKER_LIBRARY.values())
 LIB_SHUTTLES = frozenset(v["seq"].upper() for v in SHUTTLES.values())
 
+AA20 = frozenset("ACDEFGHIKLMNPQRSTVWY")
+
+# 생성 링커의 **길이 상한** = 라이브러리 최장 링커와 같게 둔다(A(EAAAK)3A = 17aa).
+# 이것이 유일한 하드 제약이고, 근거는 **독성 게이트의 길이 희석**이다.
+# 실측(2026-11-11, 화물 GSNKGAIIGLM + T7): 링커를 늘리면 구성체 독성이 단조 감소한다
+# (GGS 0.27 → (GGGGS)3 0.20). 독성은 순위 축이 아니라 **하드 게이트**(임계 0.38)라서
+# 길이로 희석하면 독성 셔틀이 게이트를 **우회**할 수 있다. 라이브러리와 같은 길이 운동장을
+# 쓰면 그 여지가 라이브러리 수준으로 묶인다(= 대응 널 원리와 같은 범위 선택).
+#
+# ⚠️ 다른 축들은 길이 해킹에 이미 면역이거나 자기 방어가 있다(실측 근거):
+#   · off-target  — 링커에 **완전 불변**(T7 13/13 모두 0.140 · Angiopep-2 13/13 모두 0.090). 셔틀 주도.
+#   · 응집 핫스팟 — 국소 최대라 저응집 잔기를 덧붙여 낮출 수 없다(폭 0.59~0.60).
+#   · liability   — **개수**라서 길이로 희석되지 않고, 늘리면 오히려 증가한다
+#                   (WGGGGS 가 T7 에서 liab 1→2 = W 산화 부위를 링커가 추가한 실측).
+#   · 불안정성    — 강직 반복을 늘리면 계속 좋아지지만(EAAAK 22.9 → (EAAAK)2 20.6 →
+#                   A(EAAAK)3A 19.6) **이진 축**이라 임계 40 아래로 들어간 뒤의 이득이 0 이다.
+#                   이진화가 여기서 길이 해킹 방어로 작동한다(연속화하면 이 방어가 사라진다).
+LINKER_MAX_LEN = max((len(v["seq"] or "") for v in LINKER_LIBRARY.values()), default=17)
+
+
+def linker_reject_reason(linker: str) -> str | None:
+    """생성 링커가 거부되는 이유. 통과면 None.
+
+    라이브러리 **밖 링커를 허용**한다(2026-11-11). 옛 차단의 근거는 §13 의 BBB 접합부
+    아티팩트("아무 잔기나 하나 끼우면 융합 BBB 0.526 → 평균 0.743")였고, BBB 를 순위에서
+    뺀 뒤(M6·M8) 그 동기가 사라졌다 — 점수를 올릴 수 없는 축을 긁을 이유가 없다.
+    남은 제약은 **길이와 알파벳**뿐이다(위 LINKER_MAX_LEN 주석의 실측 근거 참고).
+    """
+    lk = (linker or "").upper()
+    if not lk:
+        return None                                  # 직접융합(빈 문자열)은 항상 허용
+    bad = sorted(set(lk) - AA20)
+    if bad:
+        return f"표준 20 아미노산이 아닌 문자 포함: {''.join(bad)}"
+    if len(lk) > LINKER_MAX_LEN:
+        return (f"길이 {len(lk)}aa > 상한 {LINKER_MAX_LEN}aa. 상한은 라이브러리 최장 링커와 "
+                f"같게 뒀다 — 링커를 늘리면 구성체 독성이 희석되어(실측 0.27→0.20) "
+                f"**독성 하드 게이트를 우회**할 수 있다")
+    return None
+
 
 def in_library(linker: str, shuttle: str) -> bool:
     """이 조합이 라이브러리 전수 공간 안에 있는가(= evaluate로 채점 가능한가)."""

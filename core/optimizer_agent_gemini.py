@@ -17,7 +17,7 @@ import time
 from typing import Generator
 
 from .config import LINKER_LIBRARY, MODEL_MAX_LEN, SHUTTLES, Settings
-from .optimizer_agent import (AgentEvent, LIB_LINKERS, OptimizationAgent,
+from .optimizer_agent import (AgentEvent, OptimizationAgent,
                               dominates, is_candidate, is_comparison_only, is_unsupported,
                               rank_key)
 from .evidence import INHERIT_SIM_MIN
@@ -106,10 +106,21 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
         "  👉 그래서 **'BBB 점수가 낮다/높다'를 선택 근거로 쓰면 심사가 반박한다.** "
         "낮다고 버리지도, 높다고 고르지도 마라. 최종 보고서에는 보고치로 적고 "
         "'이 셔틀을 고른 근거(등급·인용)'를 따로 밝혀라.\n"
-        "  링커는 무엇으로 고르나: **문헌·표준 관행**(GGGGS = 표준 유연 링커 / EAAAK = 강직 "
-        "α-헬릭스), **개발성**(GGGGS 는 응집 낮음 / 무작위 링커는 dibasic liability 유입), "
-        "**구조**(get_structure 로 셔틀이 노출됐나 — 링커의 실제 기능은 점수를 올리는 게 아니라 "
-        "**셔틀이 수용체에 닿게 하는 것**이다).\n\n"
+        "  링커는 무엇으로 고르고 **무엇을 설계하나**(실측 2026-11-11, 라이브러리 13종 × 셔틀):\n"
+        "   · **off-target·응집 핫스팟은 링커에 반응하지 않는다** — T7 에서 off 가 13/13 모두 "
+        "0.140, Angiopep-2 는 13/13 모두 0.090 으로 **완전히 동일**했고, 응집 핫스팟도 폭이 "
+        "0.59~0.60 뿐이었다(국소 최대라 잔기를 덧붙여 낮출 수 없다). **링커로 이 두 축을 "
+        "고치려 하지 마라 — 움직이지 않는다.**\n"
+        "   · **liability 는 링커가 실제로 움직인다** — `WGGGGS` 는 T7 에서 liab 1→2, "
+        "Angiopep-2 에서 3→4 로 **올렸다**(W 산화 부위 추가). 화물과 셔틀은 고정이므로 "
+        "**접합부**(화물 끝⊕링커⊕셔틀 시작)에서 NG/NS·DG/DP·산화 M/W 모티프가 생기지 않게 "
+        "하는 것은 **링커만 할 수 있는 일**이다. 여기가 링커 설계의 정당한 표적이다.\n"
+        "   · **불안정성은 조성이 방향을 정한다** — 유연 GS 계열은 길수록 나빠지고"
+        "(GGS 30.0 → (GGGGS)3 52.7), 강직 EAAAK 계열은 길수록 좋아진다"
+        "(EAAAK 22.9 → A(EAAAK)3A 19.6). 단 이 축은 **이진**(임계 40)이라 40 아래로 "
+        "들어간 뒤에는 더 내려도 이득이 0 이다 — 길이를 늘려 숫자만 깎지 마라.\n"
+        "   · 그리고 **문헌·표준 관행**(GGGGS = 표준 유연 / EAAAK = 강직 α-헬릭스)과 "
+        "**구조**(링커의 실제 기능은 점수를 올리는 게 아니라 **셔틀이 수용체에 닿게 하는 것**).\n\n"
         f"사용 가능한 도구: {tools}\n"
         "권장 워크플로우(자율 판단): evaluate_candidates로 라이브러리 조합(**링커 유무 — 직접융합"
         "(링커 빈칸)도 포함**)을 폭넓게 스크리닝 → "
@@ -151,13 +162,18 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
 class GeminiOptimizationAgent(OptimizationAgent):
     """Claude 백엔드 재사용 + Gemini function-calling 루프."""
 
-    def __init__(self, settings, max_rounds: int = 10, use_ledger: bool = True):
+    def __init__(self, settings, max_rounds: int = 10, use_ledger: bool = True,
+                 ledger_write: bool = True):
         super().__init__(settings, max_rounds)
         # 설계 이력 원장(core/ledger.py) 사용 여부.
         # ⚠️ **벤치마크·애블레이션은 반드시 False**로 고정한다. 원장을 켠 세션은 이전
         # 세션의 탐색을 물려받으므로 콜드 스타트 세션과 **비교 불가**다('18평가로 134.8%'
         # 같은 효율 수치의 의미가 달라진다). 섞으면 §12 분모 불일치와 같은 거짓 비교가 된다.
         self.use_ledger = use_ledger
+        # 읽기는 하되 **쓰지 않는** 모드. 켬/끔 A/B 실험 전용이다 —
+        # 쓰기를 켜두면 ON 팔의 2·3세션이 **서로 다른(자라난) 원장**을 보게 되어
+        # 같은 조건의 반복이 아니게 된다. 두 팔이 **같은 바닥**을 보게 동결한다.
+        self.ledger_write = ledger_write
 
     def _function_decls(self, types):
         T = types.Type
@@ -178,17 +194,22 @@ class GeminiOptimizationAgent(OptimizationAgent):
             ),
             types.FunctionDeclaration(
                 name="design_candidate",
-                description=("**직접 편집·설계한 셔틀** 서열 하나를 채점한다. 편집 전 "
+                description=("**직접 편집·설계한 셔틀/링커**를 채점한다. 편집 전 "
                              "**가설(무엇을 왜 바꾸나)·예측(어느 축이 어떻게 변할까)**을 반드시 제시하라 "
                              "— 무작위 변이가 아니라 근거 있는 설계. 셔틀은 잔기 변이·트리밍·연장·"
-                             "하이브리드 등 자유 설계. **단, 링커는 반드시 라이브러리 링커 중 하나**"
-                             "(또는 직접융합=빈 문자열)여야 한다 — 임의 잔기를 접합부에 끼워넣는 것은 "
-                             "설계가 아니라 점수 교란이다. evaluate와 동일 지표 반환."),
+                             "하이브리드 등 자유 설계이고, **링커도 자유 설계**가 가능하다"
+                             "(표준 20 아미노산·최대 17aa). ⚠️ **링커로 무엇을 노릴 수 있는지는 "
+                             "축마다 다르다**(실측): off-target 과 응집 핫스팟은 링커에 거의 반응하지 "
+                             "않는다(라이브러리 13종에서 off 는 13/13 동일). 링커가 실제로 움직이는 "
+                             "축은 **접합부 liability**(화물 끝⊕링커⊕셔틀 시작에서 NG/NS/DG/DP·산화 "
+                             "M/W 같은 모티프가 생기거나 사라진다 — 화물·셔틀은 고정이므로 이걸 "
+                             "통제할 수 있는 모듈은 링커뿐이다)와 **불안정성**이다. "
+                             "evaluate와 동일 지표 반환."),
                 parameters=S(type=T.OBJECT, properties={
                     "label": S(type=T.STRING),
-                    "linker": S(type=T.STRING, description="**라이브러리 링커만** — 직접융합은 빈 문자열. "
-                               "임의 서열을 쓰면 채점되지 않는다."),
-                    "shuttle": S(type=T.STRING, description="자유 설계 가능(편집 대상은 셔틀이다)"),
+                    "linker": S(type=T.STRING, description="자유 설계 가능 — 직접융합은 빈 문자열. "
+                               "표준 20 아미노산·최대 17aa(라이브러리 최장과 동일)."),
+                    "shuttle": S(type=T.STRING, description="자유 설계 가능(근거 등급은 셔틀에서 상속된다)"),
                     "hypothesis": S(type=T.STRING, description="무엇을 왜 편집하는가 — 직전 평가의 어느 "
                                     "문제(축)를 어떤 편집으로 고치려는지"),
                     "prediction": S(type=T.STRING, description="그 편집이 어느 축을 어떻게 바꿀지 예측(방향·대략치)"),
@@ -234,34 +255,39 @@ class GeminiOptimizationAgent(OptimizationAgent):
             text, rows = self._evaluate(cargo, args, library_only=True)
             return text, AgentEvent("evaluation", text=args.get("rationale", ""), data={"rows": rows})
         if name == "design_candidate":
-            # ── 링커 제약 ──────────────────────────────────────────────────
-            # 이건 **장부 정규화**다 — 해킹을 막는 장치가 아니다(그건 구성체 수준 통제가 한다).
-            # 실측(docs/experiments.md §13): 화물+T7 에 아무 잔기나 하나 끼우면 융합 BBB 가
-            # 0.526 → 평균 0.743(20종 중 18종 상승)으로 뛴다. 열어두면 에이전트가 셔틀 설계
-            # 대신 접합부를 긁는다(실제로 승자 전원이 `V+...` 였다).
-            # ⚠️ **필드를 막는 것만으로는 못 막는다**: `링커 Y + 셔틀 HAIYPRH` 와
-            # `직접융합 + 셔틀 YHAIYPRH` 는 **같은 분자**이고 BBB 도 똑같이 0.875 다. 실제로
-            # 이 제약을 넣자 에이전트가 Y 를 셔틀 앞으로 옮겨 그대로 우회했다. 링커/셔틀 구분은
-            # 장부상의 경계일 뿐 화학적 경계가 아니다.
-            # 그래서 이 제약의 목적은 하나다: **모든 설계를 셔틀 필드로 모아** 구성체 수준
-            # 통제(= 근거 등급 상속 판정)가 빠짐없이 걸리게 하는 것.
-            # 2026-11-10 보강: BBB 점수를 순위에서 뺐으므로 "접합부를 긁어 점수를 올리는"
-            # 동기 자체가 사라졌다(M8: 링커 길이↔BBB 순위상관 -0.495 였던 그 신호를 더 이상
-            # 쓰지 않는다). 이 제약은 이제 **장부 정규화 목적만** 남는다.
+            # ── 링커 제약 (2026-11-11: 라이브러리 밖 링커 **허용**) ─────────────
+            # 옛 차단의 근거는 §13 의 BBB 접합부 아티팩트였다("화물+T7 에 아무 잔기나 하나
+            # 끼우면 융합 BBB 0.526 → 평균 0.743, 20종 중 18종 상승"). 그때는 BBB 가 순위에
+            # 있었으니 열어두면 에이전트가 셔틀 설계 대신 접합부를 긁었다(승자 전원 `V+...`).
+            # **BBB 를 순위에서 뺀 뒤(M6·M8) 그 동기가 사라졌다** — 점수를 올릴 수 없는 축을
+            # 긁을 이유가 없다. 그리고 차단은 애초에 우회 가능했다: `링커 Y + 셔틀 HAIYPRH` 와
+            # `직접융합 + 셔틀 YHAIYPRH` 는 **같은 분자**이고, 실제로 에이전트가 Y 를 셔틀 앞으로
+            # 옮겨 그대로 통과했다. 링커/셔틀 구분은 장부상의 경계일 뿐 화학적 경계가 아니다.
+            #
+            # 여는 이유(실측): 링커가 정당하게 기여할 수 있는 자리가 **실재한다** —
+            # liability 는 **개수**라서 링커가 바꿀 수 있고(WGGGGS 가 T7 에서 liab 1→2 로
+            # W 산화 부위를 추가한 실측), 화물과 셔틀은 고정이므로 **접합부 liability 를
+            # 통제할 수 있는 모듈은 링커뿐**이다. 반면 라이브러리 13종은 그 축에서 거의
+            # 균일해(T7 에서 서로 다른 위험축 조합 4개/13링커) 선택만으로는 손댈 수 없었다.
+            #
+            # 남은 제약은 **길이·알파벳뿐**이고 근거는 독성 게이트의 길이 희석이다
+            # (`optimizer_agent.linker_reject_reason` 주석에 축별 실측 근거를 적어뒀다).
+            # 장부 정규화 목적은 유지된다: 설계는 여전히 `design_candidate` 로만 들어오고
+            # (가설·예측이 기록에 남는다), 근거 등급 상속 판정은 **셔틀 필드**를 보므로
+            # 링커를 열어도 그 통제는 그대로 걸린다.
+            from .optimizer_agent import linker_reject_reason
             lk_raw = (args.get("linker", "") or "")
             lk = "".join(ch for ch in lk_raw.upper() if ch.isalpha())
-            if lk and lk not in LIB_LINKERS:
-                from .config import LINKER_LIBRARY
-                opts = ", ".join(sorted({(v["seq"] or "직접융합") for v in LINKER_LIBRARY.values()}))
+            _why = linker_reject_reason(lk)
+            if _why is not None:
+                from .optimizer_agent import LINKER_MAX_LEN
                 self.gate_rejections = getattr(self, "gate_rejections", 0) + 1
-                msg = (f"⚠️ 링커 `{lk}`는 라이브러리에 없어 **채점하지 않았다**.\n"
-                       f"임의 잔기를 접합부에 끼우면 점수가 오르지만 그건 설계가 아니라 "
-                       f"**점수 교란**이다 — 실측으로 화물+T7 에 아무 잔기 하나를 끼우면 "
-                       f"BBB 가 0.526→평균 0.743(20종 중 18종 상승)으로 뛴다. 발린 하나가 "
-                       f"TfR 결합을 바꿀 메커니즘은 없다.\n"
-                       f"**링커는 라이브러리에서 고르고, 설계는 셔틀에 하라.** "
-                       f"사용 가능한 링커: {opts}")
-                return msg, AgentEvent("text", text=f"🚫 라이브러리 밖 링커 `{lk}` 거부")
+                msg = (f"⚠️ 링커 `{lk}`를 **채점하지 않았다** — {_why}.\n"
+                       f"링커는 자유 설계가 가능하지만 **표준 20 아미노산 · 최대 "
+                       f"{LINKER_MAX_LEN}aa** 안에서만 가능하다. 링커로 노릴 수 있는 축은 "
+                       f"**접합부 liability**(모티프를 만들지 않는 조성)와 **불안정성**이고, "
+                       f"off-target 과 응집 핫스팟은 링커에 거의 반응하지 않는다(실측).")
+                return msg, AgentEvent("text", text=f"🚫 링커 `{lk}` 거부 — {_why}")
             text, rows = self._evaluate(cargo, {"constructs": [{
                 "label": args.get("label", "설계"), "linker": lk,
                 "shuttle": args.get("shuttle", "")}]})
@@ -277,6 +303,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
             # 알려준다. 심사까지 끌고 가면 라운드를 낭비한다. (등급은 이미 `_evaluate` 가
             # 행에 실어 두므로 여기서는 설명만 붙인다.)
             text += self._inherit_note(args.get("shuttle", ""))
+            text += self._junction_note(cargo, lk, args.get("shuttle", ""))
             reflect = ("\n\n[반성 요구] 위 실제 점수를 네 **예측과 대조**하라: 예측이 맞았나? "
                        "틀렸다면 어느 축에서 왜 빗나갔나? 그 교훈으로 다음 가설을 세워 설계를 "
                        "이어가거나, 충분히 수렴했으면 finish하라. (점수를 우기지 말고 오라클 결과를 따르라.)")
@@ -304,6 +331,39 @@ class GeminiOptimizationAgent(OptimizationAgent):
     # 임계값 0.70 은 측정값이다(M9, docs/experiments.md §18): 정당한 개발성 변이체 55개의
     # 부모 유사도 최소 **0.830** vs 스크램블 0.529 · homopolymer 0.429 · 무작위 0.136 ·
     # 타 셔틀 간 0.088 → 간극 [0.529, 0.830] 안쪽. 최근접이 부모가 아닌 양성 **0/55**.
+    def _junction_note(self, cargo: str, linker: str, shuttle: str) -> str:
+        """접합부를 걸친 liability 모티프를 **결정론적으로** 알려준다.
+
+        왜 프롬프트 규칙이 아니라 검출인가: 링커가 고칠 수 있는 liability 는 정확히
+        **접합부를 걸친 것들**인데(화물·셔틀 내부 모티프는 링커로 못 없앤다), 그게 있는지는
+        화물 끝 잔기와 셔틀 첫 잔기에 달려 있어 **화물마다 다르다**. LLM 이 매번 올바르게
+        계산하길 기대하는 대신 검출해서 알려준다('검출+복구 한 쌍').
+
+        실측 근거와 `GGS` 가 실패하는 이유는 `developability.junction_liabilities` 참고.
+        """
+        try:
+            from .developability import junction_liabilities
+            js = junction_liabilities(cargo, linker, shuttle)
+        except Exception:  # noqa: BLE001 — 보조 표시다. 실패가 본 평가를 막아선 안 된다.
+            return ""
+        if not js:
+            return ("\n\n[접합부 검사] ✅ 접합부를 걸친 liability 모티프 **없음** — 이 조합에서는 "
+                    "링커를 바꿔 liability 를 줄일 여지가 없다(화물·셔틀 **내부** 모티프는 링커로 "
+                    "못 없앤다). 링커로 liability 를 고치려 하지 말 것.")
+        items = " · ".join(f"**{j['label']} `{j['motif']}`**@{j['pos']}({j['spans']})" for j in js)
+        c = "".join(ch for ch in (cargo or "").upper() if ch.isalpha())
+        sh = "".join(ch for ch in (shuttle or "").upper() if ch.isalpha())
+        return ("\n\n[접합부 검사] ⚠️ **접합부에서 생긴 liability "
+                f"{len(js)}개**: {items}\n"
+                f"  이것은 화물·셔틀 내부 문제가 아니라 **붙이는 방식** 때문에 생긴 것이므로 "
+                f"**링커를 바꿔 없앨 수 있다** — 지금 이 시스템에서 링커가 고칠 수 있는 유일한 "
+                f"liability 다.\n"
+                f"  화물 끝 `...{c[-3:] if len(c) >= 3 else c}` ⊕ 셔틀 시작 "
+                f"`{sh[:3] if len(sh) >= 3 else sh}...` 이므로, **링커의 첫/끝 잔기**가 이 둘과 "
+                f"모티프를 만들지 않게 골라라. ⚠️ 링커를 '끼우는 것'만으로는 안 된다 — 실측으로 "
+                f"`GGS`(G 로 시작)는 N 으로 끝나는 화물과 다시 `NG` 를 만들어 **실패**했고, "
+                f"`EAAAK`·`AAAAA`(E/A 로 시작)는 제거에 **성공**했다.")
+
     def _inherit_note(self, shuttle: str) -> str:
         """design_candidate 응답에 붙일 근거 상속 한 단락. 실패해도 예외 없음."""
         try:
@@ -999,7 +1059,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
             # ── 설계 이력 원장에 이번 세션을 기록 ──
             # 다음 세션이 이 결과를 **바닥**으로 깔고 시작한다(세션 간 래칫). 실패 사유도
             # 같이 남겨 같은 벽에 다시 부딪히는 라운드를 아낀다.
-            if self.use_ledger:
+            if self.use_ledger and self.ledger_write:
                 try:
                     from .ledger import failure_notes as _ledger_notes
                     from .ledger import record as _ledger_record
@@ -1064,7 +1124,11 @@ class GeminiOptimizationAgent(OptimizationAgent):
 #   · 상한 성격 — 보통 5~6라운드에 finish로 먼저 끝나 10에는 잘 안 닿음 → 비용 폭주 없는 백스톱.
 # (주의: M4 벤치는 "타이트 예산에서도 효율적"임을 보이려 의도적으로 6을 쓴다 — 운영 기본값 10과 역할이 다름.)
 def get_gemini_agent(settings: Settings, max_rounds: int = 10,
-                     use_ledger: bool = True) -> GeminiOptimizationAgent | None:
-    """use_ledger: 설계 이력 원장 사용. **벤치마크·애블레이션은 False** (비교 불가해짐)."""
-    return (GeminiOptimizationAgent(settings, max_rounds, use_ledger)
+                     use_ledger: bool = True,
+                     ledger_write: bool = True) -> GeminiOptimizationAgent | None:
+    """use_ledger: 설계 이력 원장 사용. **벤치마크·애블레이션은 False** (비교 불가해짐).
+
+    ledger_write: False 면 읽기만 한다 — 켬/끔 A/B 에서 두 팔이 **같은 바닥**을 보게 동결.
+    """
+    return (GeminiOptimizationAgent(settings, max_rounds, use_ledger, ledger_write)
             if settings.use_gemini_agent else None)

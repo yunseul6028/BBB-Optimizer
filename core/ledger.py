@@ -91,17 +91,20 @@ def _key(e: dict) -> tuple[str, str]:
 
 
 def _bad_linker(e: dict) -> bool:
-    """라이브러리 밖 링커인가 — 승자 목록에서 빼야 한다.
+    """**채점 자격이 없는** 링커인가 — 승자 목록에서 빼야 한다.
 
-    실측(docs/experiments.md §13): 화물+T7 에 **아무 잔기나 하나** 끼우면 융합 BBB 가
-    0.526 → 평균 0.743(20종 중 18종 상승)으로 뛴다. deepB3P 의 접합부 민감도이고, 발린
-    하나가 TfR 결합을 바꿀 메커니즘은 없다. 원장이 이런 조합을 '승자'로 들고 있으면
-    다음 세션에 **도달 불가능하고 무의미한 바닥**을 깔아준다(실제로 바닥이 0.918까지
-    올라갔다 — 전원 `V+...`). 읽을 때 걸러내 자가 치유한다.
+    옛 판정은 "라이브러리 밖이면 전부 탈락"이었다. 근거는 §13 의 BBB 접합부 아티팩트였고
+    (화물+T7 에 아무 잔기나 하나 끼우면 융합 BBB 0.526 → 평균 0.743, 20종 중 18종 상승),
+    실제로 바닥이 0.918까지 올라간 적이 있다(전원 `V+...`). **그 근거는 BBB 를 순위에서
+    뺀 뒤(M6·M8) 만료됐다** — 점수를 올릴 수 없는 축을 긁을 동기가 없다. 그리고 2026-11-11
+    `design_candidate` 가 링커 생성을 허용했으므로, 여기서 라이브러리 밖을 계속 걸러내면
+    **에이전트가 만들 수 있는 후보가 원장 바닥이 될 수 없는** 불일치가 생긴다(= §12 의
+    "기준점은 에이전트가 실제로 선택할 수 있는 집합에서 나와야 한다"를 거꾸로 어기는 것).
+
+    그래서 판정을 `design_candidate` 와 **같은 단일 출처**로 바꿨다 — 길이·알파벳만 본다.
     """
-    from .optimizer_agent import LIB_LINKERS
-    lk = (e.get("linker") or "").upper()
-    return bool(lk) and lk not in LIB_LINKERS
+    from .optimizer_agent import linker_reject_reason
+    return linker_reject_reason(e.get("linker") or "") is not None
 
 
 def _unsupported(e: dict) -> bool:

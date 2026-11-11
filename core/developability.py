@@ -89,21 +89,65 @@ def _net_charge_ph74(seq: str) -> float:
     return round(pos - neg, 1)
 
 
+# ── 서열 liability 모티프 (단일 출처) ──────────────────────────────────────
+# `assess_developability`(구성체 전체 채점)와 `junction_liabilities`(접합부만 추림)가
+# **같은 패턴**을 써야 한다. 복제하면 "축은 세는데 피드백은 못 보는" 모티프가 생긴다.
+_SEQ_LIAB_PATTERNS = (
+    (r"N[GSTN]",       "탈아마이드화"),
+    (r"D[GSTDH]",      "이성질화"),
+    (r"N[^P][ST]",     "N-당화 sequon"),
+    (r"(?:RR|KR|RK|KK)", "프로테아제 절단부위"),
+)
+
+
+def junction_liabilities(cargo: str, linker: str, shuttle: str) -> list[dict]:
+    """구성체의 **접합부를 걸치는** liability 모티프만 추린다.
+
+    왜 따로 보나: liability 는 모티프 **개수의 합**이고, 링커가 바꿀 수 있는 구간은
+    자기 자신과 **접합부**뿐이다. 화물·셔틀 **내부** 모티프는 링커로 못 없앤다. 그래서
+    "링커를 바꿔서 고칠 수 있는 liability"는 정확히 **접합부를 걸친 것들**이다.
+
+    실측(2026-11-11): 화물 `GSNKGAIIGLN`(끝 N) + 셔틀 B6 `GHKAKGPRK`(시작 G)를 직접
+    융합하면 접합부에 `NG` 가 생겨 liab 3 이 된다. 링커 `EAAAK`·`A`·`AAAAA` 를 끼우면
+    **2 로 내려가지만**, `GGS` 를 끼우면 **3 그대로**다 — `GGS` 가 G 로 시작해서 화물의 N 과
+    다시 `NG` 를 만들기 때문이다. 즉 "링커를 끼운다"가 아니라 **링커의 양 끝 잔기**가
+    문제다. 대조군(끝이 M 인 화물)에서는 링커 5종 전부 liab 가 **안 움직였다** —
+    효과가 접합부 모티프에 특이적이라는 뜻이다.
+
+    ⚠️ 라이브러리 링커 13종 중 **5종이 G 로 시작**한다(GGS·GGGGS·GGGGGS·(GGGGS)2·
+    (GGGGS)3) → N 이나 Q 로 끝나는 화물에서는 **표준 GS 링커가 모두 모티프를 남긴다**.
+
+    반환: [{"motif", "label", "pos", "spans"}] — `spans` 는 걸친 경계 이름.
+    """
+    c = "".join(ch for ch in (cargo or "").upper() if ch in _STD)
+    lk = "".join(ch for ch in (linker or "").upper() if ch in _STD)
+    sh = "".join(ch for ch in (shuttle or "").upper() if ch in _STD)
+    seq = c + lk + sh
+    # 경계 인덱스: 화물|링커, 링커|셔틀. 링커가 비면 두 경계가 한 점으로 겹친다.
+    bounds = {len(c): "화물|링커" if lk else "화물|셔틀"}
+    if lk:
+        bounds[len(c) + len(lk)] = "링커|셔틀"
+    out = []
+    for pat, label in _SEQ_LIAB_PATTERNS:
+        for m in re.finditer(pat, seq):
+            st, en = m.start(), m.end()
+            spans = [nm for b, nm in bounds.items() if st < b < en]
+            if spans:
+                out.append({"motif": m.group(), "label": label, "pos": st + 1,
+                            "spans": "+".join(spans)})
+    return out
+
+
 def assess_developability(sequence: str) -> DevelopabilityResult:
     seq = "".join(ch for ch in (sequence or "").upper() if ch in _STD)
     if len(seq) < 4:
         return DevelopabilityResult(error="서열이 너무 짧아 개발성 계산 불가")
 
     liab = []
-    # 1) 모티프 liability
-    for m in re.finditer(r"N[GSTN]", seq):
-        liab.append(f"탈아마이드화 {m.group()}@{m.start()+1}")
-    for m in re.finditer(r"D[GSTDH]", seq):
-        liab.append(f"이성질화 {m.group()}@{m.start()+1}")
-    for m in re.finditer(r"N[^P][ST]", seq):
-        liab.append(f"N-당화 sequon {m.group()}@{m.start()+1}")
-    for m in re.finditer(r"(RR|KR|RK|KK)", seq):
-        liab.append(f"프로테아제 절단부위 {m.group()}@{m.start()+1}")
+    # 1) 모티프 liability — 패턴은 _SEQ_LIAB_PATTERNS 단일 출처(접합부 검출이 같은 것을 쓴다)
+    for pat, label in _SEQ_LIAB_PATTERNS:
+        for m in re.finditer(pat, seq):
+            liab.append(f"{label} {m.group()}@{m.start()+1}")
     free_cys = seq.count("C")
     if free_cys:
         liab.append(f"자유 시스테인 {free_cys}개(이황화 스크램블 위험)")

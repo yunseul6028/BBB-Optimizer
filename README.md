@@ -231,7 +231,7 @@ python scripts/directional_pairs.py  # M6 방향성 쌍 검증 — 외부 대조
 | 수용체·선택성·개발성(응집·용해도) | Biopython + 규칙 엔진 | BLOSUM62 정렬 · 서열 규칙 · AGGRESCAN a3v (로컬) |
 | 브레인(추론) | **Google Gemini**(기본) | 자율 최적화 에이전트 (Claude는 `with-claude` 브랜치) |
 
-**에이전트 도구**: `evaluate_candidates`(7축 배치 — **라이브러리 조합 전용**) · `design_candidate`(가설 주도 잔기 편집 — 가설·예측·반성, **라이브러리 밖 전담**) ·
+**에이전트 도구**: `evaluate_candidates`(7축 배치 — **라이브러리 조합 전용**) · `design_candidate`(가설 주도 잔기 편집 — 가설·예측·반성, **라이브러리 밖 전담**. **셔틀·링커 둘 다 자유 설계**이고 링커 제약은 표준 20 아미노산·최대 17aa 뿐 — 근거는 독성 게이트의 길이 희석. 응답에 **접합부 liability 검사**를 결정론적으로 붙인다) ·
 `optimize_developability`(셔틀 개발성 다목적 Pareto 최적화 — 기능 보존) · `finish`(자기 종료).
 구조(ESMFold)는 **도구에서 제거**하고 최종 후보 1건의 참고 근거로만 남겼다 — 자기 축(셔틀 노출도)에서조차
 기여가 없다는 애블레이션 결과(→ [docs/experiments.md](docs/experiments.md) §11)를 따랐다.
