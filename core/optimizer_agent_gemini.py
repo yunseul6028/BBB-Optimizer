@@ -143,8 +143,13 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
         "[설계 방법 — 가설 주도 루프 (중요)] design_candidate로 편집할 때마다 **무작위 변이가 아니라 "
         "근거 있는 가설**로 움직여라:\n"
         "  ① 관찰: 직전 평가에서 무엇이 문제인가(어느 축이 약한가 — off_target·BBB·preserv·안정성 등).\n"
-        "  ② 가설(hypothesis): 그 문제를 **어떤 편집으로 왜** 고칠 수 있는가 (예: 'R10의 양전하가 "
-        "off_target을 올리니 R10→Q로 바꾸면 선택성↑, rmt_sim은 보존').\n"
+        "  ② 가설(hypothesis): 그 문제를 **어떤 편집으로 왜** 고칠 수 있는가 (예: '응집 핫스팟이 "
+        "방향족 FFY 연속에서 오니 F3→D로 극성 잔기를 넣으면 핫스팟↓, rmt_sim은 보존').\n"
+        "  🔴 **off_target 을 낮추려고 양전하(K·R)를 지우는 편집은 금지다.** 그 축은 대응 널 심사에서 "
+        "*악화 검출은 신뢰할 수 있지만 개선 신호는 신뢰할 수 없다*고 판정됐다(무작위 편집의 46%가 "
+        "위험 감소 없이 off를 내리고, CPP의 전하만 지우면 TAT가 0.95→0.00으로 '안전'해진다). "
+        "게다가 Angiopep-2의 K10·K15는 문헌이 기능 필수라고 지목한 라이신이다(Angiopep-7=K10R/K15R은 "
+        "뇌 전달 ~9.5배 낮다). off는 **올리지 않는 것**이 목표이고, 내리는 것은 성과가 아니다.\n"
         "  ③ 예측(prediction): 그 편집이 **어느 축을 어떻게** 바꿀지 (방향·대략 수치).\n"
         "  ④ 오라클 채점(자동) → ⑤ **반성**: 예측이 맞았는지 **실제 점수와 대조**하라. 틀렸으면 어느 "
         "축에서 왜 빗나갔는지 말하고 **가설을 수정해 다음 설계**로 이어가라.\n"
@@ -417,7 +422,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
     def _optimize_developability(self, args, cargo=""):
         """셔틀의 개발성(liability·응집·불안정성)을 다목적 Pareto로 최적화 — 기능 보존.
         BBB가 아니라 '제조·안정성' 다듬기. 신뢰 오라클만 사용(규칙·AGGRESCAN·Guruprasad)."""
-        from .developability_opt import objectives, pareto_scrub
+        from .developability_opt import OFF_BAND, objectives, pareto_scrub
         sh = "".join(ch for ch in (args.get("shuttle", "") or "").upper() if ch.isalpha())
         if len(sh) < 5:
             return ("셔틀 서열이 너무 짧아 개발성 최적화 불가.",
@@ -437,8 +442,9 @@ class GeminiOptimizationAgent(OptimizationAgent):
 
         def _fmt(o):
             return (f"liability {o['liability']}·응집 {o['aggregation']}"
-                    f"·불안정 {o['instability']}·**off {o['off_target']}**")
-        rows = [f"- `{m['seq']}` — {_fmt(m['objectives'])} · rmt_sim {m['rmt_sim']} · "
+                    f"·불안정 {o['instability']}")
+        rows = [f"- `{m['seq']}` — {_fmt(m['objectives'])} · off {m['off_target']}"
+                f"(제약 {m['off_seed']}±{OFF_BAND}) · rmt_sim {m['rmt_sim']} · "
                 f"**근거 {m['tier']}**(부모 유사도 {m['tier_sim']:.2f}) · 편집 {m['n_edits']}"
                 for m in front[:6]]
         body = "\n".join(rows)

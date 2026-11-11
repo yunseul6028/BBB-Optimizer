@@ -124,7 +124,34 @@ def scrub_liabilities(shuttle: str, rounds: int = 25, pop: int = 24,
 # ---------------------------------------------------------------------------
 # 목표(모두 최소화·전부 신뢰 가능한 오라클): liability 개수(규칙=사실) · 응집(AGGRESCAN)
 # · 불안정성(Guruprasad). 서로 상충하므로 단일 최적해가 아니라 Pareto 전선을 찾는다.
-OBJECTIVE_NAMES = ("liability", "aggregation", "instability", "off_target")
+#: 🔴 off-target 은 **목적이 아니라 제약**이다(2026-11-11 대응 널 심사, §26).
+#: 축을 심사해 보니 *악화는 믿을 만하지만 개선은 못 믿는다*:
+#:   · 조성 보존 셔플(전하·GRAVY 정확히 불변, 결합만 파괴) → off 가 **올바르게 상승**
+#:     (Angiopep-2 0.09→0.214 · B6 0.37→0.853, 200/200) ⇒ **실제 악화는 검출한다**
+#:   · 같은 크기 무작위 치환 → k=3 에서 **46% 가 off 를 내린다**(바닥 셔틀 제외 414↑/355↓)
+#:     ⇒ **위험이 줄지 않았는데 점수가 내려가는 길이 널려 있다**
+#:   · 전하만 지운 CPP → TAT 0.95→**0.00** · R9 0.95→**0.00** ⇒ **해킹 1수로 뚫린다**
+#: 그래서 off 는 `objectives()` 에서 빼고 **양측 밴드 제약**으로 쓴다 — 시드 off 에서
+#: `OFF_BAND` 이상 **벗어나면**(올라가든 내려가든) 거부. 즉 축을 "검증된 셔틀의 프로파일에서
+#: 얼마나 벗어났나"의 **변화 검출기**로만 쓰고, 어느 방향으로도 **보상으로 쓰지 않는다.**
+#:
+#: ⚠️ **단측 상한(`off ≤ 시드`)은 실패했다** — 실측하니 오히려 전하 삭제를 **선택**했다
+#: (R11 삭제 54%: 제약을 만족하는 가장 쉬운 길이 전하 삭제이므로 생존자가 그쪽으로 쏠린다).
+#: 밴드 폭은 **측정으로 골랐다**(§26-5, Angiopep-2 · 시드 off 0.09 · 5시드):
+#:
+#:   | 제약 | 전선 | R11 삭제 | off 범위 | 최선 목적 |
+#:   |---|---|---|---|---|
+#:   | 없음(옛) | 55 | 15% | 0.05–**0.25** | (1, 0.077, 45.4) |
+#:   | 단측 `≤` | 26 | **54%** | 0.00–0.06 | (1, 0.077, 45.4) |
+#:   | **밴드 ±0.05** | 35 | **20%** | 0.05–0.12 | (1, 0.161, 38.9) |
+#:   | 밴드 ±0.02 | 30 | 0% | 0.10–0.11 | (1, 0.237, 63.0) |
+#:   | 밴드 ±0.00 | 11 | 0% | 0.09 | (2, 0.651, 57.1) |
+#:
+#: ±0.05 를 골랐다: M4 의 실패(off 0.09→0.25)를 막으면서 전하 삭제가 **압력 없는 기저선
+#: (15%)** 수준으로 돌아오고, 개발성 이득을 대부분 지킨다. 더 좁히면 해킹은 0% 가 되지만
+#: 응집·불안정성 대가가 급격히 커진다 — **판단이고, 상수 하나로 되돌릴 수 있다.**
+OFF_BAND = 0.05
+OBJECTIVE_NAMES = ("liability", "aggregation", "instability")
 
 
 def _instability(seq: str) -> float:
@@ -136,10 +163,9 @@ def _instability(seq: str) -> float:
 
 
 def objectives(seq: str) -> tuple:
-    """순위 위험 축과 **정렬된** 다목적 벡터 (모두 ↓ 좋음):
-    (liability 개수, 응집 핫스팟 a3v, 불안정성지수, off-target).
+    """다목적 벡터 (모두 ↓ 좋음): (liability 개수, 응집 핫스팟 a3v, 불안정성지수).
 
-    왜 off-target 이 들어오나 (2026-11-11 추가, `docs/experiments.md` §25)
+    off-target 은 왜 **여기 없고 제약인가** (§25 → §26)
     -----------------------------------------------------------------
     옛 벡터는 3축(liability·응집·불안정성)이었고 **off-target 이 빠져 있었다**. 그런데
     순위(`optimizer_agent.risk_axes`)는 **4축**이다. 이 어긋남에 측정된 대가가 있었다 —
@@ -147,10 +173,15 @@ def objectives(seq: str) -> tuple:
     그래서 "전선 멤버를 지배하는 설계체 0개"가 됐다. 옵티마이저가 **못 보는 축으로
     값을 치르고 있었던 것**이다. 원칙: **탐색의 목적함수는 심사의 축과 같아야 한다.**
 
-    off 는 `assess_selectivity(셔틀)` 로 **셔틀만** 보고 계산한다 — `_evaluate` 와 같은
-    호출이라 순위 축과 **정의가 일치**한다(그래서 링커에 불변이다: T7 13/13 모두 0.140).
-    전하·GRAVY·BLOSUM 의 로컬 결정론 계산이라 서브프로세스가 **0회**다.
-    ⚠️ BBB 는 넣지 않는다 — 순위에서 뺀 축이고(M6·M8), 후보마다 deepB3P 서브프로세스가 돈다.
+    1차 처방은 off 를 **목적에 넣는 것**이었고, 그러자 옵티마이저가 off 식의 양전하 항을
+    타고 **문헌이 기능이라 말한 라이신(K10·K15)을 지우는 법을 배웠다**(§25). 보존 위치를
+    동결해 막으니 **R11(문헌 미기재)로 옮겨 갔다.** 그래서 축 자체를 대응 널로 심사했고
+    (§26), **악화 검출은 신뢰할 수 있지만 개선 신호는 신뢰할 수 없다**는 결론이 나왔다
+    (셔플 널 통과 · 무작위 편집 46% 가 off 를 내림 · 전하 제거 1수로 TAT 0.95→0.00).
+    따라서 off 는 **양측 밴드 제약**으로만 쓴다(`OFF_BAND`) — 시드에서 벗어나면 어느
+    방향이든 거부. 이게 M4 의 실패(설계체 off 0.09→0.20~0.25, 5/5)를 막으면서 해킹
+    보상도 없앤다. 단측 상한은 **오히려 전하 삭제를 선택**해서 실패했다(§26-5).
+    ⚠️ BBB 는 목적도 제약도 아니다 — 순위에서 뺀 축이고(M6·M8), 서브프로세스가 돈다.
 
     ⚠️ 불안정성은 **연속값**을 유지한다(순위는 임계 40 이진). 의도된 불일치다 —
     **탐색에는 기울기가 필요하고**(40 아래로 내려가는 길을 찾아야 한다), 이진화는
@@ -159,11 +190,14 @@ def objectives(seq: str) -> tuple:
     """
     dev = assess_developability(seq)
     agg = round(dev.agg_hotspot_a3v, 3)
-    return (dev.n_liabilities, agg, _instability(seq), _off_target(seq))
+    return (dev.n_liabilities, agg, _instability(seq))
 
 
-def _off_target(seq: str) -> float:
-    """셔틀의 off-target 위험 — `_evaluate` 와 **같은 호출**(셔틀만 본다)."""
+def off_target(seq: str) -> float:
+    """셔틀의 off-target 위험 — `_evaluate` 와 **같은 호출**(셔틀만 본다 → 링커 불변).
+
+    전하·GRAVY·BLOSUM 의 로컬 결정론 계산이라 서브프로세스가 **0회**다.
+    """
     try:
         from .selectivity import assess_selectivity
         return round(float(assess_selectivity(seq).off_target_risk), 3)
@@ -182,19 +216,26 @@ def pareto_scrub(shuttle: str, rounds: int = 40, pop: int = 30,
                  rmt_floor: float = 0.85, seed: int = 0, max_archive: int = 40):
     """다목적 개발성 최적화 — 기능(rmt_sim≥floor) 보존하며 Pareto 전선을 반환.
 
-    반환: [{seq, objectives, rmt_sim, n_edits}] — 비지배(non-dominated) 후보 집합.
+    반환: [{seq, objectives, off_target, off_seed, rmt_sim, n_edits}] — 비지배 후보 집합.
+    제약 셋: `rmt_sim ≥ rmt_floor` · 문헌 보존 위치 동결 · **|off − 시드 off| ≤ OFF_BAND**.
     상충하는 목표(liability↓가 응집↑을 부를 수 있음)를 동시에 다루므로 단일 '정답'이
     아니라 **트레이드오프 전선**을 제시한다.
     """
     rng = random.Random(seed)
     frozen = _frozen_idx(shuttle)
     sim0 = shuttle_similarity(shuttle).score
+    # 🔴 off-target 은 **양측 밴드 제약**이다(§26) — 시드에서 ±OFF_BAND 를 벗어나면 거부.
+    #    목적에 넣으면 축의 양전하 항이 해킹 보상이 되고(§25: K10/K15 → 막으면 R11),
+    #    단측 상한으로 두면 제약 만족이 곧 전하 삭제라서 **오히려 더 쏠린다**(§26-5).
+    off0 = off_target(shuttle)
     # (seq, objvec, rmt_sim)
     archive = [(shuttle, objectives(shuttle), sim0)]
 
     def _try_insert(s):
         sim = shuttle_similarity(s).score
         if sim < rmt_floor:
+            return
+        if abs(off_target(s) - off0) > OFF_BAND + 1e-9:   # off 밴드 제약 — §26
             return
         obj = objectives(s)
         if any(_dominates(a[1], obj) for a in archive):
@@ -215,6 +256,8 @@ def pareto_scrub(shuttle: str, rounds: int = 40, pop: int = 30,
 
     front = sorted(archive, key=lambda a: a[1])
     return [{"seq": s, "objectives": dict(zip(OBJECTIVE_NAMES, obj)),
+             # 목적이 아니라 **충족된 제약**으로 보고한다(시드 ± OFF_BAND).
+             "off_target": off_target(s), "off_seed": off0,
              "rmt_sim": round(sim, 2),
              "n_edits": sum(1 for a, b in zip(shuttle, s) if a != b)}
             for s, obj, sim in front]
