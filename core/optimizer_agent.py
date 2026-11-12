@@ -129,7 +129,14 @@ def is_unsupported(row: dict) -> bool:
 
 
 def is_candidate(row: dict) -> bool:
-    """최종 후보가 될 수 있는가 — 비독성 + 비교군(CPP) 아님 + 문헌 근거 있음.
+    """최종 후보가 될 수 있는가 — 독성 게이트 통과 + 비교군(CPP) 아님 + 문헌 근거 있음.
+
+    🔴 `not row["toxic"]` 은 **"비독성"이 아니다**(§47). 그 플래그는
+    `ToxinPred3 ML Score > 0.38` 하나이고, 외부 라벨 16개 프로브에서 특이도는 **6/10**
+    이었다(위양성: 옥시토신 0.620 · 바소프레신 0.645 · 서브스탠스 P 1.000 ·
+    브라디키닌 1.000 — 임상 약과 사람의 내인성 신경펩타이드, 즉 우리 후보가 속한 클래스).
+    독소 조각 검출도 같은 길이 무작위 대조 초과 **+9.2pp(Fisher 단측 p = 0.243)** 로
+    유의하지 않았다. 그러므로 이 항이 재는 것은 독성 판정이 아니라 **조성 필터** 통과다.
 
     등급 **D(근거 없음)·미등재**는 CPP 와 **같은 취급**이다: 라이브러리·전선에는 남겨
     비교 근거로 쓰되 최종 후보로는 올리지 않는다. Tet1(등급 D)이 M2·M4 에서 우리 효능 축의
@@ -257,6 +264,12 @@ class OptimizationAgent:
         thr = self.settings.toxicity_threshold
         rows, lines = [], ["label | 근거 | liab | index | off | agg | mech | BBB(참고) | penalty | status | assembly"]
         for c, p, t in zip(clean, bbb, tox):
+            # 🔴 `>` 와 `>=` 가 갈리는 자리다(§47-4). ToxinPred3 ML Score 는 **0.005 간격으로
+            # 양자화**돼 있고 임계 0.38 은 **하필 그 눈금 위**에 있다 → 점수가 정확히 0.380 인
+            # 서열은 `>` 에서 통과하고 `>=` 에서 탈락한다. 실측 영향: 라이브러리 전수 312셀 중
+            # **3셀**, 외부 독소 1종(Bombolitin-I, 0.380 → 현재 "비독성"으로 통과).
+            # `off_target` 의 `+1e-9`(§42-4b)와 **같은 종류의 경계 정착**이다.
+            # 연산자 결정은 동결 해제 후 — 바꾸면 점수 수치가 변해 M1~M10 재측정이 필요하다.
             toxic = t.risk > thr
             bind = shuttle_similarity(c["shuttle"])
             stab = assess_stability(c["sequence"])
@@ -386,7 +399,11 @@ class OptimizationAgent:
             rows.extend(chunk)
 
         nontoxic = [r for r in rows if not r.get("toxic")]
-        # 하드 게이트는 독성뿐 → 게이트 통과 = 비독성 전체.
+        # 하드 게이트는 독성 게이트 하나뿐 → 게이트 통과 = 그 게이트를 통과한 전체.
+        # 🔴 "비독성 전체"로 읽으면 안 된다(§47) — 게이트는 `ML Score > 0.38` 이라는
+        # **조성 필터**이고, 외부 라벨 특이도 6/10 · 독소 조각 검출 8/24(무작위 29/120,
+        # 초과 +9.2pp, p = 0.243)다. 아래 `nontoxic` 이라는 이름도 같은 이유로 과하다
+        # (이름 변경은 동결 해제 후 — `docs/experiments.md` §37-4 대기열).
         gate_all = list(nontoxic)
         # 후보군 = 비교군(CPP) 아님 + 문헌 근거 있음(등급 A·B·C). 전선은 이 안에서만 만든다 —
         # 비교군·근거 없음이 전선에 끼면 "지배당했다"는 잘못된 기각 사유를 만든다.
@@ -424,7 +441,8 @@ class OptimizationAgent:
         gate_rmt = sorted([r for r in gate if is_rmt(r)], key=rank_key)
 
         # 근거 그룹별 수 — 심사자가 "더 나은 근거의 대안이 있나"를 바로 볼 수 있게.
-        # ⚠️ 분모는 **비교군(CPP)을 뺀 비독성 전체**다. `gate` 로 세면 `gate` 가 이미 등급 D 를
+        # ⚠️ 분모는 **비교군(CPP)을 뺀 게이트 통과 전체**다(= 독성 게이트 통과.
+        # "비독성"이 아니다 — §47). `gate` 로 세면 `gate` 가 이미 등급 D 를
         # 제외하므로 '근거 없음'이 **항상 0** 으로 표시된다(= 실제로 있는 걸 없다고 보고하는 셈).
         _pool = [r for r in gate_all if not is_comparison_only(r)]
         by_group = {g: len([r for r in _pool if group_of(r.get("tier")) == g])
