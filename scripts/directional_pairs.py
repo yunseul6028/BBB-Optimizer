@@ -102,7 +102,9 @@ def binom_p(k: int, n: int) -> float:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--cargo", default=DEFAULT_CARGO)
-    ap.add_argument("--n", type=int, default=20, help="셔틀당 스크램블 개수")
+    # 기본값 50 = **문서에 적힌 수치를 재현하는 값**(§14-1·EVALUATION M6). 옛 기본값 20 은
+    # 발표 수치를 재현하지 않아 "재현 스크립트가 재현하지 않는" 상태였다.
+    ap.add_argument("--n", type=int, default=50, help="셔틀당 스크램블 개수")
     args = ap.parse_args()
 
     st = get_settings()
