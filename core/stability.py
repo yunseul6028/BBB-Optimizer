@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .developability import require_protein_analysis  # 의존성 실패 메시지 단일 출처
+
 _STD = set("ACDEFGHIKLMNPQRSTVWY")  # ProtParam은 표준 20종 아미노산만 처리
 
 
@@ -35,17 +37,28 @@ class StabilityResult:
 def assess_stability(sequence: str) -> StabilityResult:
     """융합체 전체 서열의 안정성 지표를 계산한다."""
     seq = "".join(ch for ch in (sequence or "").upper() if ch in _STD)
+    # 정당하게 계산 불가한 입력(의존성 문제가 아님): ProtParam 의 불안정성 지수는
+    # 이합체(dipeptide) 표 기반이라 5aa 미만에서는 의미가 없다 → 예외가 아니라
+    # `error` 를 채운 정의된 결과를 돌려준다. 호출부(`core/optimizer_agent.py` 의
+    # `.error` 검사)가 이 축을 제외할 수 있다.
     if len(seq) < 5:
         return StabilityResult(error="서열이 너무 짧아 안정성 계산 불가")
-    try:
-        from Bio.SeqUtils.ProtParam import ProteinAnalysis
 
+    # ⚠️ 의존성 확인은 계산 **전에** 따로 한다. 예전에는 import 실패까지 아래
+    #    except 로 삼켜서 instability_index 가 기본값 0.0 으로 떨어졌고, 이진 축
+    #    `stable = ii < 40` 이 그 기본값을 그대로 "불안정"으로 읽었다 — 경고 없이.
+    #    의존성 부재는 배포 오류이므로 대체값 대신 중단한다.
+    ProteinAnalysis = require_protein_analysis("안정성(불안정성 지수·GRAVY·방향족성)")
+    try:
         pa = ProteinAnalysis(seq)
         ii = float(pa.instability_index())
         gravy = float(pa.gravy())
         arom = float(pa.aromaticity())
         perc = pa.amino_acids_percent  # {AA: 0~1 fraction}
     except Exception as exc:  # noqa: BLE001
+        # 여기까지 왔으면 Biopython 은 정상이다 → 이 실패는 **입력** 이 ProtParam 으로
+        # 계산 불가인 경우(걸러진 표준 20종·len>=5 에서는 거의 안 생긴다). 대체값이
+        # 아니라 `error` 가 채워진 결과를 돌려준다 — 0.0 은 측정값이 아니라 미계산 표시다.
         return StabilityResult(error=f"안정성 계산 오류: {exc}")
 
     # 지방족 지수 (Ikai 1980): mole% 기준 상대 부피

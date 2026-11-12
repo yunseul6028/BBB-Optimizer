@@ -37,6 +37,44 @@ from dataclasses import dataclass, field
 
 _STD = set("ACDEFGHIKLMNPQRSTVWY")
 
+
+# ── 의존성 실패를 큰 소리로 만드는 공용 헬퍼 (단일 출처) ────────────────────
+class MissingDependencyError(RuntimeError):
+    """순위 축 계산에 필요한 과학 의존성이 없거나 깨져 있음 = **배포 오류**.
+
+    왜 대체값이 아니라 예외인가 (실측된 피해):
+      - `core/selectivity.py` 에서 Biopython 이 없으면 GRAVY 가 0.0 으로 떨어졌고,
+        T7 의 off-target 위험이 **0.140 → 0.340** 으로 경고 없이 움직였다.
+      - `core/stability.py` 에서는 불안정성 지수가 기본값으로 떨어져 이진 축이
+        그대로 "불안정"으로 읽었다.
+    둘 다 *결과가 틀렸는데 아무도 볼 수 없는* 형태였다. 조용히 순위를 바꾸는 것보다
+    즉시 멈추는 것이 맞다.
+    """
+
+
+def require_protein_analysis(axis: str):
+    """Biopython ProtParam `ProteinAnalysis` 를 **요구**한다. 없으면 즉시 실패.
+
+    `axis` 는 이 의존성이 없을 때 못 믿게 되는 순위 축 이름이다(메시지에 박힌다).
+
+    ⚠️ 두 실패는 성질이 다르므로 다르게 다룬다:
+      - **의존성 부재/손상** = 배포 오류 → 여기서 MissingDependencyError 로 중단.
+        대체값을 돌려주면 측정값처럼 보이는 가짜가 순위 축에 흘러든다.
+      - **계산 불가한 입력**(창보다 짧은 서열 등) = 입력 문제 → 여기가 아니라
+        호출부에서 명시적인 `error` 필드로 처리한다(문서화된 정의된 결과).
+    """
+    try:
+        from Bio.SeqUtils.ProtParam import ProteinAnalysis
+    except Exception as exc:  # ImportError 뿐 아니라 설치 손상도 여기로 온다
+        raise MissingDependencyError(
+            f"Biopython 이 없거나 불러올 수 없어 '{axis}' 축을 계산할 수 없습니다"
+            f" (원인: {type(exc).__name__}: {exc}). "
+            "대체값으로 계산하면 경고 없이 순위가 바뀌므로 중단합니다. "
+            "설치: /usr/bin/python3 -m pip install biopython"
+        ) from exc
+    return ProteinAnalysis
+
+
 # AGGRESCAN a3v — 아미노산별 내재 응집 성향(높을수록 응집↑). 출판 척도(자유 파라미터 아님).
 _AGGRESCAN_A3V = {
     "I": 1.822, "F": 1.754, "V": 1.594, "L": 1.380, "Y": 1.159, "W": 1.037,
@@ -140,6 +178,9 @@ def junction_liabilities(cargo: str, linker: str, shuttle: str) -> list[dict]:
 
 def assess_developability(sequence: str) -> DevelopabilityResult:
     seq = "".join(ch for ch in (sequence or "").upper() if ch in _STD)
+    # 정당하게 계산 불가한 입력: 4aa 미만은 모티프·전하밀도·응집창이 모두 무의미하다.
+    # 의존성 부재와 달리 이것은 **입력 문제**이므로 예외가 아니라 `error` 가 채워진
+    # 정의된 결과를 돌려준다(호출부가 축에서 제외할 수 있도록). 기본값은 측정값이 아니다.
     if len(seq) < 4:
         return DevelopabilityResult(error="서열이 너무 짧아 개발성 계산 불가")
 
@@ -158,12 +199,15 @@ def assess_developability(sequence: str) -> DevelopabilityResult:
     # 2) 전하
     net = _net_charge_ph74(seq)
     density = round(net / len(seq), 2)
-    try:
-        from Bio.SeqUtils.ProtParam import ProteinAnalysis
-        gravy = round(float(ProteinAnalysis(seq).gravy()), 2)
-        pI = round(float(ProteinAnalysis(seq).isoelectric_point()), 1)
-    except Exception:  # noqa: BLE001
-        gravy, pI = 0.0, 0.0
+    # ⚠️ 예전에는 실패 시 `gravy, pI = 0.0, 0.0` 으로 조용히 떨어졌다. gravy=0.0 은
+    #    용해도 점수(sol_score)와 off-target 축을 동시에 흔드는 **가짜 측정값**이었다.
+    #    의존성 부재는 배포 오류이므로 여기서 멈춘다.
+    ProteinAnalysis = require_protein_analysis("개발성(GRAVY·pI·용해도)")
+    # 아래 계산은 감싸지 않는다 — 여기까지 왔으면 Biopython 은 정상이고 seq 는 이미
+    # 표준 20종으로 걸러진 len>=4 서열이다. 그래도 실패하면 Biopython API 변경 등
+    # **진짜 버그**이므로 예외가 그대로 올라가야 한다(삼키면 또 조용한 퇴화가 된다).
+    gravy = round(float(ProteinAnalysis(seq).gravy()), 2)
+    pI = round(float(ProteinAnalysis(seq).isoelectric_point()), 1)
     if density >= 0.30:
         liab.append(f"과도한 양전하(밀도 {density}) — 비특이 결합·독성·빠른 청소 위험")
 

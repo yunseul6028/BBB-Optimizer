@@ -1,6 +1,20 @@
 streamlit>=1.31
 
+# --- 과학 계산 의존성 (필수) ---
+# 없으면 순위 축이 조용히 퇴화하지 않고 **즉시 실패**한다
+# (core/developability.py 의 require_protein_analysis 참고).
+#   · 불안정성 지수·GRAVY·방향족성·pI → core/stability.py, core/developability.py
+#   · off-target/선택성 GRAVY         → core/selectivity.py
+#   · 레퍼런스 정렬(BLOSUM62)·SASA     → core/binding.py, core/structure.py
+biopython>=1.85
+
+# --- 자율 에이전트 (기본 엔진) ---
+# 이게 없으면 Gemini 에이전트가 **조용히 비활성**된다 → 반드시 설치 대상에 둔다.
+google-genai>=1.47
+
+# --- 구조 예측 보조 축 (ESMFold 공개 API 호출) ---
+requests>=2.32
+
 # --- 실제 API 연동 시 주석 해제 ---
-# requests>=2.31        # Deep-B3 예측 서버 호출용
-# python-dotenv>=1.0    # .env 자동 로딩
-# anthropic>=0.40       # LLM 변이 전략용
+# python-dotenv>=1.0    # .env 자동 로딩 (현재는 core/config.py 가 자체 파서로 처리)
+# anthropic>=0.40       # LLM 변이 전략용(Claude 보존 경로)

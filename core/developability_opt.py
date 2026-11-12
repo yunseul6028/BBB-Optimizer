@@ -155,11 +155,17 @@ OBJECTIVE_NAMES = ("liability", "aggregation", "instability")
 
 
 def _instability(seq: str) -> float:
-    try:
-        from Bio.SeqUtils.ProtParam import ProteinAnalysis
-        return round(float(ProteinAnalysis(seq).instability_index()), 1)
-    except Exception:  # noqa: BLE001
-        return 0.0
+    """불안정성 지수 — 의존성이 없으면 **큰 소리로 실패**한다.
+
+    🔴 옛 코드는 `except Exception: return 0.0` 이었다. 0.0 < `II_STABLE`(40) 이므로
+    Biopython 이 없으면 **모든 후보가 '안정'으로 보였다** — `core/stability.py` 의 실패
+    (결측 → '불안정')와 **반대 방향**이라 두 경로가 서로를 가려줬다. 조용한 퇴화가
+    순위를 바꾸는 전형이다. 측정이 아닌 값을 측정처럼 돌려주지 않는다.
+    """
+    from .developability import require_protein_analysis
+    require_protein_analysis("개발성 최적화(불안정성 지수)")   # 먼저 — 메시지가 축을 지목한다
+    from Bio.SeqUtils.ProtParam import ProteinAnalysis
+    return round(float(ProteinAnalysis(seq).instability_index()), 1)
 
 
 def objectives(seq: str) -> tuple:

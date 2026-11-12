@@ -11,6 +11,7 @@ ToxinPred3 Model 1(-m 1)은 AAC+DPC 조성 기반 Extra-Tree로 외부도구(BLA
 from __future__ import annotations
 
 import csv
+import fcntl
 import subprocess
 import tempfile
 from abc import ABC, abstractmethod
@@ -97,11 +98,26 @@ class ToxinPred3LocalPredictor(ToxicityPredictor):
                 for i, seq in enumerate(write_seqs):
                     f.write(f">{i}\n{seq.upper()}\n")
 
-            proc = subprocess.run(
-                [self.python, self.script, "-i", str(fasta), "-o", str(out),
-                 "-m", str(self.model_arg), "-d", "2"],
-                cwd=self.repo, capture_output=True, text=True, timeout=self.timeout,
-            )
+            # 🔴 **벤더 작업 디렉터리 배타 잠금** (2026-11-12)
+            # ToxinPred3 는 중간 산물(`seq.aac`·`seq.dpc`)을 **cwd 에 고정된 이름으로**
+            # 쓴다. cwd 가 공유 벤더 디렉터리이므로 **동시 호출이 서로의 중간 파일을
+            # 덮어쓴다.** 실측 피해: 같은 입력에 `reachable_front(refresh=True)` 를 세 번
+            # 돌렸을 때 후보군이 **89 / 91 / 99** 로 갈렸다(전선은 같았다). 즉 크래시로
+            # 끝나지 않고 **점수가 조용히 오염된다** — 측정 인프라가 측정을 바꾼 사례다.
+            # 처방: 파일 잠금으로 **직렬화**한다. 동시 실행이 아니면 동작은 완전히 동일하고,
+            # 동시 실행이면 느려지는 대신 정확해진다(느린 쪽이 맞는 쪽이다).
+            lock_path = Path(self.repo) / ".toxinpred3.lock"
+            with open(lock_path, "w") as lock:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                try:
+                    proc = subprocess.run(
+                        [self.python, self.script, "-i", str(fasta), "-o", str(out),
+                         "-m", str(self.model_arg), "-d", "2"],
+                        cwd=self.repo, capture_output=True, text=True,
+                        timeout=self.timeout,
+                    )
+                finally:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
             if proc.returncode != 0 or not out.exists():
                 raise RuntimeError(
                     f"ToxinPred3 추론 실패 (rc={proc.returncode}).\n"

@@ -40,19 +40,23 @@ def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
 def assess_selectivity(shuttle: str) -> SelectivityResult:
     """셔틀의 off-target(비특이 흡수) 위험과 선택성을 평가한다."""
     seq = "".join(c for c in (shuttle or "").upper() if c in _STD)
+    # 정당하게 계산 불가한 입력(의존성 문제가 아님): 4aa 미만 셔틀은 전하밀도·GRAVY·
+    # 레퍼런스 정렬이 모두 무의미하다 → 예외가 아니라 `error` 를 채운 정의된 결과.
     if len(seq) < 4:
         return SelectivityResult(error="셔틀이 너무 짧아 선택성 계산 불가")
 
-    from .developability import _net_charge_ph74
+    from .developability import _net_charge_ph74, require_protein_analysis
     net = _net_charge_ph74(seq)
     dens = round(net / len(seq), 2)
     cationicity = _clamp(dens / 0.5) if dens > 0 else 0.0   # 밀도 +0.5 = 최대 위험
 
-    try:
-        from Bio.SeqUtils.ProtParam import ProteinAnalysis
-        gravy = round(float(ProteinAnalysis(seq).gravy()), 2)
-    except Exception:  # noqa: BLE001
-        gravy = 0.0
+    # ⚠️ 여기가 실측된 조용한 퇴화 지점이다: Biopython 이 없으면 gravy 가 0.0 으로
+    #    떨어져 친유성 항이 사라지고 T7 의 off-target 위험이 0.140 → 0.340 으로
+    #    **경고 없이** 움직였다. 의존성 부재는 배포 오류 → 즉시 중단.
+    ProteinAnalysis = require_protein_analysis("off-target/선택성(GRAVY)")
+    # 감싸지 않는 이유: seq 는 이미 표준 20종으로 걸러진 len>=4 서열이라 gravy() 는
+    # 실패할 수 없다. 그래도 실패하면 진짜 버그이므로 예외를 그대로 올린다.
+    gravy = round(float(ProteinAnalysis(seq).gravy()), 2)
     lipophilicity = _clamp(gravy / 0.8) if gravy > 0 else 0.0  # GRAVY +0.8 = 최대
 
     from .binding import REFERENCE_SHUTTLES, shuttle_similarity
