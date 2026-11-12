@@ -49,7 +49,13 @@ MAX_FAILS = 40
 # 원장 스키마/목적함수 버전. **목적함수가 바뀌면 반드시 올린다** — 옛 기록은 폐지된
 # 축(유효점수 = BBB − 0.25·off)으로 매긴 순위라서, 그대로 '바닥'으로 깔면 새 목적함수를
 # 오염시킨다(reachable 캐시 키를 올리는 것과 같은 이유). 버전이 다르면 **빈 원장**으로 시작한다.
-LEDGER_VERSION = 2   # v2: 문헌 근거 그룹 + 위험 축 Pareto (2026-11-10)
+LEDGER_VERSION = 3   # 🔴 §24(GRADE 간접성)가 등급표를 바꿨다 → 2 에서 올림.
+# `load()` 의 `_unsupported()` 는 **저장된 등급 글자**로 `group_rank` 를 계산하므로,
+# 등급표가 바뀌어도 저장이 "B" 면 그냥 통과한다 → 원장 16항목 중 **그룹 과대평가 4건**이
+# 그대로 살아 있었다(§33-2). 버전을 올리면 `load()` 가 빈 원장으로 시작해 치유된다.
+# ⚠️ 근본 처방은 등급을 `evidence.inherit()` 로 **재계산**하는 것이다 — 위험 축 숫자는
+#    16/16 재현되므로 썩는 것은 등급뿐이다 — `_unsupported()` 에서 그렇게 고쳤다.
+#    (v2 = 문헌 근거 그룹 + 위험 축 Pareto, 2026-11-10)
 
 
 def _path(cargo: str) -> Path:
@@ -117,9 +123,27 @@ def _unsupported(e: dict) -> bool:
     문헌 근거를 보유했나(등급 A·B·C). 미등재·등급 D 는 바닥이 될 수 없다.
 
     ⚠️ 옛 기록은 `tier` 가 없으므로 여기서 걸러진다 — 의도된 동작이다(LEDGER_VERSION 참고).
+
+    🔴 **저장된 등급 글자를 믿지 않는다** (§33-2). 옛 코드는 `e["tier"]` 로 `group_rank` 를
+       계산했다. 그래서 §24(GRADE 간접성)가 등급표를 바꾼 뒤에도 저장이 "B" 면 그냥
+       통과했고, 원장 16항목 중 **그룹 과대평가 4건**이 살아남았다. 그 결과가 §33-3 이다 —
+       `brief()` 가 **오늘의 최상위 그룹에 존재하지 않는 점**을 바닥으로 제시해서,
+       에이전트가 **실재하는 상위 전선 멤버를 제출하면 '바닥에 지배당한 것'으로 보였다**
+       (R8: 기준점은 에이전트가 실제로 선택할 수 있는 집합에서 나와야 한다).
+
+       위험 축 숫자는 재채점에서 **16/16 정확히 재현**된다 — 썩는 것은 등급뿐이다.
+       그래서 **서열에서 다시 상속받는다.** 재계산이 불가능하면(서열 없음 등) 저장값으로
+       물러나되, 그때는 **보수적으로** 판정한다.
     """
-    from .evidence import group_rank
-    return group_rank(e.get("tier")) > 1
+    from .evidence import group_rank, inherit
+    tier = e.get("tier")
+    seq = e.get("shuttle") or e.get("shuttle_seq") or ""
+    if seq:
+        try:
+            tier = inherit(seq)[0]
+        except Exception:  # noqa: BLE001
+            pass          # 재계산 실패 → 저장값으로 물러난다
+    return group_rank(tier) > 1
 
 
 def _is_cpp(e: dict) -> bool:
@@ -236,6 +260,41 @@ def floor_entry(cargo: str) -> dict | None:
     return d["wins"][0] if d["wins"] else None
 
 
+def _today_tier(e: dict) -> str | None:
+    """이 항목의 **오늘 등급**. 저장된 글자가 아니라 서열에서 다시 상속받는다 (§33-2).
+
+    `_unsupported()` 와 같은 이유다 — 등급표는 바뀌고(§24) 저장된 글자는 안 바뀐다.
+    """
+    seq = e.get("shuttle") or e.get("shuttle_seq") or ""
+    if seq:
+        try:
+            from .evidence import inherit
+            return inherit(seq)[0]
+        except Exception:  # noqa: BLE001
+            pass
+    return e.get("tier")
+
+
+def _today_rank(e: dict) -> tuple:
+    """오늘 기준 사전식 순위 키 — 근거 그룹 먼저, 그다음 위험 축 (§33-3).
+
+    🔴 이 함수가 있는 이유: `brief()` 가 `wins[0]` 을 **바닥**으로 제시하는데, 정렬이
+       **저장된 등급**으로 돼 있으면 과대평가된 항목이 1위로 올라와 **오늘의 최상위
+       그룹에 존재하지 않는 점**이 바닥이 된다. 그러면 에이전트가 **실재하는 상위 전선
+       멤버를 제출해도 '바닥에 지배당한 것'으로 보인다** — 기준점이 에이전트가 선택할
+       수 있는 집합 밖에 있는 것이고, 래칫 규칙 R8 위반이다.
+    """
+    from .evidence import group_rank
+    big = float("inf")
+    def _n(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return big
+    return (group_rank(_today_tier(e)), _n(e.get("dev_liab")),
+            _n(e.get("instability")), _n(e.get("sel_off")), _n(e.get("dev_agg_hot")))
+
+
 def brief(cargo: str, k_win: int = 6, k_fail: int = 6) -> str:
     """세션 시작 프롬프트에 넣을 요약. 원장이 비면 빈 문자열."""
     d = load(cargo)
@@ -246,17 +305,22 @@ def brief(cargo: str, k_win: int = 6, k_fail: int = 6) -> str:
            "비교군(CPP)은 선택 대상이 아니므로 **목록에서 제외**했다 — 바닥은 네가 실제로 "
            "선택할 수 있는 후보군에서만 나온다."]
     if d["wins"]:
+        # 🔴 **오늘 등급으로 재정렬한다** (§33-3). 저장된 등급 순서를 그대로 쓰면
+        #    과대평가 항목이 바닥이 되어 도달 불가능한 기준점이 만들어진다.
+        wins_today = sorted(d["wins"], key=_today_rank)
         out.append("\n확인된 상위 후보 (근거 등급 → liability·불안정성·off·응집 순):")
-        for e in d["wins"][:k_win]:
+        out.append("  ⚠️ 등급은 **오늘 기준으로 다시 계산**한 값이다 — 저장 당시 등급표가 "
+                   "달랐을 수 있다(§24).")
+        for e in wins_today[:k_win]:
             inh = ("" if (e.get("tier_sim") or 1.0) >= 1.0 or not e.get("tier_parent")
                    else f"←{e['tier_parent']}·{e['tier_sim']:.2f}")
             out.append(f"  - {e['linker'] or '직접융합'}+{e['shuttle']} → 근거 "
-                       f"**{e.get('tier')}**{inh} · liab {e.get('dev_liab')} · 불안정성 "
+                       f"**{_today_tier(e)}**{inh} · liab {e.get('dev_liab')} · 불안정성 "
                        f"{e.get('instability')} · off {e.get('sel_off')} · 응집 "
                        f"{e.get('dev_agg_hot')} (BBB 참고 {e.get('bbb_report')})")
-        t = d["wins"][0]
+        t = wins_today[0]
         out.append(f"\n⚠️ **바닥은 `{t['linker'] or '직접융합'}+{t['shuttle']}`"
-                   f"(근거 {t.get('tier')}·liab {t.get('dev_liab')}·off {t.get('sel_off')}) 다.** "
+                   f"(근거 {_today_tier(t)}·liab {t.get('dev_liab')}·off {t.get('sel_off')}) 다.** "
                    "이걸 다시 찾아 제출하는 것은 가치가 0이다 — 이미 아는 값이다. 네 할 일은 "
                    "**이 후보에게 지배당하지 않는 것**이고(근거 등급이 같거나 높고 위험 축에서 "
                    "하나라도 더 나아야 한다), 라이브러리 조합으로 더 못 넘기면 "

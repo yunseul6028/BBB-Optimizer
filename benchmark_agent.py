@@ -530,6 +530,14 @@ def _summarize(results, title):
 def main(argv=None):
     import argparse
 
+    # 🔴 **측정 전 전제조건 검사** (§32·§37). 참조 명부가 라이브러리 셔틀을 덮지 않으면
+    #    `rmt_similarity` 가 조용히 0.0 이 되고, off 가 과대평가되며 `rmt_floor` 제약이
+    #    시드 자신을 거부해 개발성 최적화가 **아무것도 하지 않는다** — 그런데 예외도
+    #    경고도 없어서, 측정은 멀쩡히 끝나고 숫자만 틀린다. 유료 실행 앞에서 막는다.
+    #    (이 검사를 "정의만 하고 부르지 않으면" `gate_rejections` 와 같은 꼴이 된다.)
+    from core.binding import assert_roster_covers_library
+    assert_roster_covers_library()
+
     p = argparse.ArgumentParser(description="M4/M5 에이전트 벤치마크 (LLM 필요)")
     p.add_argument("--sessions", type=int, default=1,
                    help="M4 콜드 스타트 세션 수 (분산 추정에 2~3 권장)")

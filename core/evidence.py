@@ -627,8 +627,50 @@ def inherit(seq: str) -> tuple[str | None, str | None, float]:
     if best_n is None:
         return None, None, 0.0
     if best_s >= INHERIT_SIM_MIN:
+        if not _pins_intact(s, best_n):
+            # 🔴 문헌이 기능 필수라 말한 자리가 깨졌다 → **상속 거부** (§31).
+            return None, best_n, round(best_s, 3)
         return SHUTTLE_EVIDENCE[best_n].tier, best_n, round(best_s, 3)
     return None, best_n, round(best_s, 3)
+
+
+def _pins_intact(seq: str, parent_name: str) -> bool:
+    """부모의 **문헌 고정 위치**가 이 서열에 그대로 남아 있나 (§31).
+
+    🔴 왜 유사도만으로는 안 되나 — 측정으로 닫힌 질문이다.
+    옛 `inherit()` 은 유사도 하나만 봤다. 그래서:
+
+      · **Angiopep-7**(`K10R/K15R`, 문헌상 뇌 전달 ~9.5배 낮은 **알려진 기능 상실체**)이
+        유사도 **0.9434** 로 원본과 **같은 등급 B** 를 받았다.
+      · K10·K15 를 파괴하는 변이 **399개를 전수 열거하니 399/399(100%)가 등급을 받았다**
+        (유사도 0.849~0.972 — 임계 0.70 근처에도 가지 않는다).
+      · **임계값으로는 고칠 수 없다.** 핀 파괴 변이체의 유사도 중위(0.887)가 정당한
+        개발성 변이체의 중위(0.858)**보다 높다** — 분포가 겹치는 게 아니라 **역전**이다.
+        Angiopep-7(0.943)을 막으려면 임계를 0.943 초과로 올려야 하고 그러면 정당 변이체
+        25/25 가 **전부** 탈락한다.
+
+    원인은 명확하다 — **K→R 은 BLOSUM62 +2 의 보존적 치환**이라 유사도가 거의 안 떨어진다.
+    `CONSERVED_POSITIONS` 독스트링이 이미 적어 둔 결론인데 **상속 경로에 반영되지 않았다.**
+    그래서 유사도를 손대는 대신 **위치를 직접 확인**한다.
+
+    ⚠️ **길이가 바뀌면 거부한다.** 길이가 다르면 위치 대응이 깨져 핀을 **검증할 수 없다**.
+       옛 동작은 `conserved_positions()` 가 `()` 를 돌려주는 바람에 가드가 사라졌고,
+       단일 삽입 400개 전수에서 **400/400 이 등급을 유지하면서 가드 0%** 였다 —
+       **삽입 1개로 우회**할 수 있었다. 최상위 근거 그룹에서 '검증 불가'는 '통과'가 아니다.
+
+    ⚠️ **실효 범위는 1/12 이다.** `CONSERVED_POSITIONS` 에 문헌 위치가 있는 셔틀은
+       **Angiopep-2 하나**뿐이다. 나머지 11종에 대해 이 검사는 **아무것도 걸러내지 못한다**.
+       구조는 고쳤지만 데이터가 없다 — 과대 주장 금지(§31-6).
+    ⚠️ 문헌이 시험한 것은 **이중 변이**(K10R/K15R)다. 한 자리만 바꾼 경우의 직접 근거는
+       없지만, 동결 결정은 보수적으로 **자리마다** 적용한다(섞어 따지지 않는다).
+    """
+    pins = CONSERVED_POSITIONS.get(parent_name) or ()
+    if not pins:
+        return True                      # 문헌 위치가 없는 셔틀 → 검사할 것이 없다
+    parent = _clean(SHUTTLES[parent_name]["seq"])
+    if len(seq) != len(parent):
+        return False                     # 위치 대응 불가 = 검증 불가 → 거부
+    return all(1 <= p <= len(seq) and seq[p - 1] == parent[p - 1] for p in pins)
 
 
 # ── 순위용 거친 3단계 ────────────────────────────────────────────────────────

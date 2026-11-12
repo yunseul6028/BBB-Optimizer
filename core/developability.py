@@ -99,8 +99,12 @@ _AGG_WINDOW = 5
 
 @dataclass
 class DevelopabilityResult:
-    liabilities: list = field(default_factory=list)  # 사람이 읽는 위험 신호
+    liabilities: list = field(default_factory=list)  # 사람이 읽는 위험 신호 — **전부**(아래 둘의 합)
+    #: 🔴 **최소화·순위 축은 이것** — 전하 주도 항목을 **뺀** 화학적 취약성 개수 (§28).
     n_liabilities: int = 0
+    #: 전하 주도 liability — **보고만 한다. 최소화하지 않는다**(`_CHARGE_LIAB_LABELS` 참조).
+    charge_liabilities: list = field(default_factory=list)
+    n_charge_liabilities: int = 0
     free_cys: int = 0
     net_charge: float = 0.0        # pH 7.4 순전하
     charge_density: float = 0.0    # 순전하 / 길이
@@ -136,6 +140,35 @@ _SEQ_LIAB_PATTERNS = (
     (r"N[^P][ST]",     "N-당화 sequon"),
     (r"(?:RR|KR|RK|KK)", "프로테아제 절단부위"),
 )
+
+#: 🔴 **전하 주도 liability 라벨** — `n_liabilities`(최소화·순위 축)에서 **제외**한다 (§28).
+#
+# 왜 빼나. 무작위 3치환이 liability 를 **개선하는 비율이 69.4%** 였다(§28-2) — off-target
+# (46.2%)보다 **더 값싸다**. 값싼 것만으로는 축을 뺄 이유가 못 되지만, **값싼 길이 어디로
+# 나는지**가 문제였다:
+#
+#   Angiopep-2  TFFYGGSRGKRNNFKTEEY  → liability 3개 중 하나가 `프로테아제 절단부위 KR@10`
+#                        ^^ = K10·R11              = **K10 · R11 그 자리**
+#
+# `(?:RR|KR|RK|KK)` 는 **양전하 잔기 쌍** 패턴이고 `과도한 양전하` 는 직접 전하 항이다.
+# 즉 liability 를 줄이는 가장 짧은 길이 **염기성 잔기 삭제**이고, 우리 대표 셔틀에서 그
+# 자리가 하필 **문헌이 기능 필수라 말한 K10** 과 **§26-5 가 추적한 R11** 이다.
+# off 축에 밴드를 걸어 막은 그 해킹(§25: K10/K15 12.1%→18.5% · §26-5: R11 삭제 20%)의
+# **더 직접적인 유인이 이 축 안에 있었다.** off 를 범인으로 보고 처방했는데 공범이 있었다.
+#
+# 두 묶음은 **'줄인다'의 의미가 다르다**:
+#   · 화학적 취약성(탈아마이드화·이성질화·당화 sequon·자유 Cys·산화) — 줄이면 화학적
+#     불안정이 사라진다. **기능 손실을 함의하지 않는다.** → 최소화 대상.
+#   · 전하 주도(프로테아제 절단부위·과도한 양전하) — 줄이는 유일한 길이 K/R 삭제다.
+#     **기능 손실과 구별되지 않는다.** → 보고만 하고 최소화하지 않는다. 이 축은 off 양측
+#     밴드(`OFF_BAND`)와 문헌 보존 위치 동결이 이미 지키고 있다.
+#
+# ⚠️ **버리는 것**: 프로테아제 절단부위는 **진짜** 개발성 문제다(체내에서 잘린다). 최소화
+#    축에서 빼면 절단부위 5개인 구성체가 0개인 것과 **순위에서 동점**이 된다. 그 정보는
+#    `charge_liabilities` 로 계속 보고하고, 혈청 안정성은 불안정성 지수 축이 일부 받는다.
+# ⚠️ `junction_liabilities` 는 `_SEQ_LIAB_PATTERNS` 를 **그대로** 쓴다 — 접합부 검출은
+#    "링커가 새 모티프를 만들었나"이고 최소화 축이 아니므로 이 분류와 무관하다.
+_CHARGE_LIAB_LABELS = frozenset({"프로테아제 절단부위"})
 
 
 def junction_liabilities(cargo: str, linker: str, shuttle: str) -> list[dict]:
@@ -184,11 +217,12 @@ def assess_developability(sequence: str) -> DevelopabilityResult:
     if len(seq) < 4:
         return DevelopabilityResult(error="서열이 너무 짧아 개발성 계산 불가")
 
-    liab = []
+    liab, charge_liab = [], []
     # 1) 모티프 liability — 패턴은 _SEQ_LIAB_PATTERNS 단일 출처(접합부 검출이 같은 것을 쓴다)
     for pat, label in _SEQ_LIAB_PATTERNS:
         for m in re.finditer(pat, seq):
-            liab.append(f"{label} {m.group()}@{m.start()+1}")
+            bucket = charge_liab if label in _CHARGE_LIAB_LABELS else liab
+            bucket.append(f"{label} {m.group()}@{m.start()+1}")
     free_cys = seq.count("C")
     if free_cys:
         liab.append(f"자유 시스테인 {free_cys}개(이황화 스크램블 위험)")
@@ -209,7 +243,7 @@ def assess_developability(sequence: str) -> DevelopabilityResult:
     gravy = round(float(ProteinAnalysis(seq).gravy()), 2)
     pI = round(float(ProteinAnalysis(seq).isoelectric_point()), 1)
     if density >= 0.30:
-        liab.append(f"과도한 양전하(밀도 {density}) — 비특이 결합·독성·빠른 청소 위험")
+        charge_liab.append(f"과도한 양전하(밀도 {density}) — 비특이 결합·독성·빠른 청소 위험")
 
     # 3) 응집 경향 — AGGRESCAN a3v
     #    · agg_score  = 전역 평균 (보고용. **순위에 쓰지 말 것** — 길이로 희석된다)
@@ -236,7 +270,9 @@ def assess_developability(sequence: str) -> DevelopabilityResult:
     sol_level = "높음" if sol_score >= 0.6 else "보통" if sol_score >= 0.35 else "낮음"
 
     r = DevelopabilityResult(
-        liabilities=liab, n_liabilities=len(liab), free_cys=free_cys,
+        liabilities=liab + charge_liab, n_liabilities=len(liab),
+        charge_liabilities=charge_liab, n_charge_liabilities=len(charge_liab),
+        free_cys=free_cys,
         net_charge=net, charge_density=density, pI=pI,
         agg_a3v=round(mean_a3v, 3), agg_score=agg,
         agg_hotspot_a3v=round(hot_raw, 3), agg_hotspot=hot,

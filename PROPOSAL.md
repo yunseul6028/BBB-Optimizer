@@ -24,8 +24,9 @@
 | `evaluate_candidates` | deepB3P · ToxinPred3 · ProtParam · BLOSUM62 · 개발성 엔진 | 후보 배치의 5지표 |
 | `design_candidate` | 위 엔진 재사용 | 라이브러리 밖 **잔기 수준 편집** 서열 채점 |
 | `analyze_structure` | ESMFold(공개 API) · Biopython | 셔틀 표면 노출도 · pLDDT |
-| `generate_novel_shuttles` | FBGAN(사전학습 생성기 + 잠재공간 진화) | 신규 셔틀 서열 |
 | `finish` | — | 수렴 시 최종 후보 제출(자기 종료) |
+
+⚠️ **생성(FBGAN)·진화 도구는 없다.** 초기 설계에는 있었으나 폐지됐다 — 생성 루프가 deepB3P 의 양이온 편향을 착취해 '무지성 양전하' 서열을 뽑았고, 그 편향을 상쇄하려 넣은 전하 가드레일까지 함께 폐지됐다(BBB 축을 순위에서 제거한 결정의 일부). `기획서.md` §2.6 과 `docs/experiments.md` 참조.
 
 ## 5. 지표 점수 산정 방식
 | 지표 | 산정 방식 | 해석 |
@@ -57,5 +58,5 @@
 
 ## 9. 기술 스택
 Python · Streamlit · Gemini/Claude(function calling) · Biopython · deepB3P(PyTorch) ·
-ToxinPred3(scikit-learn) · ESMFold API · FBGAN. **저분자 도구(RDKit 등) 미사용** — 펩타이드/단백질
+ToxinPred3(scikit-learn) · ESMFold API. **저분자 도구(RDKit 등) 미사용** — 펩타이드/단백질
 모달리티에 맞춰 서열·구조 기반 도구로 구성.

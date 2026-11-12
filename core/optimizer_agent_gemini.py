@@ -297,7 +297,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
                        f"링커는 자유 설계가 가능하지만 **표준 20 아미노산 · 최대 "
                        f"{LINKER_MAX_LEN}aa** 안에서만 가능하다. 링커로 노릴 수 있는 축은 "
                        f"**접합부 liability**(모티프를 만들지 않는 조성)와 **불안정성**이고, "
-                       f"off-target 과 응집 핫스팟은 링커에 거의 반응하지 않는다(실측).")
+                       f"off-target 과 응집 핫스팟은 **라이브러리 링커 어휘에서만** 거의 불변이고, 그것도 **내리는 방향으로만** 참이다(§34-5: 자유 생성에서 무작위 링커의 53~56%가 핫스팟을 **올린다**; 23,040 관측 중 내린 사례는 **0건**). 즉 링커로 응집을 **낮출 수는 없고 높일 수는 있다** — 이 축에서 할 일은 개선이 아니라 **악화 회피**다.")
                 return msg, AgentEvent("text", text=f"🚫 링커 `{lk}` 거부 — {_why}")
             text, rows = self._evaluate(cargo, {"constructs": [{
                 "label": args.get("label", "설계"), "linker": lk,
@@ -429,8 +429,16 @@ class GeminiOptimizationAgent(OptimizationAgent):
                     AgentEvent("text", text="🧪 개발성 최적화: 셔틀 서열 부족"))
         try:
             front = pareto_scrub(sh, rounds=25, pop=24, rmt_floor=0.85, seed=2022)
+        except ValueError as exc:
+            # 🔴 `pareto_scrub` 이 **의도적으로** 던지는 설명 있는 실패(§32·§33-4) —
+            #    시드 자신이 기능 보존 하한을 위반하는 경우(참조 명부 누락 또는
+            #    하한 미달 서열 워밍업). 옛 코드는 `ValueError` 라는 **타입 이름만**
+            #    돌려줘서, 조용한 무작동을 고쳐 놓고도 **이유가 다시 가려졌다.**
+            #    메시지를 그대로 통과시켜 에이전트가 원인을 읽고 대응하게 한다.
+            return (f"개발성 최적화 불가 — {exc}",
+                    AgentEvent("text", text=f"🧪 개발성 최적화 불가: 기능 보존 하한 위반 (셔틀 `{sh}`)"))
         except Exception as exc:  # noqa: BLE001
-            return (f"개발성 최적화 실패: {type(exc).__name__}",
+            return (f"개발성 최적화 실패: {type(exc).__name__}: {exc}",
                     AgentEvent("text", text="🧪 개발성 최적화 실패"))
         seed = objectives(sh)
         front, n_dropped, parent = self._filter_front_by_inheritance(sh, front)
