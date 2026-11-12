@@ -99,6 +99,22 @@ AGENT_COLD = [
      "dev_liab": 3, "instability": 19.5, "sel_off": 0.20, "dev_agg_hot": 0.52,
      "n_eval": 10, "note": ""},
 ]
+# 🔴 B 팔 2판 — §49-6 재측정 (2026-11-12). 위 11-11 세션들에서는
+#    `optimize_developability` 가 **호출될 때마다 IndexError 로 터지고 있었다**(§49-2).
+#    즉 1판의 B 팔은 "에이전트"가 아니라 **도구 하나가 죽은 에이전트**였다. 그래서
+#    이 애블레이션의 판정(A→B 12:0)은 **1판에만** 해당한다 — 2판으로 다시 물어야 한다.
+AGENT_COLD_1112 = [
+    {"session": "2판-1", "linker": "EAAAKEAAAK", "shuttle": "TFEYGGSRGKRNHFKTEEY",
+     "tier": "B", "dev_liab": 1, "instability": 33.9, "sel_off": 0.06,
+     "dev_agg_hot": 0.55, "n_eval": 11, "note": "§49-6"},
+    {"session": "2판-2", "linker": "EAAAK", "shuttle": "TFEYGGSRGKRNHFKTEEY",
+     "tier": "B", "dev_liab": 1, "instability": 37.3, "sel_off": 0.06,
+     "dev_agg_hot": 0.55, "n_eval": 17, "note": "§49-6"},
+    {"session": "2판-3", "linker": "EAAAK", "shuttle": "TFEYGGSRGKRNHFKTEEY",
+     "tier": "B", "dev_liab": 1, "instability": 37.3, "sel_off": 0.06,
+     "dev_agg_hot": 0.55, "n_eval": 16, "note": "§49-6"},
+]
+
 # 부모 전선 멤버 — §22-3 이 설계체와 직접 대조한 바로 그 멤버.
 AGENT_PARENT_FRONT = {"label": "A(EAAAK)3A+Angiopep-2", "tier": "A", "dev_liab": 3,
                       "instability": 38.9, "sel_off": 0.09, "dev_agg_hot": 0.75}
@@ -342,8 +358,8 @@ def main() -> None:
     for w in led_designed:
         print(f"      · {(w.get('linker') or '직접융합'):<12}+{w['shuttle']:<30} "
               f"[{w.get('tier')}←{w.get('tier_parent')}·{w.get('tier_sim')}] {_axrow(w)}")
-    print("\n    §22-2 콜드 3세션 최종 선택:")
-    for a in AGENT_COLD:
+    print("\n    §22-2 콜드 3세션(1판) + §49-6 재측정(2판) 최종 선택:")
+    for a in list(AGENT_COLD) + list(AGENT_COLD_1112):
         sh = a["shuttle"] or "(미기록)"
         lk = "직접융합" if a["linker"] == "" else (a["linker"] or "?")
         print(f"      · {a['session']:<7} {lk:<10}+{sh:<30} [{a['tier']}] {_axrow(a)} "
@@ -370,13 +386,20 @@ def main() -> None:
           f"**그룹은 둘 다 '{group_of(SHUTTLE_EVIDENCE['Angiopep-2'].tier)}'(0)** 이므로 "
           "질문 ①의 답은 바뀌지 않는다.")
 
-    # B 팔의 세 질문 — 기록값을 **같은 함수**에 넣어 판정한다.
-    b_rows = [a for a in AGENT_COLD]
-    b_nondom = sum(1 for a in b_rows if not any(dominates(f, a) for f in front))
-    b_dom = sum(1 for a in b_rows if any(dominates(a, f) for f in front))
-    b_top = sum(1 for a in b_rows if group_rank(a["tier"]) == 0)
-    b_outside = sum(1 for a in b_rows
-                    if a["shuttle"] is None or not in_library(a["linker"] or "", a["shuttle"]))
+    # B 팔의 세 질문 — 기록값을 **같은 함수**에 넣어 판정한다. **두 판을 따로** 센다.
+    def _bstats(rows):
+        return {
+            "nondom": sum(1 for a in rows if not any(dominates(f, a) for f in front)),
+            "dom": sum(1 for a in rows if any(dominates(a, f) for f in front)),
+            "dom_top": sum(1 for a in rows if any(dominates(a, f) for f in front_top)),
+            "top": sum(1 for a in rows if group_rank(a["tier"]) == 0),
+            "outside": sum(1 for a in rows if a["shuttle"] is None
+                           or not in_library(a["linker"] or "", a["shuttle"])),
+            "n": len(rows),
+        }
+
+    b1, b2 = _bstats(AGENT_COLD), _bstats(AGENT_COLD_1112)
+    b_nondom, b_dom, b_top, b_outside = b1["nondom"], b1["dom"], b1["top"], b1["outside"]
 
     # ── 7. 맞대결 ─────────────────────────────────────────────────────────
     print("\n" + "=" * 78)
@@ -385,23 +408,29 @@ def main() -> None:
     a_top = group_rank(final_a.get("tier")) == 0
     a_nondom_final = not any(dominates(f, final_a) for f in front)
     a_outside = not in_library(final_a.get("linker") or "", final_a.get("shuttle") or "")
-    print("\n| 질문 | A 팔 (GA · LLM 0회) | B 팔 (에이전트 3세션) |")
-    print("|---|---|---|")
+    print("\n| 질문 | A 팔 (GA · LLM 0회) | B 1판 (11-11, 도구 1개 사망) | "
+          "B 2판 (11-12, 수리 후) |")
+    print("|---|---|---|---|")
     print(f"| ① 최상위 근거 그룹인가 | {'예' if a_top else '아니오'} "
-          f"({final_a.get('tier')}·{group_of(final_a.get('tier'))}) | {b_top}/3 |")
+          f"({final_a.get('tier')}·{group_of(final_a.get('tier'))}) | {b1['top']}/3 | "
+          f"{b2['top']}/3 |")
     print(f"| ② 전선에 비지배인가 | {'예' if a_nondom_final else '아니오'} "
-          f"(비지배 집합 front {len(nondom)} · front_top {len(nondom_top)}) | {b_nondom}/3 |")
-    print(f"| ③ 라이브러리 밖인가 | {'예' if a_outside else '아니오'} | {b_outside}/3 |")
+          f"(비지배 집합 front {len(nondom)} · front_top {len(nondom_top)}) | "
+          f"{b1['nondom']}/3 | {b2['nondom']}/3 |")
+    print(f"| ③ 라이브러리 밖인가 | {'예' if a_outside else '아니오'} | "
+          f"{b1['outside']}/3 | {b2['outside']}/3 |")
     print(f"| ④ 전선 멤버를 **지배**하나 | **{len(domin)}개**(front) · "
           f"**{len(domin_top)}개**(front_top) · 그중 off 개선에 **의존하지 않는** "
-          f"견고한 지배 **{len(robust)}개** | **{b_dom}개** (0 — §22-3) |")
+          f"견고한 지배 **{len(robust)}개** | **{b1['dom']}개**(front) · "
+          f"{b1['dom_top']}(front_top) — §22-3 | **{b2['dom']}개**(front) · "
+          f"{b2['dom_top']}(front_top) — §49-7 |")
 
     print("\n위험 4축 — liab | 불안정성 | off | 응집  (전부 ↓ 좋음)")
     print("|  | 근거 | liab | 불안정성 | off | 응집 |")
     print("|---|---|---|---|---|---|")
     print(f"| 부모 전선 멤버 {AGENT_PARENT_FRONT['label']} | A/B | "
           f"{_axrow(AGENT_PARENT_FRONT)} |")
-    for a in AGENT_COLD:
+    for a in list(AGENT_COLD) + list(AGENT_COLD_1112):
         sh = (a["shuttle"] or "미기록")[:18]
         print(f"| B 팔 {a['session']} ({sh}) | {a['tier']} | {_axrow(a)} |")
     print(f"| **A 팔 최종**(rank_key) {final_a['label']} | {final_a.get('tier')} | "
@@ -446,7 +475,7 @@ def main() -> None:
     print("\n    🔴 **운동장이 같지 않다**: off 양측 밴드 제약(§26, OFF_BAND=0.05)은 "
           "바로 이 콜드 세션들의 off 악화를 보고 **나중에** 도입됐다. "
           "B 팔의 설계체를 현행 제약에 넣어 보면:")
-    for a in AGENT_COLD:
+    for a in list(AGENT_COLD) + list(AGENT_COLD_1112):
         if not a["shuttle"]:
             print(f"      · {a['session']:<7} (서열 미기록 — 판정 불가, off {a['sel_off']:.2f})")
             continue
@@ -467,22 +496,47 @@ def main() -> None:
     print("-" * 78)
     print("    ⚠️ B 팔 기록의 등급 글자는 A(현행 B)지만 `dominates` 는 **그룹**을 쓰고 "
           "둘 다 0 이라 비교가 성립한다.")
-    b_named = [a for a in AGENT_COLD if a["shuttle"]]
+    # 🔴 그런데 등급 글자보다 더 나쁜 불일치가 하나 있다.
+    print("    🔴 **1판은 `liab` 단위가 다르다.** §38-1 에서 순위 축 `n_liabilities` 에서 "
+          "전하 주도 항목이 빠졌고(Angiopep-2 는 3 → 2), 1판 기록의 `liab 3` 은 **옛 정의**다. "
+          "A 팔은 **현행 정의**로 방금 채점됐으므로 1판 맞대결은 **단위가 섞인 비교**다 — "
+          "숫자로 인용하지 말 것. 2판 기록은 현행 코드로 측정돼 단위가 같다(`docs/수치원장.md` Ⅲ-2).")
+    b_named = [a for a in list(AGENT_COLD) + list(AGENT_COLD_1112) if a["shuttle"]]
     for a in b_named:
         beats = [r for r in ok if dominates(r, a)]
         beats_rb = [r for r in beats if dominates(_no_off(r), _no_off(a))]
         loses = [r for r in ok if dominates(a, r)]
+        # 🔴 반대 방향도 같은 기준으로 깎는다. B 팔 2판의 off 0.06 은 시드 0.09 대비
+        #    **개선**이고, §26 은 off 개선 신호를 신뢰하지 않는다고 판정했다. 그러므로
+        #    off 축을 뺀 3축에서도 살아남는 쌍만 **인용 가능한 지배**다.
+        loses_rb = [r for r in loses if dominates(_no_off(a), _no_off(r))]
         print(f"\n    B 팔 {a['session']} ({'직접융합' if a['linker'] == '' else a['linker']}"
               f"+{a['shuttle']}) {_axrow(a)}")
         print(f"      · 이 설계체를 **지배하는 A 팔 설계체**: **{len(beats)}개** "
               f"(그중 off 개선에 의존하지 않는 견고한 지배 **{len(beats_rb)}개**)")
-        print(f"      · 반대로 이 설계체가 **지배하는 A 팔 설계체**: **{len(loses)}개**")
+        print(f"      · 반대로 이 설계체가 **지배하는 A 팔 설계체**: **{len(loses)}개** "
+              f"(그중 **견고한**(off 축 제외) 지배 **{len(loses_rb)}개**)")
         for r in sorted(beats_rb, key=rank_key)[:3]:
             print(f"          ▸ 예: {r['label']:<30} {_axrow(r)}")
     # 요약 — 어느 쪽이 상대를 지배하는가를 한 줄로.
-    tot_beats = sum(1 for a in b_named for r in ok if dominates(r, a))
-    tot_loses = sum(1 for a in b_named for r in ok if dominates(a, r))
-    print(f"\n    합계: A→B 지배 **{tot_beats}쌍** vs B→A 지배 **{tot_loses}쌍**")
+    def _tally(rows):
+        rows = [a for a in rows if a["shuttle"]]
+        return (sum(1 for a in rows for r in ok if dominates(r, a)),
+                sum(1 for a in rows for r in ok if dominates(a, r)),
+                sum(1 for a in rows for r in ok
+                    if dominates(r, a) and dominates(_no_off(r), _no_off(a))),
+                sum(1 for a in rows for r in ok
+                    if dominates(a, r) and dominates(_no_off(a), _no_off(r))))
+
+    t1, t2 = _tally(AGENT_COLD), _tally(AGENT_COLD_1112)
+    print(f"\n    합계 **1판**(11-11, 도구 1개 사망): A→B 지배 **{t1[0]}쌍**(견고 {t1[2]}) vs "
+          f"B→A **{t1[1]}쌍**(견고 {t1[3]})")
+    print(f"    합계 **2판**(11-12, 수리 후):        A→B 지배 **{t2[0]}쌍**(견고 {t2[2]}) vs "
+          f"B→A **{t2[1]}쌍**(견고 {t2[3]})")
+    print("    ⚠️ 2판은 3세션이 **같은 셔틀**이라 쌍 수가 3배로 세어진다 — 서로 다른 설계는 "
+          f"사실상 **1개**이고 그 설계 하나가 상대하는 A 팔 설계체는 **{t2[1] // 3}개**다.")
+    print("    🔴 1판의 판정(A→B 12:0)은 **도구 하나가 죽은 에이전트**와 겨룬 결과다"
+          "(§49-2). 인용할 때 어느 판인지 반드시 밝힌다.")
 
     # ── 8. 한계 재고지 ────────────────────────────────────────────────────
     print("\n" + "=" * 78)
@@ -500,6 +554,11 @@ def main() -> None:
     print("4. B 팔은 **기록**이고 A 팔은 **이번 실행**이다. 그 사이 §24(GRADE 간접성)로 "
           "등급 글자가 바뀌었다(A→B). 순위 그룹은 불변이라 ①은 안전하지만, "
           "**글자끼리 비교하지 말 것.**")
+    print("4b. 🔴 **1판 맞대결은 단위가 섞였다** — §38-1 의 liability 정의 변경(전하 항목 분리) "
+          "이후라서 1판의 `liab 3`(옛 정의)과 A 팔의 현행 `liab` 를 같은 축에 놓을 수 없다. "
+          "그래서 §30-2 의 **A→B 12:0 은 현행 코드에서 재현되지 않는다**(이 실행은 2:0). "
+          "원래의 12:0 은 **양 팔이 모두 옛 정의였을 때** 성립한 수다 — 폐기하지 말고 "
+          "**'옛 정의에서의 값'으로 병기**한다. 인용 가능한 맞대결은 **2판뿐**이다.")
     print("5. **운동장이 다르다**(7-b): off 양측 밴드 제약은 B 팔의 off 악화를 보고 "
           "**나중에** 추가됐다. B 팔 설계체 일부는 현행 제약에서 **생성 불가**다. "
           "두 팔은 엄밀히 말해 **같은 탐색 문제를 풀지 않았다.**")

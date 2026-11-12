@@ -71,14 +71,22 @@ def _cargo_error(cargo):
 
 st.caption(
     f"엔진 — deepB3P {_dot(settings.use_deepb3p_local)} · "
-    f"ToxinPred3 {_dot(settings.use_toxinpred3_local)} · ESMFold 연동(API) · "
+    f"ToxinPred3 {_dot(settings.use_toxinpred3_local)} · ESMFold 참고(최종 후보 1건) · "
     f"Gemini {_dot(settings.use_gemini_agent)}"
     f"{'' if settings.use_gemini_agent else ' · 키 필요'}"
 )
 with st.expander("동작 방식 · 지표 안내"):
     st.markdown(
-        "- **설계 에이전트**가 평가·잔기 편집·구조 도구로 후보를 만들고, **심사 에이전트**가 적대적으로 검증합니다.\n"
-        "- **BBB 점수**는 deepB3P 예측 확률(0–100)로 후보 비교용이며, 실제 투과율은 실험(Papp/logBB)이 필요합니다.\n"
+        "- **설계 에이전트**가 도구 4개(후보 평가 · 직접 설계 · 개발성 최적화 · 종료)를 스스로 골라 쓰고, "
+        "**심사 에이전트**가 독립 컨텍스트에서 적대적으로 검증합니다.\n"
+        "- **순위 기준은 문헌 근거 등급 → 위험 축(liability · 불안정성 · off-target · 응집) Pareto** 입니다.\n"
+        "- ⚠️ **BBB 점수는 순위에 쓰지 않습니다** — 셔틀 간·링커 간 순위로 쓸 근거가 없어(M6 · M8) "
+        "**보고치**로만 표시합니다. deepB3P 예측 확률(0–100)이고 실제 투과율은 실험(Papp/logBB)이 필요합니다.\n"
+        "- ⚠️ 하드 게이트는 **독성 게이트 하나**뿐이고, 그것이 재는 것은 ToxinPred3 ML Score 입니다 — "
+        "외부 라벨에서 특이도가 완전하지 않았으므로(임상·내인성 펩타이드 오탈락 관측) "
+        "**'게이트 통과 = 무독성'으로 읽지 마세요**.\n"
+        "- ESMFold 구조 노출도는 **에이전트 도구가 아닙니다**(애블레이션에서 기여 없음) — "
+        "최종 후보 1건에만 참고 근거로 붙습니다.\n"
         "- `융합체 = 화물 + 링커 + 셔틀`"
     )
 
@@ -111,8 +119,8 @@ with _hero:
     else:
         st.caption("데모 모드 — API 키 없이 예시 결과로 화면을 미리봅니다.")
     agent_run = st.button("자율 설계 에이전트 실행", type="primary", width='stretch')
-    st.caption("에이전트가 BBB·독성·구조·수용체·잔기 편집·개발성 최적화 도구를 스스로 오케스트레이션해 "
-               "최종 융합체를 설계합니다.")
+    st.caption("에이전트가 **후보 평가 · 직접 설계 · 개발성 최적화 · 종료** 네 도구를 스스로 골라 쓰며 "
+               "최종 융합체를 설계합니다. 멈추는 시점도 에이전트가 정합니다.")
     with st.expander(f"라이브러리 구성 (링커 {len(LINKER_LIBRARY)} · 셔틀 {len(SHUTTLES)})"):
         st.markdown("**링커**")
         st.dataframe(
@@ -388,9 +396,12 @@ def _render_agent_summary(events, cargo):
             st.caption(f"비교군 참고선(CPP, 최종 선택 대상 아님) — `{_bl.get('shuttle', '?')}` "
                        f"BBB {_bl.get('bbb', 0):.3f} · off-target {_bl.get('sel_off', 0):.2f}. "
                        "비특이 흡수 상한을 보여주는 대조군이며 순위에서 제외됩니다.")
-        st.caption("에이전트가 고른 최종 선택(심사 판정 포함)이 1위이고, 나머지는 **유효점수"
-                   "(BBB − off-target 감점) 순** 차순위입니다 — raw BBB 최고여도 비특이(off-target) "
-                   "CPP는 밀립니다(에이전트 결정축과 동일).")
+        # 🔴 옛 문구는 폐지된 가중합을 설명하고 있었다("유효점수 = BBB − off-target 감점").
+        #    그 축은 2026-11-10 에 폐지됐고(BBB 는 순위에서 제외), 지금 순서는 `rank_key` 다.
+        st.caption("에이전트가 고른 최종 선택(심사 판정 포함)이 1위이고, 나머지는 **문헌 근거 등급 → "
+                   "위험 축(liability · 불안정성 · off-target · 응집) Pareto** 순 차순위입니다 "
+                   "— 에이전트 결정축과 **같은 키**로 줄 세웁니다. BBB 가 높아도 순위에 영향이 없고, "
+                   "비교군 CPP·근거 등급 미달은 애초에 올라오지 않습니다.")
         cols = st.columns(len(podium))
         for i, cand in enumerate(podium):
             with cols[i]:
@@ -400,7 +411,9 @@ def _render_agent_summary(events, cargo):
                 with st.container(border=True, key=f"best-card-{i}"):
                     if is_pick and approved and tier == "APPROVE_WITH_LIMITS":
                         st.markdown("### 에이전트 최종 선택")
-                        st.caption("심사 조건부 승인 — 하드 게이트(독성·BBB 하한) 통과, 달성 가능 "
+                        # 🔴 옛 문구는 "하드 게이트(독성·BBB 하한)"였다 — **BBB 하한은 폐지됐다**
+                        #    (양이온성 필터였음이 측정으로 드러남). 하드 게이트는 독성 하나뿐이다.
+                        st.caption("심사 조건부 승인 — 하드 게이트(독성 게이트) 통과, 달성 가능 "
                                    "전선에서 비지배. 남은 한계는 심사 카드에 명시됩니다.")
                         _v = Verdict.ACCEPTED
                     elif is_pick and approved is False:
@@ -446,7 +459,25 @@ def _render_agent_summary(events, cargo):
                         f"**{cand.get('sel_level', '?')}** · {cand.get('sel_mech', '?')}")
                     st.caption(f"링커 `{cand['linker'] or '—'}` · 셔틀 `{cand['shuttle'] or '—'}`")
     else:
-        st.warning("독성 임계값을 통과한 후보가 없습니다. 스텝 수를 늘리거나 화물을 바꿔 다시 시도해 보세요.")
+        # 🔴 옛 문구는 원인을 하나로 단정했다("독성 임계값을 통과한 후보가 없습니다").
+        #    실제로는 **평가가 0건**일 때도(예: LLM 호출이 거부돼 도구를 한 번도 못 부름)
+        #    같은 문구가 떴다 — 측정하지 않은 것을 측정 결과처럼 보고하는 셈이다.
+        #    그래서 원인을 **세어서** 구분한다.
+        _rows = [r for e in events if e.kind == "evaluation" for r in e.data.get("rows", [])]
+        _errs = [e.text for e in events if e.kind == "error"]
+        if _errs:
+            st.error("에이전트가 중단돼 후보를 내지 못했습니다 — 위 status 를 펼치면 원인이 있습니다.\n\n"
+                     + "\n\n".join(_errs[:2]))
+        elif not _rows:
+            st.warning("채점된 후보가 **0건**입니다 — 에이전트가 평가 도구를 한 번도 부르지 않았습니다. "
+                       "독성 때문이 아닙니다. 스텝 수를 늘려 다시 시도해 보세요.")
+        else:
+            _tox = sum(1 for r in _rows if r.get("toxic"))
+            _cpp = sum(1 for r in _rows if is_comparison_only(r))
+            st.warning(
+                f"채점은 {len(_rows)}건 했지만 **최종 후보 자격을 갖춘 것이 없습니다** "
+                f"(독성 게이트 탈락 {_tox}건 · 비교군 CPP {_cpp}건 · 나머지는 문헌 근거 등급 미달). "
+                "최종 후보는 **근거 등급 A·B·C** 이고 비교군이 아닌 것만 될 수 있습니다.")
     if final:
         with st.container(border=True):
             st.markdown("### 설계 에이전트 — 최종 보고서")
@@ -473,7 +504,11 @@ if agent_run:
         st.error(_err)
         st.stop()
     if settings.use_gemini_agent:
-        event_source = get_gemini_agent(settings, max_rounds=agent_rounds).run(cargo)
+        # 🔴 `use_ledger` 를 안 넘기면 **기본값이 True** 라, 데모가 보고된 모든 수치
+        #    (`benchmark_agent.py`·애블레이션은 False 고정)와 **다른 구성**으로 돌았다.
+        #    화면에 보이는 것이 벤치마크와 같은 조건이어야 하므로 여기서 명시적으로 끈다.
+        event_source = get_gemini_agent(settings, max_rounds=agent_rounds,
+                                        use_ledger=False).run(cargo)
         brain = f"Gemini ({settings.gemini_model})"
     else:
         event_source = _demo_agent_events(cargo)   # API 키 없음 → 예시 데이터로 화면 미리보기
@@ -482,8 +517,8 @@ if agent_run:
     st.divider()
     st.subheader("자율 설계 에이전트")
     st.caption(
-        f"화물 `{cargo}` · **{brain}**가 BBB·독성·구조·잔기 편집·개발성 최적화 도구를 자율 오케스트레이션해 "
-        f"최종 융합체를 탐색 (최대 {agent_rounds}스텝)"
+        f"화물 `{cargo}` · **{brain}**가 도구 4개(후보 평가 · 직접 설계 · 개발성 최적화 · 종료)를 "
+        f"스스로 골라 쓰며 최종 융합체를 탐색 (최대 {agent_rounds}스텝 · 설계 이력 원장 끔 = 벤치마크와 동일 조건)"
     )
     events = []
     with st.status("에이전트가 후보를 제안하고 평가 중...", expanded=True) as status:

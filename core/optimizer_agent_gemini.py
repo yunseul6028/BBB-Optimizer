@@ -501,11 +501,19 @@ class GeminiOptimizationAgent(OptimizationAgent):
                   "**채점됐으므로 러닝 베스트·원장·래칫이 이 후보들을 본다** — "
                   "이보다 나쁜 것을 제출하면 래칫에 걸린다.")
 
+        # 🔴 옛 코드는 여기서 `seed[3]` 을 **off** 로 읽었다 — 그런데 `objectives()` 는
+        #    **3-튜플**이다(liability·응집·불안정성). off 는 §26 의 결정으로 목적이 아니라
+        #    **양측 밴드 제약**이라 벡터에 없다. 그래서 이 줄은 호출될 때마다
+        #    `IndexError: tuple index out of range` 로 터졌고, 도구 하나가 통째로 죽어 있었다.
+        #    off 시드는 전선 항목의 `off_seed` 가 들고 있다(위 `rows` 와 같은 출처).
+        off_seed = front[0].get("off_seed")
         md = (f"**🧪 개발성 다목적(Pareto) 최적화** — 셔틀 `{sh}` {pn}\n"
-              f"시드: liability {seed[0]}·응집 {seed[1]}·불안정 {seed[2]}·**off {seed[3]}**. "
+              f"시드: liability {seed[0]}·응집 {seed[1]}·불안정 {seed[2]}"
+              f"·**off {off_seed}**(목적이 아니라 ±{OFF_BAND} 밴드 제약). "
               f"기능 보존(rmt_sim≥0.85) + **근거 상속 보존(부모 유사도 ≥ "
-              f"{INHERIT_SIM_MIN:.2f})**하며 **순위 위험 4축**(liability·응집·불안정성·"
-              f"off-target) 동시 최소화 → 비지배 전선 {len(front)}개{drop}:\n{body}"
+              f"{INHERIT_SIM_MIN:.2f})**하며 **목적 3축**(liability·응집·불안정성) 동시 최소화 "
+              f"+ **off-target 은 최소화 대상이 아니라 ±{OFF_BAND} 밴드 제약**(§26) "
+              f"→ 비지배 전선 {len(front)}개{drop}:\n{body}"
               f"{score_note}")
         llm = (f"셔틀 {sh}의 개발성 Pareto 전선 {len(front)}개{drop}. "
                f"제약: rmt_sim≥0.85 **및 부모({pn}) 유사도 ≥ {INHERIT_SIM_MIN:.2f}"
@@ -1183,6 +1191,11 @@ class GeminiOptimizationAgent(OptimizationAgent):
                     pass
                 yield AgentEvent("optimum", data=final_pick)
         except Exception as exc:  # noqa: BLE001
+            # 🔴 역추적을 **stderr 로 반드시 남긴다**. 화면에는 한 줄 요약만 가는데,
+            # 그 한 줄로는 어디서 터졌는지 알 수 없어 2026-11-12 에 오진을 한 번 했다
+            # (루프 종료 조건을 의심했지만 실제 원인은 응답 파싱의 IndexError 였다).
+            import traceback
+            traceback.print_exc()
             yield AgentEvent("error", f"Gemini 호출 오류: {type(exc).__name__}: {exc}")
 
 
