@@ -189,16 +189,23 @@ def derive_tier(c: Criteria) -> str:
 SHUTTLE_EVIDENCE: dict[str, Evidence] = {
     "Angiopep-2": Evidence(
         tier="B",
-        fold="~9.5× / 86×",
-        context="**~9.5×** = Angiopep-2 의 뇌 전달이 음성 대조군 **Angiopep-7**(K10R·K15R) 대비 "
-                "우세한 배수 — 같은 실험 안의 **점 변이 쌍**이라 라이브러리에서 가장 해석이 깨끗한 "
-                "수치다(Demeule 2008 JPET). **86×** = ANG1005(파클리탁셀 접합체)의 뇌 유입계수 Kin "
-                "vs **유리 파클리탁셀**, 랫 in situ perfusion — 비교군이 유리 약물이므로 "
-                "'무표적 운반체 대비'가 아니다.",
-        ref="Demeule et al. 2008 J Pharmacol Exp Ther (DOI 10.1124/jpet.107.131318; "
-            "Angiopep 계열·Angiopep-7 대조, ~9.5×); Demeule et al. 2008 J Neurochem "
-            "(LRP1 매개·투과를 트랜스페린/락토페린/아비딘보다 높게 보고); "
-            "ANG1005 Kin 86× (리뷰 인용, Oncotarget 2016). ANG1005는 임상 2상까지 진행.",
+        fold="−85% / 7×",
+        context="✅ **원문 대조 완료**(§40). **−85%** = 음성 대조군 **Angiopep-7**(K10R·K15R)의 "
+                "뇌 **실질(parenchymal) 흡수 감소폭** — 같은 실험 안의 **점 변이 쌍**이라 "
+                "라이브러리에서 가장 해석이 깨끗한 수치다. 단일 변이 **Angiopep-5**(K10R 단독)도 "
+                "**−60%** 로 함께 보고된다. 🔴 세 펩타이드의 **순전하가 모두 +2 로 동일**하므로 "
+                "이 손실은 **전하 효과가 아니라 자리 효과**다. **7×** = Angiopep-2 의 transcytosis "
+                "vs **아프로티닌**(in vitro BBB 모델). "
+                "⚠️ 과거 이 칸에 적혀 있던 **~9.5× 와 86× 는 인용 출처에 없다** — 원문의 ≥10×·≥8× 는 "
+                "**아프로티닌 vs 트랜스페린**이고 Angiopep-7 의 손실은 배수로 적혀 있지 않다. "
+                "86× 는 ANG1005 Kin vs 유리 파클리탁셀로 적혀 있었으나 **원문 미대조**라 뺐다.",
+        ref="Demeule et al. 2008 J Pharmacol Exp Ther 324(3):1064-1072 "
+            "(DOI 10.1124/jpet.107.131318) — p.1069 원문: \"the lysine at positions 10 and 15 "
+            "were replaced by arginine residues. Each of these three peptides ... has a net "
+            "charge of +2. However, parenchymal uptake for both Angiopep-5 and Angiopep-7 was "
+            "decreased by approximately 60 and 85%, respectively.\" "
+            "Demeule et al. 2008 J Neurochem (LRP1 매개·투과를 트랜스페린/락토페린/아비딘보다 "
+            "높게 보고, ⚠️ 원문 미대조). ANG1005는 임상 2상까지 진행.",
         caveat="라이브러리 중 근거가 가장 단단하다. 점 변이 음성 대조군 Angiopep-7(K10R·K15R)이 "
                "존재하며, 우리 효능 축은 그 쌍을 **역전**시킨다(M6 §14-2).",
     ),
@@ -341,9 +348,11 @@ SHUTTLE_CRITERIA: dict[str, Criteria] = {
     "Angiopep-2": Criteria(
         quant=True, mech=True, clinical=True, form_match=True, bbb_alone=True,
         indirectness=1,
-        why="정량: Demeule 2008 JPET 의 Angiopep-7 점변이쌍 대비 ~9.5×(같은 실험 내 대조). "
-            "기전: LRP1 매개 확인. 임상: ANG1005 2상. 형태: 선형 L 19aa 그대로."
-        "간접성 1: 임상(ANG1005)은 **파클리탁셀 접합체**이고 ~9.5× 는 화물 없는 **펩타이드 단독** 수송이다. 단일 복제 유전자 융합 근거는 없다.",
+        why="정량: Demeule 2008 JPET 의 Angiopep-7 점변이쌍이 실질 흡수 **−85%**(단일 변이 "
+            "Angiopep-5 = K10R 단독도 −60%), 같은 실험 내 대조이고 **순전하 +2 로 동일**. "
+            "기전: LRP1 매개 확인. 임상: ANG1005 2상. 형태: 선형 L 19aa 그대로. "
+            "간접성 1: 임상(ANG1005)은 **파클리탁셀 접합체**이고 −85% 는 화물 없는 "
+            "**펩타이드 단독** 수송이다. 단일 복제 유전자 융합 근거는 없다.",
     ),
     "ApoE(159-167)2": Criteria(
         quant=True, mech=False, clinical=False, form_match=True, bbb_alone=True,
@@ -640,7 +649,7 @@ def _pins_intact(seq: str, parent_name: str) -> bool:
     🔴 왜 유사도만으로는 안 되나 — 측정으로 닫힌 질문이다.
     옛 `inherit()` 은 유사도 하나만 봤다. 그래서:
 
-      · **Angiopep-7**(`K10R/K15R`, 문헌상 뇌 전달 ~9.5배 낮은 **알려진 기능 상실체**)이
+      · **Angiopep-7**(`K10R/K15R`, 문헌상 뇌 실질 흡수 **~85% 감소**인 **알려진 기능 상실체**)이
         유사도 **0.9434** 로 원본과 **같은 등급 B** 를 받았다.
       · K10·K15 를 파괴하는 변이 **399개를 전수 열거하니 399/399(100%)가 등급을 받았다**
         (유사도 0.849~0.972 — 임계 0.70 근처에도 가지 않는다).
@@ -661,8 +670,11 @@ def _pins_intact(seq: str, parent_name: str) -> bool:
     ⚠️ **실효 범위는 1/12 이다.** `CONSERVED_POSITIONS` 에 문헌 위치가 있는 셔틀은
        **Angiopep-2 하나**뿐이다. 나머지 11종에 대해 이 검사는 **아무것도 걸러내지 못한다**.
        구조는 고쳤지만 데이터가 없다 — 과대 주장 금지(§31-6).
-    ⚠️ 문헌이 시험한 것은 **이중 변이**(K10R/K15R)다. 한 자리만 바꾼 경우의 직접 근거는
-       없지만, 동결 결정은 보수적으로 **자리마다** 적용한다(섞어 따지지 않는다).
+    ✅ **단일 변이에도 직접 근거가 있다**(§40, 원문 대조). 문헌은 이중 변이
+       (Angiopep-7 = K10R/K15R, 실질 흡수 −85%)뿐 아니라 **단일 변이도 시험했다**
+       — Angiopep-5 = **K10R 단독**이 **−60%** 다. 그래서 '자리마다 동결'은 보수적
+       추정이 아니라 **문헌에 근거한 결정**이다. (옛 주석은 "단일 변이의 직접 근거는
+       없다"고 적었는데 **틀렸다** — 2차 출처만 보고 쓴 탓이다.)
     """
     pins = CONSERVED_POSITIONS.get(parent_name) or ()
     if not pins:
@@ -748,12 +760,25 @@ def rubric_report() -> str:
 #: **"어디가 중요한지 우리가 모른다"**는 뜻이다 — 이 간극 자체가 한계로 보고돼야 한다.
 CONSERVED_POSITIONS: dict[str, tuple[int, ...]] = {
     # Angiopep-2 `TFFYGGSRGKRNNFKTEEY` — K10·K15.
-    # 근거: **Angiopep-7 = K10R/K15R** 이고 문헌상 뇌 전달이 ~9.5배 낮다(Demeule 2008 JPET,
-    # ⚠️ **2차 출처·원문 미대조**이며 같은 사실이 '뇌 실질 축적 ~85% 감소'(≈6.7배)로도 적혀
-    #    있다. 두 수치가 문서 안에 공존한다 — 동결 결정은 **방향**(K10R/K15R 이 뚜렷히 열등)에
-    #    의존하고 배수에 의존하지 않지만, 배수를 인용할 때는 원문을 대조해야 한다.
-    # 같은 실험 내 점 변이 쌍 = 라이브러리에서 가장 깨끗한 음성 대조). 두 라이신을
-    # **같은 양전하 잔기(R)로만 바꿔도** 기능이 무너진다면, 그 자리는 건드리지 않는다.
+    # ✅ **원문 대조 완료** (Demeule et al. 2008 J Pharmacol Exp Ther 324(3):1064-1072, p.1069).
+    #    원문 문장: *"the lysine at positions 10 and 15 were replaced by arginine residues.
+    #    Each of these three peptides (Angiopep-2, Angiopep-5, and Angiopep-7) has a net
+    #    charge of +2. However, parenchymal uptake for both Angiopep-5 and Angiopep-7 was
+    #    decreased by approximately 60 and 85%, respectively. ... replacement of the lysine
+    #    residues at positions 10 and 15 prevents the transport capacity."*
+    #
+    # 🔴 이 인용에서 동결을 정당화하는 것은 배수가 아니라 **세 가지 사실**이다:
+    #   ① **위치가 10·15 로 원문에 명시**된다(2차 출처 일부는 '10 과 13'으로 적는데 틀렸다 —
+    #      서열 `TFFYGGSRGKRNNFKTEEY` 의 K 는 10·15 에만 있다. 서열로 검산 가능).
+    #   ② **순전하가 셋 다 +2 로 동일**하다. 즉 기능 상실은 전하 효과가 **아니다** — 같은
+    #      양전하 잔기(K→R)로 바꿔도 무너진다. **자리**가 중요하다는 직접 증거이고,
+    #      그래서 제약을 '순전하 유지'가 아니라 **위치 동결**로 거는 것이 맞다.
+    #   ③ **단일 변이도 시험됐다**: Angiopep-5 = **K10R 단독** → 실질 흡수 **−60%**.
+    #      그래서 '자리마다 동결'은 보수적 추정이 아니라 **문헌에 근거한 결정**이다.
+    #
+    # ⚠️ **"~9.5배"는 이 논문에 없다**(§40). 원문의 배수는 전부 다른 비교다 —
+    #    ≥10× 와 ≥8× 는 **아프로티닌 vs 트랜스페린**, 7× 는 **Angiopep-2 vs 아프로티닌**.
+    #    Angiopep-7 의 손실은 배수가 아니라 **"실질 흡수 ~85% 감소"**로만 적혀 있다.
     "Angiopep-2": (10, 15),
 }
 

@@ -121,6 +121,13 @@ def m4_agent_efficiency(cargo="GSNKGAIIGLM", max_rounds=6, use_ledger=False,
     print(f"  ② 전선에 지배당하나   : {'아니오(비지배)' if not dom_by else '예 — ' + ', '.join(dom_by[:3])}")
     print(f"  ③ 전선 안인가         : {'라이브러리 전선 내' if in_front else '라이브러리 밖(설계체)'}")
     print(f"  에이전트가 평가한 후보 수: {n_eval}  (라이브러리 전수 {front.get('n_total')}개 중)")
+    # 역할 분리 게이트의 거부 횟수. `scripts/ablation_tools.py` 는 전부터 이 값을 기록하는데
+    # 메인 벤치마크는 계측만 하고 **보고하지 않았다** — 계측된 값이 아무 데도 안 나오면
+    # 그 자체가 §37 계열의 "조용함"이다. 세는 것은 **독성 하드 게이트가 아니라**
+    # `evaluate_candidates` 가 편집 서열을 되돌려 보낸 횟수다(= 역할 분리가 실제로 작동한 횟수).
+    gate_rej = getattr(agent, "gate_rejections", 0)
+    print(f"  역할 분리 게이트 거부: {gate_rej}회  "
+          f"(편집 서열을 `evaluate_candidates` 에 넣으려 한 횟수 — 독성 게이트와 무관)")
     if not on_top:
         verdict = "근거 하향 — 더 단단한 근거의 대안이 있었다"
     elif dom_by:
@@ -136,7 +143,8 @@ def m4_agent_efficiency(cargo="GSNKGAIIGLM", max_rounds=6, use_ledger=False,
             "tier": pick.get("tier"), "group": g, "dev_liab": pick.get("dev_liab"),
             "instability": pick.get("instability"), "sel_off": pick.get("sel_off"),
             "dev_agg_hot": pick.get("dev_agg_hot"), "bbb_report": pick.get("bbb"),
-            "dominated_by": dom_by, "use_ledger": use_ledger}
+            "dominated_by": dom_by, "use_ledger": use_ledger,
+            "gate_rejections": gate_rej}
 
 
 # ── M5 프로브 표 · 게이트 마커 (모듈 수준) ────────────────────────────────

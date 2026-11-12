@@ -87,6 +87,30 @@ _A3V_MIN, _A3V_MAX = -1.836, 1.822     # 척도 자체의 극값(정규화용 �
 # 응집 **핫스팟** 창 길이(aa). AGGRESCAN 이 응집 경향을 다루는 방식은 전역 평균이 아니라
 # **연속 구간(hot spot)** 이다. 5 는 AGGRESCAN 의 a4v/HSA 창 길이를 따른다(자유 파라미터 아님).
 #
+# ✅ **원문 대조 완료** (Conchillo-Solé et al. 2007 BMC Bioinformatics 8:65, PMC1828741 — §41):
+#    *"The best predictions were obtained using a window size of **5 for <= 75 residues**,
+#    7 for <= 175, 9 for <= 300 and 11 for > 300."* 우리 셔틀·융합체는 전부 75 잔기 이하라
+#    창 **5** 가 원문 권고와 **정확히 일치**한다.
+#
+# 🔴 **그러나 우리 값은 AGGRESCAN 의 "hot spot" 이 아니다.** 원문 정의는 세 조건이다:
+#    *"A region ... is considered an aggregation 'hot spot' (HS) if there are **5 or more
+#    sequentially continuous residues with an a4v larger than the HST** and **none of them
+#    is a proline** (aggregation breaker)."* 그리고 *"The 'hot spot' threshold (HST) has been
+#    defined as the average of the a3v of the 20 amino acids **weighted by their frequencies
+#    in the SwissProt database**."*
+#    우리가 재는 것은 **창 슬라이딩 a4v 의 최대값**이다 — ⓐ HST 임계를 쓰지 않고
+#    ⓑ 프롤린 규칙이 없다. 그래서 이 축은 **"국소 최대 a3v"** 이고, 원문의 HS/HSA/AAT/NHSA
+#    면적량과 **비교 가능한 숫자가 아니다**(정규화도 HST 가 아니라 척도 극값으로 한다).
+#
+#    ⚠️ 실측 결과(§41): **12종 중 4종**(T7·B6·THR·TAT)의 최대창에 **프롤린이 들어 있다**
+#    (`HAIYP`·`KAKGP`·`WSPVW`·`RRPPQ`). 원문 규칙이라면 그 창은 HS 자격이 **없다**. 즉 이
+#    축은 프롤린이 많은 펩타이드의 응집 위험을 **과대평가**한다 — 프롤린 창을 제외하면
+#    최대값은 내려가므로 그 셔틀들은 **지금보다 좋게** 보일 것이다. T7·THR·B6 는 현재
+#    **전선 멤버**다(§37-3). 이 괴리는 **문서화만 했고 축은 바꾸지 않았다**(바꾸면 전수
+#    재측정이고, 설계 결정이다 — 대기열).
+#    🔴 논문·README 에 쓸 때 **"AGGRESCAN 핫스팟"으로 쓰면 안 된다.** "AGGRESCAN a3v 척도의
+#    국소 최대(창 5aa)"로 쓴다.
+#
 # ⚠️ 왜 전역 평균을 순위 축에서 뺐나 (M10 실측, docs/experiments.md §20)
 # 전역 평균 a3v 는 **길이로 희석된다** — 저응집 잔기(G·S·E·K·D)를 붙이면 분모만 커져
 # 점수가 내려간다. 실측: 후보군 셔틀 8종 전부에서 링커 길이↔응집 점수 순위상관이 음수
