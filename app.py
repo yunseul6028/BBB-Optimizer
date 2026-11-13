@@ -435,9 +435,15 @@ def _render_agent_summary(events, cargo):
                               else Verdict.SUBOPTIMAL)
                     st.markdown(_verdict_pill(_v), unsafe_allow_html=True)
                     st.code(cand["sequence"], language="text")
-                    m1, m2 = st.columns(2)
-                    m1.metric("BBB 투과 점수", f"{cand['bbb']*100:.0f}")
-                    m2.metric("독성", f"{cand['tox']*100:.0f}%", delta="안전", delta_color="off")
+                    # 🔴 BBB 를 큰 metric 으로 띄우지 않는다. 순위에서 뺀 값(M8)이라
+                    #    카드에서 제일 크게 찍히면 보는 사람이 성능으로 읽는다. 실제로
+                    #    융합하면 셔틀 단독 0.95 가 0.07 까지 주저앉는데(§51 · 알려진 정답
+                    #    대조), 그 숫자를 키워 놓으면 "성능이 나쁘다"로 오독된다.
+                    #    옛 체계가 높게 찍었던 건 바로 이 값을 **올리도록 최적화**했기
+                    #    때문이고, 그 대가가 생존자 72% 비교군 CPP 였다.
+                    st.metric("독성", f"{cand['tox']*100:.0f}%", delta="안전", delta_color="off")
+                    st.caption(
+                        f":gray[BBB 투과 점수 **{cand['bbb']*100:.0f}** — 순위에 쓰지 않는 보고치입니다.]")
                     if cand.get("mechanism"):
                         _mech = cand["mechanism"]
                         _pres = cand.get("preservation")
