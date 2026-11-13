@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ko"><meta charset="utf-8">
+<title>Angiopep 알려진 정답 대조</title>
+<style>
+  :root { --ink:#16181d; --mut:#6b7280; --line:#e5e7eb; --bg:#fff;
+           --ok:#166534; --okbg:#f0fdf4; --bad:#b91c1c; --badbg:#fef2f2;
+           --flat:#92400e; --flatbg:#fffbeb; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:34px 30px; background:var(--bg); color:var(--ink);
+    font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR",system-ui,sans-serif;
+    font-size:14px; line-height:1.55; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:880px; margin:0 auto; }
+  h1 { font-size:19px; margin:0 0 4px; letter-spacing:-.01em; }
+  .sub { color:var(--mut); font-size:12.5px; margin:0 0 20px; }
+  .lit { border:1px solid var(--line); border-left:3px solid var(--ink);
+    padding:12px 15px; margin:0 0 20px; background:#fafafa; }
+  .lit h2 { font-size:12px; margin:0 0 8px; letter-spacing:.04em;
+    text-transform:uppercase; color:var(--mut); font-weight:600; }
+  .lit table { border-collapse:collapse; font-size:13px; }
+  .lit td { padding:2px 16px 2px 0; }
+  .seq { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px;
+    letter-spacing:.02em; }
+  .hit { background:#fde68a; padding:0 1px; border-radius:2px; font-weight:700; }
+  table.main { width:100%; border-collapse:collapse; font-size:13px; }
+  table.main th, table.main td { padding:7px 9px; border-bottom:1px solid var(--line); }
+  table.main thead th { font-size:11.5px; color:var(--mut); font-weight:600;
+    letter-spacing:.03em; border-bottom:1.5px solid var(--ink); text-align:right; }
+  table.main thead th:first-child { text-align:left; }
+  .ax { text-align:left; font-weight:500; white-space:nowrap; }
+  .note { display:block; font-size:10.5px; color:var(--mut); font-weight:400; }
+  .num { text-align:right; font-variant-numeric:tabular-nums;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .v { text-align:right; font-size:11.5px; font-weight:600; white-space:nowrap; }
+  tr.ok .v { color:var(--ok); }  tr.ok { background:var(--okbg); }
+  tr.bad .v { color:var(--bad); } tr.bad { background:var(--badbg); }
+  tr.flat .v { color:var(--flat); } tr.flat { background:var(--flatbg); }
+  .tally { display:flex; gap:9px; margin:16px 0 0; }
+  .tally div { flex:1; border:1px solid var(--line); padding:9px 11px; }
+  .tally b { display:block; font-size:21px; line-height:1.15;
+    font-variant-numeric:tabular-nums; }
+  .tally span { font-size:11.5px; color:var(--mut); }
+  .punch { margin:18px 0 0; border:1.5px solid var(--ink); padding:14px 16px; }
+  .punch h2 { font-size:14px; margin:0 0 9px; }
+  .punch ul { margin:0; padding-left:17px; font-size:12.5px; }
+  .punch li { margin:3px 0; }
+  .punch .kicker { margin:10px 0 0; font-size:13.5px; font-weight:700; }
+  .pin { margin:16px 0 0; border:1px solid var(--line); padding:13px 15px;
+    background:#fafafa; }
+  .pin h2 { font-size:13px; margin:0 0 8px; }
+  .pin p { margin:4px 0; font-size:12.5px; }
+  footer { margin-top:20px; padding-top:11px; border-top:1px solid var(--line);
+    font-size:10.5px; color:var(--mut); line-height:1.5; }
+  @media print { body { padding:0; } tr.ok,tr.bad,tr.flat { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
+</style>
+<div class="wrap">
+  <h1>문헌에 정답이 있는 서열을 우리 축에 통과시키면</h1>
+  <p class="sub">Angiopep-2 / -5 / -7 · 화물 GSNKGAIIGLM · 링커 GGGGS · 유료 LLM 0회</p>
+
+  <div class="lit">
+    <h2>밖에 적힌 정답 — Demeule et al. 2008 <i>J Pharmacol Exp Ther</i> 324(3):1064–1072 (원문 대조 완료)</h2>
+    <table>
+      <tr><td><b>Angiopep-2</b></td><td class="seq">TFFYGGSRG<span class="hit">K</span>RNNF<span class="hit">K</span>TEEY</td><td>원본</td><td>기준</td></tr>
+      <tr><td><b>Angiopep-5</b></td><td class="seq">TFFYGGSRG<span class="hit">R</span>RNNF<span class="hit">K</span>TEEY</td><td>K10R</td><td>뇌 실질 흡수 <b>−60%</b></td></tr>
+      <tr><td><b>Angiopep-7</b></td><td class="seq">TFFYGGSRG<span class="hit">R</span>RNNF<span class="hit">R</span>TEEY</td><td>K10R·K15R</td><td>뇌 실질 흡수 <b>−85%</b></td></tr>
+    </table>
+    <p style="margin:9px 0 0;font-size:12px">셋의 <b>순전하가 모두 +2 로 같다</b> → 기능 상실은 전하 효과가 아니라 <b>자리 효과</b>다.
+    원문: <i>“replacement of the lysine residues at positions 10 and 15 prevents the transport capacity.”</i></p>
+  </div>
+
+  <table class="main">
+    <thead><tr><th>우리 축</th><th>Angiopep-2</th><th>Angiopep-5</th><th>Angiopep-7</th><th>정답 대비</th></tr></thead>
+    <tbody><tr class='flat'><th class='ax'>순전하 (pH 7.4)<span class=note>문헌이 '셋 다 같다'고 한 칸</span></th><td class='num'>+2.00</td><td class='num'>+2.00</td><td class='num'>+2.00</td><td class='v flat'>구별 못 함</td></tr><tr class='ok'><th class='ax'>rmt_sim (기능 보존 프록시)<span class=note>하한 0.85</span></th><td class='num'>1.000</td><td class='num'>0.972</td><td class='num'>0.943</td><td class='v ok'>방향 맞음</td></tr><tr class='ok'><th class='ax'>off_target<span class=note>밴드 ±0.05</span></th><td class='num'>0.09</td><td class='num'>0.09</td><td class='num'>0.10</td><td class='v ok'>방향 맞음</td></tr><tr class='ok'><th class='ax'>불안정성 지수<span class=note>이진화 임계 40</span></th><td class='num'>71.5</td><td class='num'>88.9</td><td class='num'>96.8</td><td class='v ok'>방향 맞음</td></tr><tr class='flat'><th class='ax'>응집 핫스팟 (정규화)</th><td class='num'>0.720</td><td class='num'>0.720</td><td class='num'>0.720</td><td class='v flat'>구별 못 함</td></tr><tr class='flat'><th class='ax'>liability 개수</th><td class='num'>2</td><td class='num'>2</td><td class='num'>2</td><td class='v flat'>구별 못 함</td></tr><tr class='flat'><th class='ax'>접합부 liability (구성체)</th><td class='num'>0</td><td class='num'>0</td><td class='num'>0</td><td class='v flat'>구별 못 함</td></tr><tr class='bad'><th class='ax'>ToxinPred3 ML Score (셔틀)<span class=note>하드 게이트 0.38</span></th><td class='num'>0.250</td><td class='num'>0.165</td><td class='num'>0.130</td><td class='v bad'>방향 반대</td></tr><tr class='bad'><th class='ax'>ToxinPred3 ML Score (구성체)</th><td class='num'>0.240</td><td class='num'>0.195</td><td class='num'>0.180</td><td class='v bad'>방향 반대</td></tr><tr class='bad'><th class='ax'>deepB3P (셔틀 단독)<span class=note>보고치 — 순위 미사용</span></th><td class='num'>0.867</td><td class='num'>0.973</td><td class='num'>0.978</td><td class='v bad'>방향 반대</td></tr><tr class='bad'><th class='ax'>deepB3P (구성체)<span class=note>보고치 — 순위 미사용</span></th><td class='num'>0.011</td><td class='num'>0.020</td><td class='num'>0.024</td><td class='v bad'>방향 반대</td></tr></tbody>
+  </table>
+
+  <div class="tally">
+    <div><b style="color:var(--ok)">3</b><span>방향 맞음</span></div>
+    <div><b style="color:var(--flat)">4</b><span>구별 못 함</span></div>
+    <div><b style="color:var(--bad)">4</b><span>방향 반대</span></div>
+  </div>
+
+  <div class="punch">
+    <h2>그런데 — 방향을 맞춘 3개는 <u>판정을 바꾸지 않는다</u></h2>
+    <ul>
+      <li><b>rmt_sim</b> 하한 0.85 → Angiopep-7 이 <b>0.943 로 통과</b>. 안 막는다.</li>
+      <li><b>off_target</b> 밴드 ±0.05 → 변화 0.09→0.10 = <b>0.01</b>, 밴드 안. 그 0.01 은 이 축의 <b>양자화 눈금 자체</b>다.</li>
+      <li><b>불안정성</b> 이진화 임계 40 → 71.5 도 96.8 도 ‘불안정’. <b>순위 기여 0.</b></li>
+    </ul>
+    <p class="kicker">방향을 맞춘 축 3개 · 그 중 후보를 떨어뜨리는 축 <span style="color:var(--bad)">0개</span>.</p>
+  </div>
+
+  <div class="pin">
+    <h2>유일하게 잡아내는 것은 서열 축이 아니다</h2>
+    <p>근거 등급 상속이 Angiopep-5 (유사도 0.972) 와 Angiopep-7 (0.943) 의 <b>등급 상속을 거부</b>한다.
+       유사도 하한 0.70 은 셋 다 통과한다 — 막는 것은 유사도가 아니라
+       <b>문헌 보존 위치 (10, 15) 의 라이신이 살아 있는가</b> 하나다.</p>
+    <p style="color:var(--mut)">즉 이 계열을 걸러낸 것은 <b>측정이 아니라 문헌 사실</b>이다.
+       그리고 그 핀을 가진 셔틀은 라이브러리 <b>12종 중 1종</b>뿐이다.</p>
+  </div>
+
+  <footer>
+    n=3 · 한 계열 · 화물 1종. <b>축의 정확도 측정이 아니다.</b> ·
+    K→R 은 BLOSUM62 +2(보존적 치환)이므로 서열 유사도 축의 실패는 버그가 아니라 <b>그 양이 이 질문에 답할 수 없다</b>는 뜻이다. ·
+    인용 금지: “~9.5배 / 86배”는 인용 출처에 없다 — 쓸 수 있는 것은 −60% / −85% 와 순전하 동일뿐이다. ·
+    생성 <code>scripts/known_answer_angiopep.py --html</code>
+  </footer>
+</div>
+</html>
