@@ -90,20 +90,26 @@ OFF_TARGET_PENALTY = 0.25   # ⚠️ 폐지됨 — 옛 실험 재현용. 새 코
 MODEL_MAX_LEN = 50                 # deepB3P seq_len — 초과분은 잘림(truncate)
 
 # --- 링커 라이브러리 (융합체의 링커 축) ---
+# 📚 `ref` = **그 서열 형태가 문헌에 적혀 있는지**. 전문 서지·확인 등급은
+#    `docs/링커-문헌출처.md` 가 단일 출처다(셔틀의 `core/evidence.py` 에 대응).
+#    None = 문헌 객체가 아니거나 출처를 찾지 못한 것. 🔴 13종 중 **문헌 서열은 7종뿐**이고
+#    4종은 `GGGGS` 의 N-말단 한 잔기 스캔(우리 구성물), 1종은 0aa 널,
+#    2종(`GGS`·`GGGGGS`)은 (GGGGS)n 격자에 없는 길이로 **출처를 찾지 못했다**.
+#    🚫 "문헌에서 가져온 링커 13종"으로 쓰면 틀린다. 🚫 등급을 여기 복제하지 말 것(드리프트).
 LINKER_LIBRARY = {
-    "직접융합":    {"seq": "",               "kind": "none",        "note": "링커 없이 화물-셔틀 직접 연결(0aa, direct fusion)"},
-    "GGS":        {"seq": "GGS",             "kind": "flexible",    "note": "짧은 유연 링커(3aa)"},
-    "GGGGS":      {"seq": "GGGGS",           "kind": "flexible",    "note": "고전 GS 링커(5aa)"},
-    "GGGGGS":     {"seq": "GGGGGS",          "kind": "flexible",    "note": "표준 유연 링커(6aa)"},
-    "(GGGGS)2":   {"seq": "GGGGSGGGGS",      "kind": "flexible",    "note": "긴 유연 링커(10aa)"},
-    "(GGGGS)3":   {"seq": "GGGGSGGGGSGGGGS", "kind": "flexible",    "note": "매우 긴 유연 링커(15aa)"},
-    "YGGGGS":     {"seq": "YGGGGS",          "kind": "aromatic",    "note": "N-말단 타이로신(방향족)"},
-    "WGGGGS":     {"seq": "WGGGGS",          "kind": "aromatic",    "note": "N-말단 트립토판(방향족)"},
-    "FGGGGS":     {"seq": "FGGGGS",          "kind": "aromatic",    "note": "N-말단 페닐알라닌(방향족)"},
-    "VGGGGS":     {"seq": "VGGGGS",          "kind": "hydrophobic", "note": "N-말단 발린(소수성)"},
-    "EAAAK":      {"seq": "EAAAK",           "kind": "rigid",       "note": "α-헬릭스 강직 링커(5aa)"},
-    "(EAAAK)2":   {"seq": "EAAAKEAAAK",      "kind": "rigid",       "note": "강직 링커(10aa)"},
-    "A(EAAAK)3A": {"seq": "AEAAAKEAAAKEAAAKA", "kind": "rigid",     "note": "강직 헬릭스 링커(17aa)"},
+    "직접융합":    {"seq": "",               "kind": "none",        "ref": None,     "note": "링커 없이 화물-셔틀 직접 연결(0aa, direct fusion) — 널 대조, 문헌 객체 아님"},
+    "GGS":        {"seq": "GGS",             "kind": "flexible",    "ref": None,     "note": "짧은 유연 링커(3aa) — ⚠️ (GGGGS)n 격자 밖(5/10/15 아님), 출처 미확인"},
+    "GGGGS":      {"seq": "GGGGS",           "kind": "flexible",    "ref": "Lu2008", "note": "고전 GS 링커(5aa) = (GGGGS)n 의 n=1"},
+    "GGGGGS":     {"seq": "GGGGGS",          "kind": "flexible",    "ref": None,     "note": "유연 링커(6aa) — ⚠️ (GGGGS)n 격자 밖, 출처 미확인. '표준'이라 부르지 말 것"},
+    "(GGGGS)2":   {"seq": "GGGGSGGGGS",      "kind": "flexible",    "ref": "Lu2008", "note": "긴 유연 링커(10aa) = n=2 — Lu2008 에서 8종 중 최적 링커였다"},
+    "(GGGGS)3":   {"seq": "GGGGSGGGGSGGGGS", "kind": "flexible",    "ref": "Lu2008", "note": "매우 긴 유연 링커(15aa) = n=3 — scFv 고전 길이. ⚠️ Huston1988 귀속은 2차 인용"},
+    "YGGGGS":     {"seq": "YGGGGS",          "kind": "aromatic",    "ref": None,     "note": "N-말단 타이로신(방향족) — GGGGS 한 잔기 스캔(우리 구성물)"},
+    "WGGGGS":     {"seq": "WGGGGS",          "kind": "aromatic",    "ref": None,     "note": "N-말단 트립토판(방향족) — GGGGS 한 잔기 스캔(우리 구성물)"},
+    "FGGGGS":     {"seq": "FGGGGS",          "kind": "aromatic",    "ref": None,     "note": "N-말단 페닐알라닌(방향족) — GGGGS 한 잔기 스캔(우리 구성물)"},
+    "VGGGGS":     {"seq": "VGGGGS",          "kind": "hydrophobic", "ref": None,     "note": "N-말단 발린(소수성) — GGGGS 한 잔기 스캔(우리 구성물)"},
+    "EAAAK":      {"seq": "EAAAK",           "kind": "rigid",       "ref": "Lu2008", "note": "α-헬릭스 강직 링커(5aa) = (EAAAK)n 의 n=1. ⚠️ Arai 범위(n=2-5)·측면 A 없음"},
+    "(EAAAK)2":   {"seq": "EAAAKEAAAK",      "kind": "rigid",       "ref": "Lu2008", "note": "강직 링커(10aa) = (EAAAK)n 의 n=2. ⚠️ 측면 A 없음"},
+    "A(EAAAK)3A": {"seq": "AEAAAKEAAAKEAAAKA", "kind": "rigid",     "ref": "Arai2001", "note": "강직 헬릭스 링커(17aa) = A(EAAAK)nA 의 n=3, Arai 시험 범위(n=2-5) 안"},
 }
 
 # --- 셔틀 라이브러리 (BBB 투과 수송 펩타이드, 전수 탐색) ---
