@@ -42,7 +42,7 @@ _inject_theme()
 settings = get_settings()
 
 st.title("BBB-Optimize AI Agent")
-st.markdown("화물 펩타이드를 입력하면 AI가 BBB를 통과하는 **항체–셔틀 융합 단백질**을 설계합니다.")
+st.markdown("화물 펩타이드를 입력하면 AI가 **화물–링커–셔틀 펩타이드 융합체**를 설계합니다.")
 
 
 def _dot(ok):
@@ -64,7 +64,7 @@ def _cargo_error(cargo):
     if bad:
         shown = ", ".join(("공백/줄바꿈" if not c.strip() else f"`{c}`") for c in bad)
         return (f"⚠️ 표준 20종 아미노산이 아닌 문자가 있습니다: {shown}. "
-                "1글자 코드(ACDEFGHIKLMNPQRSTVWY)만 사용하세요 — 항체 서열의 **X(불명 잔기)**·"
+                "1글자 코드(ACDEFGHIKLMNPQRSTVWY)만 사용하세요 — **X(불명 잔기)**·"
                 "공백·복붙 특수문자 등을 확인하세요.")
     return None
 
@@ -100,8 +100,12 @@ with _hero:
     cargo_input = st.text_input(
         "화물(cargo) 서열",
         value=DEFAULT_CARGO,
-        help="뇌로 전달할 화물 서열을 넣으면 자율 설계 에이전트가 링커·셔틀을 붙여 BBB 투과 융합체를 "
-             "설계합니다. 항체·나노바디도 화물로 처리됩니다. (표준 20종 1글자 코드)",
+        help="뇌로 전달할 화물 서열을 넣으면 자율 설계 에이전트가 링커·셔틀을 붙여 융합체를 설계합니다. "
+             "(표준 20종 1글자 코드)\n\n"
+             "⚠️ **적용 범위는 펩타이드 규모입니다.** 라이브러리·축·제약이 전부 짧은 서열을 전제로 "
+             "맞춰져 있습니다(링커 상한 17aa · deepB3P·ToxinPred3 는 짧은 펩타이드로 학습 · "
+             "셔틀 유사도는 19aa 기준 정규화). 항체·나노바디 서열도 입력은 되지만 **적용 범위 밖**이라 "
+             "나오는 숫자를 해석하지 마세요.",
     )
     _seq = _clean_cargo(cargo_input)
 
