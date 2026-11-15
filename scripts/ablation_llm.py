@@ -146,6 +146,28 @@ AGENT_COLD_1115_B = [   # 화물 B `WAGGDASGE` (DSIP)
      "tier": "B", "dev_liab": 1, "instability": 28.8, "sel_off": 0.05,
      "dev_agg_hot": 0.55, "n_eval": 16, "note": "§59 신규 설계"},
 ]
+# 🔴 B 팔 4판 — **GA 대조를 한 번도 받아본 적 없는 설계 3종** (2026-11-16 추가 · §65).
+#    §59-3 의 "독립 설계 3종" 은 **전부 Angiopep-2 + 3번 자리 E(`TFEY…`) 계열**이었다.
+#    그런데 M4 콜드 세션에는 **다른 부모**를 고른 설계가 전부터 있었다 — §53 의 B1(TFGY)·
+#    C3(ApoE)과 §63 의 ApoE+EAAAK. 🔴 **그 셋은 GA 대조 목록에 들어간 적이 없다.**
+#    §54-2 가 이미 "B1·C3 은 front_top 지배가 1/5 뿐이고 C3 은 off 를 빼면 0/1" 이라고
+#    적었으니, GA 대조에서도 TFEY 계열보다 약할 것으로 예상된다 — 그 예상을 심사한다.
+#    ⚠️ 이 셋은 부모가 Angiopep-2 가 아니므로 **off 밴드 기준 시드가 다르다**(7-e 가
+#    설계별 부모로 계산한다). 7-d 의 `off_seed`(Angiopep-2 고정)를 쓰면 틀린다.
+AGENT_COLD_1116_A = [   # 화물 A `GSNKGAIIGLM`
+    {"session": "4판-1", "linker": "EAAAK", "shuttle": "TFGYGGSRGKRNHFKTEEY",
+     "parent": "Angiopep-2",
+     "tier": "B", "dev_liab": 1, "instability": 34.9, "sel_off": 0.11,
+     "dev_agg_hot": 0.59, "n_eval": 18, "note": "§53 B1 = §63 묶음#1 세션1"},
+    {"session": "4판-2", "linker": "", "shuttle": "LAVYQAGARLAVYQYGAR",
+     "parent": "ApoE(159-167)2",
+     "tier": "B", "dev_liab": 1, "instability": -4.6, "sel_off": 0.20,
+     "dev_agg_hot": 0.66, "n_eval": 13, "note": "§53 C3 = §63 묶음#1·#2 세션2"},
+    {"session": "4판-3", "linker": "EAAAK", "shuttle": "LAVYQAGARLAVYQYGAR",
+     "parent": "ApoE(159-167)2",
+     "tier": "B", "dev_liab": 1, "instability": -5.0, "sel_off": 0.20,
+     "dev_agg_hot": 0.68, "n_eval": 12, "note": "§63 묶음#1·#2 세션3 (신규 조합)"},
+]
 CARGO_A, CARGO_B = "GSNKGAIIGLM", "WAGGDASGE"
 
 
@@ -605,6 +627,42 @@ def main() -> None:
               f"서로 다른 **셔틀 {len(uniq_shut)}종** / {len(batch3)}세션")
         print("    → 이 수가 §58-5 의 'n=1' 을 대체한다. 쌍 수(위)는 세션 중복을 포함하므로 "
               "**독립 설계 수를 같이 적지 않으면 과장**이다.")
+
+    # ── 7-e. 4판 — GA 대조를 받아본 적 없는 설계 3종 (§65) ────────────────
+    batch4 = AGENT_COLD_1116_A if cargo == CARGO_A else []
+    print("\n" + "-" * 78)
+    print(f"[7-e] 4판 (GA 대조 **미실시** 설계 3종 · 화물 `{cargo}`) — §65")
+    print("-" * 78)
+    if not batch4:
+        print(f"    (이 화물 `{cargo}` 에는 4판 기록이 없다 — 화물 A 만 측정했다)")
+    else:
+        print("    🔴 §59-3 의 '독립 설계 3종' 은 전부 `TFEY…` 계열이었다. 아래 셋은")
+        print("       부모가 다르거나 링커가 다른 설계인데 **GA 대조를 받은 적이 없다.**")
+        from core.config import SHUTTLES as _SH
+        for a in batch4:
+            beats = [r for r in ok if dominates(r, a)]
+            beats_rb = [r for r in beats if dominates(_no_off(r), _no_off(a))]
+            loses = [r for r in ok if dominates(a, r)]
+            loses_rb = [r for r in loses if dominates(_no_off(a), _no_off(r))]
+            pseq = (_SH.get(a["parent"]) or {}).get("seq") or ""
+            poff = off_target(pseq) if pseq else float("nan")
+            d = abs(a["sel_off"] - poff)
+            print(f"\n    {a['session']} ({'직접융합' if a['linker'] == '' else a['linker']}"
+                  f"+{a['shuttle']}) {_axrow(a)}")
+            print(f"      · 부모 **{a['parent']}** · 부모 off {poff:.2f} · |Δ부모| {d:.2f}"
+                  f" → {'밴드 통과' if d <= OFF_BAND + 1e-9 else '🔴 밴드 위반'}"
+                  f"   ⚠️ 7-d 와 달리 **설계별 부모**로 재는 값이다")
+            print(f"      · 이 설계체를 **지배하는 A 팔 설계체**: **{len(beats)}개** "
+                  f"(견고 **{len(beats_rb)}개**)")
+            print(f"      · 반대로 이 설계체가 **지배하는 A 팔 설계체**: **{len(loses)}개** "
+                  f"(견고 **{len(loses_rb)}개**)")
+            print(f"      · 출처: {a['note']}")
+        t4 = _tally(batch4)
+        print(f"\n    합계 **4판**: A→B 지배 **{t4[0]}쌍**(견고 {t4[2]}) vs "
+              f"B→A **{t4[1]}쌍**(견고 {t4[3]})")
+        print("    → 🔴 **이 수를 3판과 합치지 말 것.** 4판은 §54-2 가 이미 'front_top "
+              "지배 1/5' 로 약하다고 판정한 설계들이라, 합치면 **고른 표본이 섞인다**. "
+              "두 표를 나란히 두는 것이 이 절의 쓸모다.")
 
     # ── 8. 한계 재고지 ────────────────────────────────────────────────────
     print("\n" + "=" * 78)
