@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# AUDIT-EXEMPT: 이 파일은 금지어 목록 자체를 담는다 (점검 대상에서 제외)
 """LLM·사용자가 읽는 **모든 문자열**에 폐기·반증된 주장이 남아 있는지 전수 점검한다 (§67).
 
 왜 이 스크립트가 존재하나
@@ -28,6 +29,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 def _targets() -> list:
     """점검 대상 — **전 파일이다.**
@@ -57,36 +59,34 @@ def _targets() -> list:
     return [f for f in out if not _is_auditor(f)]
 
 
+# 🔴 제외 규칙의 **세 번째** 판이다(§67-11). 1판은 파일 이름 하나,
+#    2판은 `scripts/audit_*.py` + `BAD = [`. 둘 다 내가 **밖에서 추측한 규칙**이라
+#    새 파일(`_forbidden.py`)이 생기자마자 또 샜다.
+#    → 3판: **파일이 스스로 선언한다.** 아래 표식을 담은 파일은 제외다.
+#       금지어 목록을 새로 어디에 두든, 그 파일이 표식을 적으면 끝난다.
+_EXEMPT = "AUDIT-EXEMPT"
+
+
 def _is_auditor(rel: str) -> bool:
-    """점검기 자신인가 — `scripts/audit_*.py` 중 `BAD` 목록을 들고 있는 것."""
-    if not rel.startswith("scripts/audit_"):
-        return False
+    """파일이 **스스로** 점검 제외를 선언했나 (파일 앞머리 40줄 안의 표식)."""
     try:
-        src = io.open(os.path.join(ROOT, rel), encoding="utf-8").read()
+        with io.open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
+            head = "".join(next(fh, "") for _ in range(40))
     except OSError:
         return False
-    return "BAD = [" in src
+    return _EXEMPT in head
 
-# 폐기·반증된 주장을 담은 말들. **늘려야 하는 목록이다** — 새 측정이 무언가를 깰 때마다
-# 그 말을 여기 추가하는 것이 §67 절차의 핵심이고, 그래야 다음에 자동으로 걸린다.
-BAD = [
-    "비독성", "독성 게이트", "독성뿐",                 # §47-6 조성 필터
-    "기능 보존", "기능(rmt_sim)", "검증 기능", "결합 모티프를 보존",   # §55 상속 게이트
-    "선택성", "선택적",                                # §50 off 축은 전하 하나
-    "BBB 하한",                                        # 2026-11-10 폐지
-    "무작위보다 나쁘", "상대 비교가 신뢰",             # §53-5 · §57 deepB3P
-    "0/108", "5/5 지배",                               # §53 폐기
-    "AGGRESCAN 핫스팟",                                # §41 이름 불일치
-    "6세션", "3종 중 2종", "0/3", "4/9",               # §64 · §65 · §67 중간값
-    "BBB 를 예측", "BBB를 예측",                       # §56 M6
-]
+# 🔴 **폐기어 목록은 더 이상 여기 손으로 적지 않는다**(§67-11).
+#    `docs/수치원장.md` Ⅳ(🚫 쓰면 안 되는 숫자) 표에서 **자동 추출**한다 — 새 측정이
+#    무언가를 깰 때 그 표에 한 행을 적는 것이 이 프로젝트의 규율이므로, 표가 자라면
+#    점검도 같이 자란다. 손목록이 세상보다 늦게 자라던 병의 마지막 뿌리였다.
+from _forbidden import load as _load_forbidden        # noqa: E402
+
+BAD, _NUMERIC, _SRC = _load_forbidden()
 
 # 같은 문맥에 이 표시가 있으면 **정정문**이므로 통과시킨다.
 OK_MARK = ["🔴", "⚰️", "§", "아니다", "없다", "말 것", "쓰지 마", "않는다", "폐기", "정정", "옛 ", "금지"]
 
-# 🔴 숫자 비(比)는 **부분 문자열로 찾으면 안 된다** — `"0/3"` 이 `"0/37"`(§50 수용체
-#    발현 대조)에 걸려 위양성 2건을 냈다. 뒤에 숫자가 붙으면 다른 수다.
-_NUMERIC = {"0/3", "4/9", "0/108", "6세션", "3종 중 2종"}
 
 
 def _real_hit(text: str, bad: str, at: int) -> bool:
@@ -165,7 +165,7 @@ def main() -> int:
     print("=" * 78)
 
     tgt = _targets()
-    print(f"\n[⑴ AST 전수] 파일 {len(tgt)}개 × 폐기어 {len(BAD)}종")
+    print(f"\n[⑴ AST 전수] 파일 {len(tgt)}개 × 폐기어 {len(BAD)}종  (출처 {_SRC})")
     hits = scan_ast()
     if hits:
         print(f"  🔴 적중 {len(hits)}건 — 하나씩 보고 **정정문인지 미정정인지** 판단하라:")

@@ -48,8 +48,11 @@
   개념 혼동 없이 정직하게 해석.
 - **🛠 잔기 편집 = 개발성 스크러빙** — 잔기 수준 편집은 **BBB 개선(오라클 약함)이 아니라
   개발성 liability 스크러빙**으로 재조준(`core/developability_opt.py`). **기존 오라클**(규칙 기반
-  developability·AGGRESCAN·rmt_sim — 새 모델 없음, 게임 불가)로, **검증 기능을 보존(rmt_sim≥floor)**
-  하며 liability를 제거. **다목적(Pareto) 동시 최적화**(`pareso_scrub`)까지.
+  developability·AGGRESCAN·rmt_sim — 새 모델 없음, 게임 불가)로, **부모 유사도 하한(rmt_sim≥floor)**
+  안에서 liability를 제거. **다목적(Pareto) 동시 최적화**(`pareto_scrub`)까지.
+  🔴 이 하한을 **"기능 보존"이라 부르지 않는다** — 기능을 깨는 **단일 치환 검출률 0.0%**,
+  길이↔붕괴 ρ **−0.924**, T7 은 서열이 **69.2% 바뀐 채로도 통과**한다(§55). 재는 것은
+  "얼마나 많이 고쳤나"이고 "무엇을 고쳤나"가 아니다.
 - **🔗 링커도 자유 설계** — 링커 생성을 열어두되(표준 20 아미노산·최대 17aa), **링커가 실제로
   움직이는 축만** 노리게 한다. 실측상 off-target·응집은 링커에 거의 반응하지 않고, 링커만
   고칠 수 있는 것은 **접합부를 걸쳐 생긴 liability**다 → `design_candidate` 응답에
