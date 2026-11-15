@@ -115,6 +115,40 @@ AGENT_COLD_1112 = [
      "dev_agg_hot": 0.55, "n_eval": 16, "note": "§49-6"},
 ]
 
+# 🔴 B 팔 3판 — §58-5 의 **n=1 을 깨려고** 2026-11-15 에 라이브로 더 돌렸다(§59).
+#    조건은 §49-6 과 동일(`use_ledger=False` · `--skip-m5` · 콜드). 화물을 **두 종**으로
+#    나눈 이유: 화물 A 는 6세션(11-12 의 3 + 11-15 의 3)이 **전부 같은 설계**로 수렴해서
+#    독립 설계 수가 늘지 않았다. 화물 B(DSIP, §35 에서 **측정 전에** 고른 대조 화물 —
+#    길이 9aa · 순전하 −2 · GRAVY −0.70 으로 A 와 부호가 반대)에서 **새 셔틀이 나왔다.**
+#    🔴 **화물을 섞어 비교하면 안 된다** — liab·응집·불안정성은 **구성체**(화물 포함)에서
+#    계산되므로, 아래 묶음은 `--cargo` 와 **같은 화물의 기록만** 쓴다.
+AGENT_COLD_1115_A = [   # 화물 A `GSNKGAIIGLM`
+    {"session": "3판A-1", "linker": "EAAAK", "shuttle": "TFEYGGSRGKRNHFKTEEY",
+     "tier": "B", "dev_liab": 1, "instability": 37.3, "sel_off": 0.06,
+     "dev_agg_hot": 0.55, "n_eval": 17, "note": "§59"},
+    {"session": "3판A-2", "linker": "EAAAK", "shuttle": "TFEYGGSRGKRNHFKTEEY",
+     "tier": "B", "dev_liab": 1, "instability": 37.3, "sel_off": 0.06,
+     "dev_agg_hot": 0.55, "n_eval": 12, "note": "§59"},
+    {"session": "3판A-3", "linker": "EAAAK", "shuttle": "TFEYGGSRGKRNHFKTEEY",
+     "tier": "B", "dev_liab": 1, "instability": 37.3, "sel_off": 0.06,
+     "dev_agg_hot": 0.55, "n_eval": 11, "note": "§59"},
+]
+AGENT_COLD_1115_B = [   # 화물 B `WAGGDASGE` (DSIP)
+    {"session": "3판B-1", "linker": "", "shuttle": "TFEYGGSRGKRNHFKTEEY",
+     "tier": "B", "dev_liab": 0, "instability": 38.1, "sel_off": 0.06,
+     "dev_agg_hot": 0.55, "n_eval": 20, "note": "§59"},
+    {"session": "3판B-2", "linker": "", "shuttle": "TFEYGGSRGKRNHFKTEEY",
+     "tier": "B", "dev_liab": 0, "instability": 38.1, "sel_off": 0.06,
+     "dev_agg_hot": 0.55, "n_eval": 17, "note": "§59"},
+    # 🔴 **새 설계** — 셔틀이 다르다(3F>E · 7S>Y). 적법성 확인됨:
+    #    off 0.05 · |Δ시드| 0.04 ≤ 밴드 0.05 · K10·K15 보존 · rmt_sim 0.858 ≥ 0.85.
+    {"session": "3판B-3", "linker": "EAAAK", "shuttle": "TFEYGGYRGKRNNFKTEEY",
+     "tier": "B", "dev_liab": 1, "instability": 28.8, "sel_off": 0.05,
+     "dev_agg_hot": 0.55, "n_eval": 16, "note": "§59 신규 설계"},
+]
+CARGO_A, CARGO_B = "GSNKGAIIGLM", "WAGGDASGE"
+
+
 # 부모 전선 멤버 — §22-3 이 설계체와 직접 대조한 바로 그 멤버.
 AGENT_PARENT_FRONT = {"label": "A(EAAAK)3A+Angiopep-2", "tier": "A", "dev_liab": 3,
                       "instability": 38.9, "sel_off": 0.09, "dev_agg_hot": 0.75}
@@ -537,6 +571,40 @@ def main() -> None:
           f"사실상 **1개**이고 그 설계 하나가 상대하는 A 팔 설계체는 **{t2[1] // 3}개**다.")
     print("    🔴 1판의 판정(A→B 12:0)은 **도구 하나가 죽은 에이전트**와 겨룬 결과다"
           "(§49-2). 인용할 때 어느 판인지 반드시 밝힌다.")
+
+    # ── 7-d. 3판(2026-11-15) — §58-5 의 n=1 을 깨려고 더 돌린 세션 ──────────
+    # 🔴 **화물이 같은 기록만** 쓴다. liab·응집·불안정성은 구성체(화물 포함)에서
+    #    계산되므로 화물을 섞으면 축이 다른 양이 된다.
+    batch3 = (AGENT_COLD_1115_B if cargo == CARGO_B
+              else AGENT_COLD_1115_A if cargo == CARGO_A else [])
+    print("\n" + "-" * 78)
+    print(f"[7-d] 3판 (2026-11-15 라이브 · 화물 `{cargo}`) — §58-5 의 **n=1** 검사")
+    print("-" * 78)
+    if not batch3:
+        print(f"    (이 화물 `{cargo}` 의 3판 기록이 없다 — 화물 A/B 만 측정했다)")
+    else:
+        for a in batch3:
+            beats = [r for r in ok if dominates(r, a)]
+            beats_rb = [r for r in beats if dominates(_no_off(r), _no_off(a))]
+            loses = [r for r in ok if dominates(a, r)]
+            loses_rb = [r for r in loses if dominates(_no_off(a), _no_off(r))]
+            d = abs(a["sel_off"] - off_seed)
+            print(f"\n    {a['session']} ({'직접융합' if a['linker'] == '' else a['linker']}"
+                  f"+{a['shuttle']}) {_axrow(a)}"
+                  f"  [off |Δ시드| {d:.2f} → {'밴드 통과' if d <= OFF_BAND + 1e-9 else '🔴 밴드 위반'}]")
+            print(f"      · 이 설계체를 **지배하는 A 팔 설계체**: **{len(beats)}개** "
+                  f"(견고 **{len(beats_rb)}개**)")
+            print(f"      · 반대로 이 설계체가 **지배하는 A 팔 설계체**: **{len(loses)}개** "
+                  f"(견고 **{len(loses_rb)}개**)")
+        t3 = _tally(batch3)
+        uniq_full = {(a["linker"], a["shuttle"]) for a in batch3}
+        uniq_shut = {a["shuttle"] for a in batch3}
+        print(f"\n    합계 **3판**: A→B 지배 **{t3[0]}쌍**(견고 {t3[2]}) vs "
+              f"B→A **{t3[1]}쌍**(견고 {t3[3]})")
+        print(f"    🔴 **독립 설계 수**: 서로 다른 (링커,셔틀) **{len(uniq_full)}종** · "
+              f"서로 다른 **셔틀 {len(uniq_shut)}종** / {len(batch3)}세션")
+        print("    → 이 수가 §58-5 의 'n=1' 을 대체한다. 쌍 수(위)는 세션 중복을 포함하므로 "
+              "**독립 설계 수를 같이 적지 않으면 과장**이다.")
 
     # ── 8. 한계 재고지 ────────────────────────────────────────────────────
     print("\n" + "=" * 78)
