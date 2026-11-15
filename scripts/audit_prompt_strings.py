@@ -50,8 +50,22 @@ def _targets() -> list:
         for f in sorted(os.listdir(dp)):
             if f.endswith(".py") and f != "__init__.py":
                 out.append(f"{d}/{f}")
-    # 이 스크립트 자신은 뺀다 — `BAD` 목록 자체가 전부 적중한다(자기 참조 21건).
-    return [f for f in out if not f.endswith("audit_prompt_strings.py")]
+    # 🔴 **점검기들은 전부 뺀다** — `BAD` 목록 자체가 통째로 적중한다.
+    #    처음엔 `audit_prompt_strings.py` **한 파일만** 이름으로 뺐는데, 자매편
+    #    `audit_docs_claims.py` 를 만들자마자 그게 24건으로 떴다. 또 손으로 적은
+    #    목록이었던 것이다(§67-10). → 이름이 아니라 **역할**로 뺀다.
+    return [f for f in out if not _is_auditor(f)]
+
+
+def _is_auditor(rel: str) -> bool:
+    """점검기 자신인가 — `scripts/audit_*.py` 중 `BAD` 목록을 들고 있는 것."""
+    if not rel.startswith("scripts/audit_"):
+        return False
+    try:
+        src = io.open(os.path.join(ROOT, rel), encoding="utf-8").read()
+    except OSError:
+        return False
+    return "BAD = [" in src
 
 # 폐기·반증된 주장을 담은 말들. **늘려야 하는 목록이다** — 새 측정이 무언가를 깰 때마다
 # 그 말을 여기 추가하는 것이 §67 절차의 핵심이고, 그래야 다음에 자동으로 걸린다.

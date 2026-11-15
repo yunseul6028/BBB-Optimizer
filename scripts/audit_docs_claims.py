@@ -53,16 +53,27 @@ OK_MARK = ["🔴", "⚰️", "🚫", "§", "아니다", "없다", "말 것", "�
            "폐기", "정정", "옛 ", "금지", "깨졌", "철회", "대체", "한때", "이전", "미반영"]
 
 
+# 🔴 2026-11-16 **세 번째 정정** — 처음엔 `ROOT/*.md` + `docs/*.md` 만 봤다.
+#    `os.listdir` 는 **한 겹만** 본다 → `docs/figs/*.md`(표 3개)와 `.html` 그림이
+#    통째로 빠져 있었다. 손으로 적은 목록을 디렉터리 훑기로 바꿨더니, 이번엔
+#    **훑는 깊이**가 손으로 정해져 있었던 것이다. 같은 병의 세 번째 얼굴이다.
+#    → `os.walk` 로 **전부** 훑고, 확장자도 늘린다.
+_EXT = (".md", ".html", ".txt")
+_SKIP_DIRS = {".git", ".cache", "node_modules", "__pycache__", ".venv", "venv",
+              "deepb3p", "toxinpred3", "List_CitedPapers"}
+
+
 def _targets() -> list:
-    """🔴 목록을 **손으로 적지 않는다**(§67-8 의 교훈). 디렉터리를 훑는다."""
+    """🔴 목록도 **깊이도** 손으로 적지 않는다(§67-8 · §67-10 의 교훈)."""
     out = []
-    for f in sorted(os.listdir(ROOT)):
-        if f.endswith(".md"):
-            out.append(f)
-    d = os.path.join(ROOT, "docs")
-    if os.path.isdir(d):
-        out += [f"docs/{f}" for f in sorted(os.listdir(d)) if f.endswith(".md")]
-    return out
+    for dirpath, dirnames, filenames in os.walk(ROOT):
+        dirnames[:] = [d for d in dirnames
+                       if d not in _SKIP_DIRS and not d.startswith(".")]
+        for f in sorted(filenames):
+            if f.endswith(_EXT):
+                rel = os.path.relpath(os.path.join(dirpath, f), ROOT)
+                out.append(rel)
+    return sorted(out)
 
 
 def _real(line: str, bad: str, at: int) -> bool:
