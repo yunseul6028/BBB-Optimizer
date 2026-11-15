@@ -24,7 +24,7 @@ C. **순서 무관성** — 조성 보존 셔플(전하·GRAVY 가 **정확히**
    off 가 안 바뀌면 축은 서열이 아니라 **조성**을 보고 있다.
 D. **검출 + 복구 한 쌍** — ⑴ 검출: 알려진 기능 상실체 Angiopep-7(K10R/K15R)을
    Angiopep-2 와 구별하나. ⑵ 복구(해킹): CPP 의 양전하만 지운 "가짜 RMT"가 축을
-   속여 선택적으로 승격되나.
+   속여 off 축에서 승격되나.
 
 실행: 프로젝트 루트에서 Biopython 이 설치된 파이썬으로 (서브프로세스 0회·결정론).
   $ /usr/bin/python3 scripts/null_selectivity.py
@@ -81,7 +81,8 @@ def null_a() -> None:
         ("rmt_sim 만 (물리화학 제거)", dict(use_physchem=False, use_rmt=True)),
     ]
     print(f"RMT {len(rs)} vs CPP {len(cs)} (홀드아웃 {len(HOLDOUT_CPP)} 포함)")
-    print(f"{'조건':<32}{'RMT평균off':>11}{'CPP평균off':>11}{'AUC(선택성)':>13}")
+    print(f"{'조건':<32}{'RMT평균off':>11}{'CPP평균off':>11}{'AUC(off축)':>13}")
+    print("  🔴 AUC 는 RMT/CPP **판별력**이다 — 수용체 선택성이 아니다(§50).")
     for label, kw in arms:
         a = [off_variant(s, **kw) for s in rs]
         b = [off_variant(s, **kw) for s in cs]
@@ -92,7 +93,7 @@ def null_a() -> None:
 
 def null_b(n: int = 120, seed: int = 0) -> None:
     print("\n=== 널 B 🔴 방향성 대응 널: 같은 크기 무작위 편집에서 off 가 어디로 가나 ===")
-    print("축이 '수용체 선택성 상실 위험'을 재면 무작위 편집은 결합을 망치므로 off ↑ 가 기대값이다.")
+    print("축이 '수용체 결합 상실 위험'을 재면(🔴 그렇게 재지 않는다 §50) 무작위 편집은 결합을 망치므로 off ↑ 가 기대값이다.")
     rmt, _ = groups()
     rng = random.Random(seed)
     print(f"{'셔틀':<16}{'k':>2}{'기준off':>8}{'평균Δoff':>10}{'상승':>6}{'하락':>6}{'동일':>6}")

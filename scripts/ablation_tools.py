@@ -155,7 +155,7 @@ def run_session(cargo: str, disabled: list[str], max_rounds: int, rep: int) -> d
         "cargo": cargo, "max_rounds": max_rounds,
         "n_oracle_evals": 0, "rounds_used": 0, "finished": False, "approved": None,
         "final": None, "error": None, "struct_fail": 0,
-        # best_seen = 그 세션이 **직접 채점해서 본** 비독성 후보의 최고 유효점수.
+        # best_seen = 그 세션이 **직접 채점해서 본** 조성 필터 통과 후보의 최고 유효점수.
         # final < best_seen 이면 "이미 본 더 좋은 후보를 버리고 제출"한 퇴행(regression)이다.
         "best_seen": None, "best_seen_label": None, "best_from_design": None,
     }
@@ -241,7 +241,7 @@ def main():
     print(f"화물 {args.cargo} · 모델 {settings.gemini_model} · 상한 ${args.budget_usd}")
     print("── oracle(라이브러리 전수) 기준선 ──", flush=True)
     orc = oracle_baseline(probe, args.cargo, Path(args.oracle_cache))
-    print(f"  전수 {orc['n_combos']}조합 / 비독성 {orc['n_valid']}개")
+    print(f"  전수 {orc['n_combos']}조합 / 조성 필터 통과 {orc['n_valid']}개")
     print(f"  oracle 유효점수 최적 : {orc['oracle_eff']:.4f}  ({orc['oracle_eff_label']})")
     print(f"  oracle raw BBB 최적  : {orc['oracle_raw_bbb']:.4f}  ({orc['oracle_raw_label']})\n")
 

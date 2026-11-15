@@ -201,7 +201,7 @@ def front_structure(agent: OptimizationAgent) -> dict:
         print(_w(label, 26) + _w(str(fa), 34) + _w(str(fb), 34))
     A, B = fronts[CARGO_A], fronts[CARGO_B]
     row("채점 조합", A["n_total"], B["n_total"])
-    row("비독성(하드 게이트 통과)", A["n_nontoxic"], B["n_nontoxic"])
+    row("조성 필터(ToxinPred3 ≤0.38) 통과", A["n_comp_filter"], B["n_comp_filter"])
     row("후보군(근거 A·B·C·非CPP)", A["n_gate"], B["n_gate"])
     row("근거 그룹 분포", A["by_group"], B["by_group"])
     row("최상위 도달 그룹", A["best_group"], B["best_group"])

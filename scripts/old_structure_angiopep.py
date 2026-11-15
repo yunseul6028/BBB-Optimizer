@@ -66,7 +66,7 @@ def dominated(r, pool):
 print("=" * 78)
 print("수정 전 구조 (커밋 d671c60 · BBB 가 순위 1번 축) — Angiopep 3종 × 링커 13종")
 print("=" * 78)
-print(f"하드 게이트: 독성 + BBB 하한 {MIN_BBB_SIGNAL}\n")
+print(f"하드 게이트: 독성 + BBB 하한 ⚰️(이 스크립트는 **옛 시스템 재현**이다 — BBB 하한은 2026-11-10 폐지) {MIN_BBB_SIGNAL}\n")
 
 print("[1] 계열별 요약 — 셔틀 단독 BBB 와 구성체 BBB 최대")
 print("-" * 78)
@@ -84,7 +84,7 @@ print()
 print("[2] 옛 하드 게이트의 판정")
 print("-" * 78)
 print(f"  독성 통과            : {len(nontoxic)}/39")
-print(f"  BBB 하한({MIN_BBB_SIGNAL}) 통과 : **{len(gate)}/39**")
+print(f"  BBB 하한({MIN_BBB_SIGNAL}) 통과 : **{len(gate)}/39**   ⚰️ 2026-11-10 폐지된 게이트")
 if not gate:
     print("  🔴 문헌으로 검증된 Angiopep-2 조합 13개가 **전부 탈락**한다.")
     print("     즉 옛 하드 게이트는 이 계열을 **전멸**시킨다.")

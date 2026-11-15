@@ -1,16 +1,19 @@
 """개발성 기반 잔기 편집 (liability 스크러빙) — directed evolution.
 
 잔기 편집의 **정당한 쓰임**: BBB(오라클 약함·게임 가능)가 아니라 **개발성**(규칙 기반
-liability·AGGRESCAN — 거의 "사실"이라 게임 불가)을 목표로, **검증된 기능을 보존하는
-보존적 치환**으로 liability를 최소화한다.
+liability·AGGRESCAN — 거의 "사실"이라 게임 불가)을 목표로, 부모에서 멀지 않은
+**보존적 치환**으로 liability를 최소화한다.
 
 설계 원칙:
   · 목표(오라클): developability liability 개수(사실) + AGGRESCAN 응집(출판 척도)
-  · 기능 보존 제약: rmt_sim ≥ floor → 검증 리간드에서 멀어지지 않게(Angiopep-7 교훈:
+  · **부모 유사도 하한**: rmt_sim ≥ floor → 부모 서열에서 멀어지지 않게(Angiopep-7 교훈:
     서열 유사≠기능보장이므로 '보수적 범위'로만 편집). BBB는 라이브러리 스캐폴드가 담당.
   · 적합도 = (liability 개수, 응집) **사전식(lexicographic) 최소화** — 가중치 없음.
 
-⚠️ rmt_sim은 기능 보존의 **프록시**(유사도≠결합보장). 실제 결합 보존은 구조/실험 확정.
+🔴 이 하한을 "기능 보존 제약"이라 부르지 말 것 (§55 실측) — 재는 것은 **편집의 양**이다.
+   결합 모티프를 깨는 **단일 치환 검출률 0.0%**, 길이↔붕괴 상관 ρ −0.924, T7 은 서열이
+   **69.2% 바뀐 상태로도 통과**한다. 즉 기능 보존의 프록시로도 약하다. 실제 결합 보존은
+   구조/실험으로만 확정된다.
 """
 
 from __future__ import annotations
@@ -175,7 +178,9 @@ def objectives(seq: str) -> tuple:
     -----------------------------------------------------------------
     옛 벡터는 3축(liability·응집·불안정성)이었고 **off-target 이 빠져 있었다**. 그런데
     순위(`optimizer_agent.risk_axes`)는 **4축**이다. 이 어긋남에 측정된 대가가 있었다 —
-    M4 콜д 3세션의 설계체가 **전부** off 0.09 → 0.20~0.23 으로 악화했고(원장 기록 5/5),
+    M4 콜드 3세션의 설계체가 **전부** off 0.09 → 0.20~0.23 으로 악화했고(당시 원장에
+    "5/5" 로 적혔다 — 🔴 폐기된 **"지배 5/5"** 와 다른 수치다. 그 지배 주장은 9세션
+    재측정에서 7/9 로 깨졌다),
     그래서 "전선 멤버를 지배하는 설계체 0개"가 됐다. 옵티마이저가 **못 보는 축으로
     값을 치르고 있었던 것**이다. 원칙: **탐색의 목적함수는 심사의 축과 같아야 한다.**
 
@@ -260,7 +265,9 @@ def pareto_scrub(shuttle: str, rounds: int = 40, pop: int = 30,
     #    이게 `core/stability.py`·`core/developability.py` 에 적용한 원칙과 같다.
     if sim0 < rmt_floor:
         raise ValueError(
-            f"시드 자신이 기능 보존 하한을 위반한다: rmt_sim {sim0:.3f} < rmt_floor {rmt_floor} "
+            # 🔴 이 예외문은 `_optimize_developability` 가 그대로 LLM 에 돌려준다.
+            #    "기능 보존 하한"은 §55 가 반증한 이름이다(단일 치환 검출률 0.0%).
+            f"시드 자신이 **부모 유사도 하한**을 위반한다: rmt_sim {sim0:.3f} < rmt_floor {rmt_floor} "
             f"(셔틀 {shuttle[:24]}{'…' if len(shuttle) > 24 else ''}). "
             "원인은 둘 중 하나다 — ⑴ 이 셔틀이 `core/binding.REFERENCE_SHUTTLES` 에 없다"
             "(그러면 유사도가 0.0 이 되고 축이 '명부 등재 여부'를 재게 된다, §32), "

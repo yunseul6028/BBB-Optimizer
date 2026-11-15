@@ -66,7 +66,8 @@ NEGATIVES_RANDOM = {
     "insulinB-frag": "FVNQHLCGSHLVEAL",
 }
 
-# 독성 가드레일용: 알려진 독성 펩타이드(양성) vs 양성대조 비독성
+# 독성 가드레일용: 알려진 독성 펩타이드(양성) vs 양성대조 — 🔴 "비독성"이 아니라
+# **조성 필터 음성**이다(§47-6: 재는 것은 ToxinPred3 ML Score ≤ 0.38 인 조성).
 TOXIC_KNOWN = {
     "Melittin": "GIGAVLKVLTTGLPALISWIKRKRQQ",   # 벌독 — 강한 세포용해 독성
     "Mastoparan": "INLKALAALAKKIL",              # 말벌독
@@ -170,14 +171,14 @@ def m2_search(cargo, predictor, tox_pred, thr):
     valid = [r for r in rows if not r["toxic"]]
     print("\n── M2. 탐색 공간 & 도달 가능 집합 ──")
     print(f"  화물: {cargo}  |  탐색 공간: 링커 {len(LINKER_LIBRARY)} × 셔틀 {len(SHUTTLES)} = {len(rows)}개 조합")
-    print(f"  비독성(하드 게이트 통과): {len(valid)}/{len(rows)}")
+    print(f"  조성 필터(ToxinPred3 ≤0.38) 통과: {len(valid)}/{len(rows)}")
 
     agent = OptimizationAgent(get_settings())
     fr = agent.reachable_front(cargo)
     n_gate, n_all = fr["n_gate"], fr["n_gate_all"]
     front, front_top = fr["front"], fr["front_top"]
     print(f"  후보 자격(CPP 비교군·근거 등급 D·미등재 제외): {n_gate}/{n_all}")
-    print(f"  근거 그룹 분포(비독성, CPP 제외): {fr['by_group']}")
+    print(f"  근거 그룹 분포(조성 필터 통과, CPP 제외): {fr['by_group']}")
     print(f"  🎯 달성 가능한 최상위 근거 그룹: {fr['best_group']}")
     print(f"  Pareto 전선: 전체 {len(front)}개 · 최상위 그룹 전선(front_top) {len(front_top)}개")
     for b in front_top[:12]:
@@ -225,9 +226,9 @@ def m3_guardrails(tox_pred, thr):
     for name, r in zip(TOXIC_KNOWN, tox_r):
         flag = r > thr
         hits += flag
-        print(f"  독성 알려짐 {name:12s} risk={r:.2f} → {'✅ 탈락' if flag else '❌ 통과(오탐)'}")
+        print(f"  독성 알려짐 {name:12s} risk={r:.2f} → {'✅ 탈락' if flag else '❌ 통과(미검출)'}")
     for name, r in zip(BENIGN_KNOWN, ben_r):
-        print(f"  비독성 대조 {name:12s} risk={r:.2f} → {'❌ 탈락(오탐)' if r>thr else '✅ 통과'}")
+        print(f"  외부 음성 대조 {name:12s} risk={r:.2f} → {'❌ 탈락(위양성)' if r>thr else '✅ 통과'}")
     print(f"  독성 검출율: {hits}/{len(TOXIC_KNOWN)}")
 
 

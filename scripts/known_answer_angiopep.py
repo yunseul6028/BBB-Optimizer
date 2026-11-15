@@ -22,6 +22,11 @@
    쓸 수 있는 것은 **−60% / −85%** 와 **순전하 +2 동일** 뿐이다.
 
 실행: /usr/bin/python3 scripts/known_answer_angiopep.py   (유료 LLM 0회)
+
+† rmt_sim 은 **부모 유사도**다 — 🔴 "기능 보존"이 아니다(§55: 기능을 깨는 단일
+  치환 검출률 0.0% · 길이↔붕괴 ρ −0.924 · T7 은 69.2% 바뀐 채로 통과).
+‡ off-target 은 **전하 기반** 위험 프록시다 — 🔴 "선택성"이 아니다(§50: 이 라이브러리
+  11/12 에서 친유성항이 꺼져 사실상 전하 하나 · 표적 수용체 분포를 본 적 없음).
 """
 from __future__ import annotations
 
@@ -137,7 +142,7 @@ def main() -> int:
     verdicts = {}
     verdicts["순전하"]       = line("순전하 (pH 7.4)", "charge", "{:+.2f}", True,
                                   "← 문헌이 '같다'고 한 칸")
-    verdicts["rmt_sim"]      = line("rmt_sim (기능 보존 프록시)", "rmt", "{:.3f}", False)
+    verdicts["rmt_sim"]      = line("rmt_sim (부모 유사도†)", "rmt", "{:.3f}", False)
     verdicts["off_target"]   = line("off_target", "off", "{:.2f}", True)
     verdicts["불안정성"]     = line("불안정성 지수", "ii", "{:.1f}", True)
     verdicts["응집"]         = line("응집 핫스팟(정규화)", "agg", "{:.3f}", True)
@@ -216,7 +221,7 @@ def main() -> int:
 # ── 그림 생성 (--html) ────────────────────────────────────────────────────────
 _ROWSPEC = [
     ("순전하 (pH 7.4)",            "charge", "{:+.2f}", "문헌이 '셋 다 같다'고 한 칸"),
-    ("rmt_sim (기능 보존 프록시)",  "rmt",    "{:.3f}",  "하한 0.85"),
+    ("rmt_sim (부모 유사도†)",  "rmt",    "{:.3f}",  "하한 0.85"),
     ("off_target",                 "off",    "{:.2f}",  "밴드 ±0.05"),
     ("불안정성 지수",               "ii",     "{:.1f}",  "이진화 임계 40"),
     ("응집 핫스팟 (정규화)",        "agg",    "{:.3f}",  ""),
@@ -370,8 +375,8 @@ def _html(rows, verdicts, rmt_floor, off_band, ii_stable, pins) -> str:
 
 # 전달을 주장하는 축 — 이 정답지로 심판할 수 있다
 _JUDGED = [
-    ("rmt_sim (기능 보존 프록시)",  "rmt",           "{:.3f}", "낮을수록 기능 손상"),
-    ("off-target (선택성)",         "off",           "{:.2f}", "RMT 선택성 주장"),
+    ("rmt_sim (부모 유사도†)",  "rmt",           "{:.3f}", "낮을수록 기능 손상"),
+    ("off-target (전하 기반‡)",                     "off",           "{:.2f}", "RMT 경로 주장"),
     ("deepB3P (셔틀 단독)",         "bbb_shuttle",   "{:.3f}", "BBB 투과 확률"),
     ("deepB3P (구성체)",            "bbb_construct", "{:.3f}", "BBB 투과 확률"),
 ]

@@ -132,7 +132,7 @@ def main() -> None:
     print("| 펩타이드 | 라벨 | ML Score | 게이트 판정 | 맞나 |")
     print("|---|---|---|---|---|")
     for nm, lb, s in zip(names, labels, sc):
-        gate = "탈락(독성)" if s > THRESH else "통과(비독성)"
+        gate = "탈락" if s > THRESH else "통과"   # 🔴 "비독성"이 아니다 — 조성 필터다(§47-6)
         ok = (s > THRESH) == bool(lb)
         print(f"| {nm} | {'독성' if lb else '무해'} | {s:.3f} | {gate} | "
               f"{'✅' if ok else '🔴 **틀림**'} |")

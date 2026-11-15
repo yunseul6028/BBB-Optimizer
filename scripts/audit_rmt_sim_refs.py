@@ -181,7 +181,7 @@ def b4_counterfactual() -> None:
 def b5_scrub_seed() -> None:
     hdr("B5. 파생 영향 — rmt_floor 0.85 게이트 (개발성 최적화의 입구)")
     print("`pareto_scrub`/`scrub_liabilities` 는 `shuttle_similarity(seq).score ≥ 0.85` 를")
-    print("기능 보존 제약으로 쓴다. 참조 세트에 없는 셔틀은 **시드 자신이 이미 미달**이다.\n")
+    print("부모 유사도 제약으로 쓴다(🔴 기능 보존 아님 §55). 참조 세트에 없는 셔틀은 **시드 자신이 이미 미달**이다.\n")
     print("셔틀 | 참조세트? | shuttle_similarity(시드) | 0.85 통과?")
     print("---|---|---|---")
     for n, m in SHUTTLES.items():

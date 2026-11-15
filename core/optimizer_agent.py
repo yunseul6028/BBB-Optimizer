@@ -166,7 +166,10 @@ II_STABLE = 40.0
 def risk_axes(r: dict) -> tuple:
     """위험 스크린 축 (전부 **작을수록 좋음**). 축들 사이에 우선순위는 **없다**.
 
-    ⚠️ 응집 축은 **설계 모듈(링커+셔틀)의 AGGRESCAN 핫스팟**이다. 두 번 좁혔고 둘 다 실측 근거가 있다:
+    ⚠️ 응집 축은 **설계 모듈(링커+셔틀)의 AGGRESCAN a3v 척도 국소 최대(창 5aa)**다.
+    🔴 "AGGRESCAN 핫스팟"으로 쓰지 말 것 — AGGRESCAN 의 핫스팟 정의(HST 임계 + 프롤린
+    규칙 + 정규화)와 다르고, 측정 셔틀 **4/12 에 프롤린이 있어** 차이가 실제로 발생한다(§41).
+    두 번 좁혔고 둘 다 실측 근거가 있다:
       ① 전역 평균 → 국소 최대(핫스팟). 전역 평균은 **길이로 희석**된다 — M10 실측에서
          후보군 셔틀 8종 전부 링커 길이↔응집 순위상관이 음수(평균 -0.697)였고, 그 결과
          전선이 **가장 긴 링커로 전원 수렴**했다(M8 의 BBB 길이 아티팩트와 구조가 같다).
@@ -394,7 +397,12 @@ class OptimizationAgent:
             "shuttles": {k: v["seq"] for k, v in SHUTTLES.items()},
             # 캐시 키 버전 태그 — 전선의 **축 정의가 바뀌면** 반드시 올린다.
             # (옛 캐시를 재사용하면 BBB 기반 전선이 섞인다.)
-            "axes": "evidence-group+risk-pareto-v3", "thr": self.settings.toxicity_threshold,
+            # 🔴 2026-11-16 (§67) 규칙을 넓힌다 — **출력 딕셔너리의 키 이름이 바뀔 때도
+            #    올려야 한다.** `n_nontoxic` → `n_comp_filter` 로 바꿨을 때 옛 캐시가
+            #    그대로 읽혀서 `front.get('n_comp_filter', '?')` 가 **심사 프롬프트에 `?` 를
+            #    찍었다.** 예외도 경고도 없이 조용히 퇴화하는 경로다(같은 계열: Biopython
+            #    없을 때 축이 대체값으로 떨어지던 것). v3 → v4.
+            "axes": "evidence-group+risk-pareto-v4", "thr": self.settings.toxicity_threshold,
         }, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
         cache = BASE_DIR / ".cache" / "reachable" / f"{sig}.json"
         if cache.exists() and not refresh:
@@ -464,7 +472,10 @@ class OptimizationAgent:
 
         out = {
             "cargo": cargo,
-            "n_total": len(rows), "n_nontoxic": len(nontoxic),
+            # 🔴 `n_nontoxic` → `n_comp_filter` 로 바꿨다(§67). "비독성"은 틀린
+            #    이름이고(§47-6) 이 키가 심사 프롬프트에 그 이름으로 찍히고 있었다.
+            #    별칭은 남기지 않는다 — 별칭이 바로 틀린 이름이 살아남는 길이다(§60).
+            "n_total": len(rows), "n_comp_filter": len(nontoxic),
             "n_gate": len(gate), "n_gate_all": len(gate_all),
             "n_gate_rmt": len(gate_rmt),
             "by_group": by_group,

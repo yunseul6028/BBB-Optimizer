@@ -6,7 +6,7 @@
 이 시스템은 "LLM 설계 에이전트"로 소개되지만, **주장을 떠받치는 결정은 거의 전부
 결정론적**이다: 채점(7 엔진) · 순위(사전식 = 근거 그룹 → 위험 4축 Pareto) · 하드
 게이트(독성) · 래칫(퇴화한 최종 선택을 러닝 베스트로 **교체**). 그리고
-`reachable_front` 는 라이브러리 설계 공간을 **전수 열거**한다(156 조합 → 비독성
+`reachable_front` 는 라이브러리 설계 공간을 **전수 열거**한다(156 조합 → 조성 필터 통과
 132 → 후보 89 → 전선 5). 즉 라이브러리 안에서는 LLM 이 할 일이 없다.
 
 남는 **비중복 역할은 `design_candidate` 하나**다 — 라이브러리 **밖**의 서열 편집.
@@ -260,7 +260,7 @@ def main() -> None:
     print("[1] 도달 가능 전선 전수 열거 (refresh=True — 낡은 캐시 금지)")
     t0 = time.time()
     res = agent.reachable_front(cargo, refresh=True)
-    print(f"    전수 {res['n_total']} → 비독성 {res['n_nontoxic']} → 후보군 {res['n_gate']} "
+    print(f"    전수 {res['n_total']} → 조성 필터 통과 {res['n_comp_filter']} → 후보군 {res['n_gate']} "
           f"(RMT {res['n_gate_rmt']}) → **전선 {len(res['front'])}** "
           f"(최상위 그룹 전선 {len(res['front_top'])}) · {time.time() - t0:.0f}s")
     print(f"    최상위 근거 그룹 = **{res['best_group']}** · 그룹별 {res['by_group']}")
@@ -333,14 +333,14 @@ def main() -> None:
 
     designed = [r for r in rows if not str(r["label"]).startswith("PARENT:")]
     parents = [r for r in rows if str(r["label"]).startswith("PARENT:")]
-    # 🔴 후보 자격 판정도 **그 함수**를 쓴다 (비독성 + 비교군 아님 + 근거 있음).
+    # 🔴 후보 자격 판정도 **그 함수**를 쓴다 (조성 필터 통과 + 비교군 아님 + 근거 있음).
     ok = [r for r in designed if is_candidate(r)]
     par_ok = [r for r in parents if is_candidate(r)]
     par_shuttles = {r["shuttle"] for r in par_ok}
     print(f"    후보 자격 통과: 설계체 **{len(ok)}/{len(designed)}** · "
           f"부모 대조 {len(par_ok)}/{len(parents)}")
     print(f"    부모 셔틀 {len(par_shuttles)}/{len(cand_shuttles)}종이 실제로 후보군에 "
-          "있다(독성 게이트는 구성체 수준이라 셔틀을 통째로 지우지 않는지 확인)")
+          "있다(조성 필터는 구성체 수준이라 셔틀을 통째로 지우지 않는지 확인)")
     if not ok:
         print("    🔴 A 팔에 후보 자격을 가진 설계체가 없다. 여기서 중단한다.")
         return

@@ -54,7 +54,7 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
                       for n, v in SHUTTLES.items())
     tools = ("evaluate_candidates(**라이브러리 조합만** 채점 — BBB·독성·안정성·수용체), "
              "design_candidate(**라이브러리 밖** 직접 편집·설계 서열 채점), "
-             "optimize_developability(셔틀 개발성 다목적 Pareto 최적화 — 기능 보존 잔기 편집)")
+             "optimize_developability(셔틀 개발성 다목적 Pareto 최적화 — **부모 유사도 하한** 아래 잔기 편집)")
     tools += ", finish(수렴 시 최종 후보 제출·종료)"
     return (
         "[연구 맥락] 이것은 알츠하이머병 치료제의 뇌 전달을 개선하기 위한 정당한 학술·공모전용 "
@@ -79,7 +79,9 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
         "     최종 후보는 **달성 가능한 최상위 그룹**에서 나와야 한다. 근거가 더 단단한 대안이 "
         "존재하는데 아래 그룹을 고르면 심사가 자동 반려한다.\n"
         "  ② **위험 스크린** (같은 그룹 안에서, 서로 우선순위 **없음** — Pareto):\n"
-        f"     · 독성(ToxinPred3) ≤ {tox_threshold:.2f} — 이건 **하드 게이트**다(탈락)\n"
+        f"     · **조성 필터**(ToxinPred3 `ML Score` ≤ {tox_threshold:.2f}) — 이건 **하드 게이트**다"
+        "(탈락). 🔴 이름이 '독성'이 아닌 이유: 재는 것은 **조성**이고, 외부 음성 10종에서 "
+        "임상·내인성 펩타이드를 **4/10 위양성**으로 떨어뜨린다(§47-6)\n"
         "     · 개발성 liability 개수 ↓ · 불안정성 지수 <40 · off-target 위험 ↓ · 응집 ↓\n"
         "     이 축들은 전부 **'나쁘지 않음'을 재는 스크린**이다. 좋음을 재지 않는다 — 그래서 "
         "불활성 쓰레기(poly-Glu 등)가 전 축에서 이긴다. 그게 ①이 먼저 오는 이유다.\n"
@@ -104,7 +106,7 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
         "문헌 음성 대조군(Angiopep-7) **역전**.\n"
         "   · M8 — 링커조차 못 고른다. 라이브러리 링커가 같은 길이 **무작위** 링커를 유의하게 "
         "이긴 비율이 **우연 기대(~5%)와 구별되지 않고**, 경험 p 중위 **0.82** = 설계된 링커가 "
-        "무작위보다 **나쁘다**. "
+        "**방향이 오히려 거꾸로다**(🔴 '무작위보다 나쁘다'로 단정할 측정은 아니다 — 중위 p 다). "
         "그리고 길이↔점수 순위상관 -0.495 — 6/9 셔틀에서 '최적 링커'가 **직접융합(링커 없음)**"
         "이었다. 즉 옛 시스템이 '링커 없음'을 권한 것은 **아티팩트**였다.\n"
         "  👉 그래서 **'BBB 점수가 낮다/높다'를 선택 근거로 쓰면 심사가 반박한다.** "
@@ -138,7 +140,8 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
         "- design_candidate: 라이브러리에 얽매이지 말고 셔틀/링커의 특정 잔기를 자유롭게 편집한 서열을 "
         "제안·채점할 수 있다(진짜 설계). 왜 그렇게 편집했는지 edit_note에 남겨라.\n"
         "- optimize_developability: 최종 셔틀을 확정하기 전에 **개발성(liability·응집·불안정성)을 신뢰 "
-        "오라클로 다목적 Pareto 최적화**하고 싶을 때. 기능(rmt_sim)을 보존하는 변이체 전선을 받아, "
+        "오라클로 다목적 Pareto 최적화**하고 싶을 때. **부모 유사도 하한**(`rmt_sim`)을 지키는 "
+        "변이체 전선을 받아, "
         "개발성이 개선된 셔틀 하나를 골라 design_candidate/finish에 쓰라. 이는 **BBB 효능이 아니라 "
         "'만들 수 있게(제조·안정성)' 다듬는 축** — BBB는 검증 라이브러리 셔틀 선택이 담당한다.\n"
         "- finish: 고정 스텝을 다 쓸 필요 없다. 목적을 충분히 만족했다고 판단하면 언제든 finish로 최종 "
@@ -164,7 +167,9 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
         f"{evidence_brief()}\n\n"
         f"참고 라이브러리 — 링커: {lib_l}\n  셔틀: {lib_s}\n"
         f"주의: construct가 {MODEL_MAX_LEN}aa 초과면 BBB는 연결부위(링커+셔틀)로 계산된다. deepB3P는 "
-        f"짧은 펩타이드 학습이라 절대값보다 상대 비교가 신뢰됨. 최대 {max_rounds}행동. 한국어로 간결히."
+        f"짧은 펩타이드 학습이다. 🔴 **상대 비교도 신뢰하지 마라** — 셔틀 간(M6)·링커 간(M8) 순위를 "
+        f"못 매기고, 정답지(Angiopep 계열 11종의 실측 뇌 흡수, n=11)와는 **유의하게 거꾸로**다"
+        f"(ρ −0.620 · p 0.046). 절대값도 상대값도 선택 근거가 아니다. 최대 {max_rounds}행동. 한국어로 간결히."
     )
 
 
@@ -190,8 +195,9 @@ class GeminiOptimizationAgent(OptimizationAgent):
         decls = [
             types.FunctionDeclaration(
                 name="evaluate_candidates",
-                description=("후보 융합체(cargo+linker+shuttle)들의 BBB 투과 점수(deepB3P), 독성"
-                             "(ToxinPred3), 융합체 안정성(불안정성 지수), 수용체 유사도를 배치로 채점."),
+                description=("후보 융합체(cargo+linker+shuttle)들의 BBB 점수(deepB3P — 🔴 **참고치이고 "
+                             "순위에 쓰지 않는다**), **조성 필터** 점수(ToxinPred3 — '독성'이 아니라 "
+                             "조성을 잰다, §47-6), 융합체 불안정성 지수, 수용체 유사도를 배치로 채점."),
                 parameters=S(type=T.OBJECT, properties={
                     "rationale": S(type=T.STRING, description="이 후보들을 낸 근거"),
                     "constructs": S(type=T.ARRAY, items=S(type=T.OBJECT, properties={
@@ -236,12 +242,18 @@ class GeminiOptimizationAgent(OptimizationAgent):
         decls.append(types.FunctionDeclaration(
             name="optimize_developability",
             description=("한 셔틀 서열을 **순위 위험 4축**(liability·응집·불안정성·**off-target**)에서 "
-                         "신뢰 가능한 규칙/척도 오라클로 **다목적(Pareto) 최적화**한다. 검증 기능을 "
-                         "보존(rmt_sim 하한) + **문헌 근거 등급 상속 보존**하는 보존적 잔기 치환으로, "
+                         "신뢰 가능한 규칙/척도 오라클로 **다목적(Pareto) 최적화**한다. **부모 유사도 "
+                         "하한**(rmt_sim) + **문헌 근거 등급 상속** 조건 아래 보존적 잔기 치환으로, "
+                         "🔴 (이 하한은 '기능 보존'이 아니다 — 무작위 **단일 치환**에서 기능이 무너진 65개가 "
+                         "**65개 전부 등급을 받았다 = 검출률 0.0%**. 재는 것은 '얼마나 많이 고쳤나'이고 "
+                         "'무엇을 고쳤나'가 아니다, §55) "
                          "서로 상충하는 네 축을 동시에 줄인 변이체들의 트레이드오프 전선을 반환하고 "
                          "**그 전선을 실제로 채점해 러닝 베스트·래칫에 반영한다**. "
-                         "목적함수가 심사의 축과 **같다** — 네가 직접 편집할 때 자주 잃는 off-target 까지 "
-                         "함께 본다. **BBB 효능이 아니라 '만들 수 있게(제조·안정성·선택성)' 다듬는 용도** — "
+                         "네가 직접 편집할 때 자주 잃는 off-target 까지 함께 본다. 🔴 단 **목적함수가 심사의 "
+                         "축과 완전히 같지는 않다**(실측): off 는 탐색에서 **밴드 제약**이고 심사에서는 "
+                         "**축**이며, 불안정성은 탐색에서 연속·심사에서 **이진**(임계 40)이다. 그 범위 차이로 "
+                         "이진 판정이 최대 47% 갈린다(§66). **BBB 효능이 아니라 '만들 수 있게"
+                         "(제조·안정성)' 다듬는 용도** — "
                          "최종 후보 셔틀을 확정하기 전에 호출하라."),
             parameters=S(type=T.OBJECT, properties={
                 "shuttle": S(type=T.STRING, description="개발성을 다듬을 셔틀 서열"),
@@ -395,7 +407,9 @@ class GeminiOptimizationAgent(OptimizationAgent):
         if tier:
             return (f"\n\n[문헌 근거] ✅ **{parent}** 의 후손으로 인정 — 유사도 {sim:.2f} ≥ "
                     f"{INHERIT_SIM_MIN:.2f} → 등급 **{tier}**({evidence_group(tier)}) 상속. "
-                    f"부모의 결합 모티프를 보존했다는 뜻이다(기능 보존 제약).")
+                    f"🔴 이것은 **등급 상속 자격**일 뿐 \"기능을 보존했다\"는 뜻이 아니다 — "
+                    f"이 하한은 무작위 **단일 치환**에서 기능이 무너진 65개를 **65개 전부 "
+                    f"통과시켰다(검출률 0.0%)**. 재는 것은 **편집의 양**이다(§55).")
         near = f"최근접 {parent}·유사도 {sim:.2f}" if parent else "닮은 셔틀 없음"
         return (f"\n\n[문헌 근거] ⚠️ **미등재** — {near} < {INHERIT_SIM_MIN:.2f} 이라 등급을 "
                 f"상속받지 못했다. 이 서열은 **최종 후보가 될 수 없다**(심사가 자동 반려). "
@@ -421,14 +435,17 @@ class GeminiOptimizationAgent(OptimizationAgent):
             f"상속 하한 {INHERIT_SIM_MIN:.2f} 에 미달 → 자동 미승인(REVISE).\n"
             f"이 프로젝트에서 '이 셔틀이 좋다'를 말할 수 있는 근거는 **문헌 인용뿐**이다"
             f"(우리 BBB 점수는 셔틀 간·링커 간 순위를 매길 수 없음이 M6·M8 로 확인됐다). "
-            f"설계체는 부모 셔틀의 결합 모티프를 보존했을 때만 그 근거를 물려받는다. "
+            f"설계체는 부모 셔틀과 **서열 유사도**가 하한 이상일 때만 그 근거를 물려받는다 "
+            f"(🔴 이 하한이 재는 것은 **편집의 양**이고 기능 보존이 아니다 — 결합 모티프를 "
+            f"깨는 단일 치환 검출률이 **0.0%** 였다, §55). "
             f"하한 {INHERIT_SIM_MIN:.2f} 은 실측 간극에서 왔다(정당한 개발성 변이체 최소 0.830 "
             f"vs 스크램블 0.529·homopolymer 0.429·무작위 0.136).\n"
             f"요구: 라이브러리 셔틀에서 **보존적 치환**(liability 제거 등)으로 다시 설계하거나, "
             f"라이브러리 셔틀을 그대로 쓰라.")
 
     def _optimize_developability(self, args, cargo=""):
-        """셔틀의 개발성(liability·응집·불안정성)을 다목적 Pareto로 최적화 — 기능 보존.
+        """셔틀의 개발성(liability·응집·불안정성)을 다목적 Pareto로 최적화.
+        제약은 **부모 유사도 하한**이다(🔴 "기능 보존"이 아니다 — §55).
         BBB가 아니라 '제조·안정성' 다듬기. 신뢰 오라클만 사용(규칙·AGGRESCAN·Guruprasad)."""
         from .developability_opt import OFF_BAND, objectives, pareto_scrub
         sh = "".join(ch for ch in (args.get("shuttle", "") or "").upper() if ch.isalpha())
@@ -444,7 +461,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
             #    돌려줘서, 조용한 무작동을 고쳐 놓고도 **이유가 다시 가려졌다.**
             #    메시지를 그대로 통과시켜 에이전트가 원인을 읽고 대응하게 한다.
             return (f"개발성 최적화 불가 — {exc}",
-                    AgentEvent("text", text=f"🧪 개발성 최적화 불가: 기능 보존 하한 위반 (셔틀 `{sh}`)"))
+                    AgentEvent("text", text=f"🧪 개발성 최적화 불가: 부모 유사도 하한 위반 (셔틀 `{sh}`)"))
         except Exception as exc:  # noqa: BLE001
             return (f"개발성 최적화 실패: {type(exc).__name__}: {exc}",
                     AgentEvent("text", text="🧪 개발성 최적화 실패"))
@@ -518,7 +535,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
         md = (f"**🧪 개발성 다목적(Pareto) 최적화** — 셔틀 `{sh}` {pn}\n"
               f"시드: liability {seed[0]}·응집 {seed[1]}·불안정 {seed[2]}"
               f"·**off {off_seed}**(목적이 아니라 ±{OFF_BAND} 밴드 제약). "
-              f"기능 보존(rmt_sim≥0.85) + **근거 상속 보존(부모 유사도 ≥ "
+              f"부모 유사도 하한(rmt_sim≥0.85) + **근거 상속(부모 유사도 ≥ "
               f"{INHERIT_SIM_MIN:.2f})**하며 **목적 3축**(liability·응집·불안정성) 동시 최소화 "
               f"+ **off-target 은 최소화 대상이 아니라 ±{OFF_BAND} 밴드 제약**(§26) "
               f"→ 비지배 전선 {len(front)}개{drop}:\n{body}"
@@ -614,8 +631,19 @@ class GeminiOptimizationAgent(OptimizationAgent):
         grp = front.get("by_group") or {}
         lines = [
             f"[도달 가능 집합 — 라이브러리 전수 {front.get('n_total', '?')}조합을 **동일 지표**로 채점한 결과]",
-            f"  비독성 {front.get('n_nontoxic', '?')}개 → 하드 게이트(**독성뿐**) 통과 "
-            f"{front.get('n_gate_all', '?')}개 → 그중 **후보군 {front.get('n_gate', '?')}개** "
+            # 🔴 이 문자열은 **심사 모델의 시스템 프롬프트로 그대로 들어간다.**
+            #    옛 문구는 *"비독성 N개 → 하드 게이트(독성뿐) 통과 M개"* 였는데 두 군데가
+            #    틀렸다. ⑴ **"비독성"은 틀린 이름이다**(§47-6) — 이 게이트가 재는 것은
+            #    `ToxinPred3 ML Score ≤ 0.38` 인 **조성**이고, 외부 음성 10종에서 임상·내인성
+            #    펩타이드를 4/10 위양성으로 떨어뜨린다. §48-3 이 **같은 오칭을 심사 프롬프트의
+            #    다른 자리에서** 이미 한 번 걷어냈는데 이 자리는 남아 있었다(§67).
+            #    ⑵ `n_nontoxic` 과 `n_gate_all` 은 **같은 값이다**(`gate_all = list(nontoxic)`,
+            #    `optimizer_agent.py:420`) — 단계가 둘인 것처럼 보여줘서 모델에게 없는 단계를
+            #    알려주고 있었다. 하나로 합친다.
+            f"  **조성 필터**(ToxinPred3 `ML Score ≤ 0.38`) 통과 "
+            f"{front.get('n_comp_filter', '?')}개 — 라이브러리의 **유일한 하드 게이트**이고 "
+            f"'비독성'이 아니다(재는 것은 조성이다, §47-6) "
+            f"→ 그중 **후보군 {front.get('n_gate', '?')}개** "
             f"(CPP 비교군·근거 등급 D·미등재 제외. 엄밀 RMT {front.get('n_gate_rmt', 0)}개)",
             "  후보군의 **문헌 근거 그룹 분포**: "
             + " · ".join(f"{g} {n}개" for g, n in grp.items() if n) or "—",
@@ -682,14 +710,17 @@ class GeminiOptimizationAgent(OptimizationAgent):
             "그리고 **당신도 BBB 점수가 낮다는 이유로 REVISE 하지 마십시오** — 탈락 사유가 아닙니다.\n\n"
             f"{front_text}\n\n"
             "[하드 게이트 — 이 둘만 탈락 사유. 위반하면 예외 없이 REVISE]\n"
-            f"  ① **독성**: ToxinPred3 > {thr:.2f} → 탈락.\n"
+            f"  ① **조성 필터**: ToxinPred3 `ML Score` > {thr:.2f} → 탈락. 🔴 이것은 '독성'이 아니라\n"
+            "       **조성**을 재는 필터다(§47-6: 외부 음성 10종에서 임상·내인성 펩타이드 "
+            "4/10 위양성 · 독소 조각 삽입을 같은 길이 무작위와 구별 못 함 p=0.243). "
+            "하드 게이트이므로 **판정은 그대로 적용**하되, 승인문에 '비독성'이라고 쓰지 마십시오.\n"
             "  ② **문헌 근거 등급 보유**: 최종 후보의 셔틀이 라이브러리 셔틀이거나, 설계체라면 "
             f"가장 닮은 라이브러리 셔틀과 유사도 **{INHERIT_SIM_MIN:.2f} 이상**으로 그 등급을 "
             "**상속**받아야 합니다. 미등재(상속 실패)·등급 **D**(BBB 통과 단독 근거 없음)는 탈락.\n"
             "    왜: 문헌 인용은 이 시스템에서 '이 후보가 좋다'를 말할 수 있는 **유일한 근거**입니다. "
-            "신뢰하는 나머지 축(독성·응집·liability·불안정성·off-target)은 전부 **'나쁘지 않음'만** "
+            "나머지 축(조성 필터·응집·liability·불안정성·off-target)은 전부 **'나쁘지 않음'만** "
             "재므로, 근거를 요구하지 않으면 **불활성 쓰레기가 모든 축에서 이깁니다** "
-            "(실측: poly-Glu 는 off 0.00·선택성 1.00·응집 0.12·liability 0 으로 Angiopep-2 를 "
+            "(실측: poly-Glu 는 off 0.00·비특이흡수축 1.00·응집 0.12·liability 0 으로 Angiopep-2 를 "
             "전 축에서 이깁니다).\n\n"
             "[셔틀 역할 — CPP·등급 D 는 비교군이다]\n"
             "  **RMT**(수용체 매개)가 후보군이고, **CPP**(TAT·SynB1·Penetratin)는 비특이 흡수 "
@@ -697,7 +728,9 @@ class GeminiOptimizationAgent(OptimizationAgent):
             "하고 그 대안을 지목하십시오.\n\n"
             f"{evidence_critic_rule()}"
             "[트레이드오프 축 — 탈락 사유가 아니라 '한계로 명시할' 사유]\n"
-            "  불안정성 · 개발성 liability/양이온 · off-target · 응집 · 설계의 실질.\n"
+            "  불안정성 · 개발성 liability · off-target · 응집 · 설계의 실질.\n"
+            "  (🔴 'liability/양이온'으로 적던 것을 고쳤다 — **전하 항목은 liability 에서 "
+            "분리됐다**(§38-1: Angiopep-2 3→2 · TAT 4→0). 축에 없는 성분을 이름에 넣어 뒀다.)\n"
             "  이 축들에서는 제출 후보가 전선에서 **지배당하는지만** 보십시오.\n"
             "   · **지배당함** = 근거 그룹이 같거나 더 좋고 위험 축 전부가 같거나 더 나은 "
             "**달성 가능** 후보가 실재 → REVISE, 그 후보를 지목.\n"
@@ -729,7 +762,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
 
         반환 `(approve: bool, critique_text: str, tier: str)`.
         tier ∈ {APPROVE, APPROVE_WITH_LIMITS, REVISE} — **계층 판정**이다.
-        하드 게이트(**독성 · 문헌 근거 등급 보유**)만 탈락 사유이고, 나머지 축은
+        하드 게이트(**조성 필터**(ToxinPred3) · 문헌 근거 등급 보유)만 탈락 사유이고, 나머지 축은
         '도달 가능 집합(Pareto 전선) 대비 지배당하는가'로만 본다. 절대적 이상과 비교하면 승인 가능 영역이 비기 때문이다
         (실측: 심사 기준 AND → 130조합 중 0개. `reachable_front` 주석 참고).
         """
@@ -748,9 +781,13 @@ class GeminiOptimizationAgent(OptimizationAgent):
              f"/전체구성체={choice.get('dev_agg_hot_full', '?')}, "
              f"liability({len(dev_list)}): "
              + ("; ".join(dev_list) if dev_list else "없음") + "\n"
-             f"선택성/off-target — 위험={choice.get('sel_level', '?')}"
-             f"(선택성 {choice.get('selectivity', '?')}), {choice.get('sel_mech', '?')}\n"
-             f"용해도 — {choice.get('sol_level', '?')}(점수 {choice.get('sol_score', '?')})")
+             f"비특이 흡수 위험(전하 기반 off-target) — 위험={choice.get('sel_level', '?')}"
+             f"(축값 {choice.get('selectivity', '?')} — 🔴 \"선택적\"으로 읽지 마십시오: "
+             f"친유성항이 라이브러리 11/12 에서 꺼져 있어 이 축은 사실상 **전하 하나**이고, "
+             f"표적 수용체의 조직 분포를 본 적이 없습니다), {choice.get('sel_mech', '?')}\n"
+             f"용해도(보조) — {choice.get('sol_level', '?')}(점수 {choice.get('sol_score', '?')}) "
+             f"🔴 **순위 축이 아닙니다**: 이 점수는 내부에 응집 전역평균을 품고 있어 위 응집 항과 "
+             f"중복이고(§27), 용해도 축은 개발성으로 통합됐습니다. 이것으로 후보를 가르지 마십시오.")
         cfg = types.GenerateContentConfig(
             system_instruction=self._critic_prompt(self._front_text(front)), temperature=1.0,
             thinking_config=types.ThinkingConfig(include_thoughts=False))
@@ -867,8 +904,9 @@ class GeminiOptimizationAgent(OptimizationAgent):
         dev_list = choice.get("dev_liabilities") or []
         m = (f"화물={cargo}, 링커={choice.get('linker') or '—'}, 셔틀={choice.get('shuttle')}\n"
              f"BBB={choice['bbb']:.3f}, 독성={choice['tox']:.3f}, 불안정성={choice['instability']}, "
-             f"선택성={choice.get('selectivity', '?')}({choice.get('sel_level', '?')}), "
-             f"개발성위험={choice.get('dev_risk', '?')}, 용해도={choice.get('sol_level', '?')}, "
+             f"비특이흡수축={choice.get('selectivity', '?')}({choice.get('sel_level', '?')}), "
+             f"개발성위험={choice.get('dev_risk', '?')}, "
+             f"용해도(보조·순위축 아님)={choice.get('sol_level', '?')}, "
              f"liability={len(dev_list)}개")
         sys = (
             "너는 BBB 융합체 설계의 자문(advisory) 에이전트다. 최종 후보가 심사에서 **최종 미승인**됐다. "
@@ -879,7 +917,9 @@ class GeminiOptimizationAgent(OptimizationAgent):
             "트리밍) — 셔틀은 de-novo 생성하지 말고 검증된 셔틀을 개량한다.\n"
             "  2) 링커 교체 — 셔틀이 구조상 파묻힐(occluded) 땐 (GGGGS)3 등 긴 유연 링커로 노출 개선, "
             "반대로 너무 길어 불안정하면 직접융합/짧은 링커로.\n"
-            "  3) 라이브러리 내 다른 셔틀 — 선택성(RMT형) 높은 쪽으로.\n"
+            "  3) 라이브러리 내 다른 셔틀 — 🔴 **축값이 아니라 문헌 근거 등급이 더 단단한 쪽**으로. "
+            "(옛 문구는 \"선택성 높은 쪽으로\"였는데, 그 축의 **개선 신호는 신뢰할 수 없다**고 "
+            "대응 널 심사에서 판정됐다 — 무작위 편집의 46%가 위험 감소 없이 축을 내린다, §26)\n"
             "  4) 실패가 화물 자체 특성(독성·불안정·과소수성) 때문이면 그 사실을 명시하고, 셔틀로는 "
             "해결 불가임을 정직히 밝힌 뒤 화물 측 개량 또는 다른 전달 모달리티(향후)를 권고.\n"
             "출력: 한국어로 '### 🔧 권고안(대안)' 제목 아래 ①실패 진단 1~2문장 + ②우선순위 대안 2~3개"
@@ -1174,7 +1214,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 final_report = (final_report or "") + (
                     f"\n\n> **비교군 참고선(CPP, 최종 선택 대상 아님)** — "
                     f"`{best_cpp.get('shuttle', '?')}` — {self._summary(best_cpp)}. "
-                    "비특이 흡수 상한을 보여주는 대조군이며, 기전(비수용체)과 선택성 때문에 "
+                    "비특이 흡수 상한을 보여주는 대조군이며, **기전(비수용체)** 때문에 "
                     "후보군에서 제외됩니다. **BBB 점수가 높게 나오는 것이 바로 그 점수를 "
                     "순위에 쓸 수 없는 이유입니다**(M1 조성 편향).")
 
@@ -1194,7 +1234,12 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 # 모델이 빈 텍스트를 돌려줘도 판정 문구를 채워 카드가 사라지지 않게.
                 yield AgentEvent(
                     "critique",
-                    critique_text or ("하드 게이트(독성·BBB 하한)를 통과하고 도달 가능 전선에서 "
+                    # 🔴 폴백 문구다(모델이 빈 텍스트를 줄 때만 쓴다). 옛 문구는
+                    #    *"하드 게이트(독성·BBB 하한)를 통과하고"* 였는데 **BBB 하한은
+                    #    2026-11-10 에 폐지됐다**(`DEV_BBB_FLOOR_RATIO` · `MIN_BBB_SIGNAL`
+                    #    — 후자는 사실 양이온성 필터였다). 즉 **없는 게이트를 통과했다고
+                    #    사용자 화면에 적고 있었다.** 그리고 "독성"도 틀린 이름이다(§47-6).
+                    critique_text or ("**조성 필터**(ToxinPred3)를 통과하고 도달 가능 전선에서 "
                                       "지배당하지 않습니다. 최종 선택을 승인합니다."
                                       if approve else "근거가 불충분합니다. 개선이 필요합니다."),
                     data={"approve": approve, "tier": tier})

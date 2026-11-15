@@ -2,7 +2,9 @@
 BBB-Optimize AI Agent — Streamlit UI (thin layer)
 =================================================
 화물(cargo) 서열을 받아, **자율 설계 에이전트**가 링커·셔틀을 조립·잔기 편집(가설 주도)·개발성 최적화 도구로
-오케스트레이션하고 deepB3P(BBB)·ToxinPred3(독성)·선택성 등 7축으로 평가해 최종 융합체를 설계한다.
+오케스트레이션하고 deepB3P(BBB **보고치**)·ToxinPred3(**조성 필터**)·전하 기반 off-target 등
+7축으로 평가해 최종 융합체를 설계한다. 🔴 "선택성"이라고 쓰지 않는다 — off 축은 이 라이브러리
+11/12 에서 **전하 하나**이고 표적 수용체의 조직 분포를 본 적이 없다(§50).
 UI는 얇은 표시·스트리밍 계층이며 계산은 core/*.py.
 
 실행:
@@ -82,7 +84,7 @@ with st.expander("동작 방식 · 지표 안내"):
         "- **순위 기준은 문헌 근거 등급 → 위험 축(liability · 불안정성 · off-target · 응집) Pareto** 입니다.\n"
         "- ⚠️ **BBB 점수는 순위에 쓰지 않습니다** — 셔틀 간·링커 간 순위로 쓸 근거가 없어(M6 · M8) "
         "**보고치**로만 표시합니다. deepB3P 예측 확률(0–100)이고 실제 투과율은 실험(Papp/logBB)이 필요합니다.\n"
-        "- ⚠️ 하드 게이트는 **독성 게이트 하나**뿐이고, 그것이 재는 것은 ToxinPred3 ML Score 입니다 — "
+        "- ⚠️ 하드 게이트는 **조성 필터 하나**뿐이고, 그것이 재는 것은 ToxinPred3 ML Score 입니다 — "
         "외부 라벨에서 특이도가 완전하지 않았으므로(임상·내인성 펩타이드 오탈락 관측) "
         "**'게이트 통과 = 무독성'으로 읽지 마세요**.\n"
         "- ESMFold 구조 노출도는 **에이전트 도구가 아닙니다**(애블레이션에서 기여 없음) — "
@@ -264,13 +266,15 @@ def _demo_agent_events(cargo):
     yield _Ev("final", text=(
         f"**최종 보고서** — `{r_win['shuttle_name']} · {r_win['linker_name']}` 조합이 "
         f"BBB {r_win['bbb']*100:.0f}점, 독성 {r_win['tox']*100:.0f}%로 최적입니다. "
-        "안정성·선택성 모두 안전 범위이며, 실제 적용 전 합성·In Vitro 검증이 필요합니다."))
+        "불안정성·off-target 축 모두 밴드 안이며, 실제 적용 전 합성·In Vitro 검증이 필요합니다. "
+        "(데모 데이터입니다.)"))
     yield _Ev("critique", text=(
-        "BBB·독성·선택성 근거가 일관되고 임계값을 만족합니다. 최종 선택을 승인합니다."),
+        "조성 필터를 통과하고 달성 가능 전선에서 비지배입니다. 조건부 승인합니다. "
+        "(데모 데이터이고, BBB 는 순위 근거가 아닙니다.)"),
         data={"approve": True})
     yield _Ev("reflection", text=(
         "추가로 검증 셔틀의 잔기 편집(design_candidate)·개발성 다목적 최적화(optimize_developability)로 "
-        "기능을 보존하며 더 나은 후보를 다듬을 수 있습니다."))
+        "**부모 유사도 하한** 안에서 더 나은 후보를 다듬을 수 있습니다."))
 
 
 def _emit_agent_event(ev):
@@ -417,7 +421,7 @@ def _render_agent_summary(events, cargo):
                         st.markdown("### 에이전트 최종 선택")
                         # 🔴 옛 문구는 "하드 게이트(독성·BBB 하한)"였다 — **BBB 하한은 폐지됐다**
                         #    (양이온성 필터였음이 측정으로 드러남). 하드 게이트는 독성 하나뿐이다.
-                        st.caption("심사 조건부 승인 — 하드 게이트(독성 게이트) 통과, 달성 가능 "
+                        st.caption("심사 조건부 승인 — 하드 게이트(**조성 필터**) 통과, 달성 가능 "
                                    "전선에서 비지배. 남은 한계는 심사 카드에 명시됩니다.")
                         _v = Verdict.ACCEPTED
                     elif is_pick and approved is False:
@@ -461,12 +465,13 @@ def _render_agent_summary(events, cargo):
                     _devs = cand.get("dev_liabilities") or []
                     st.caption(
                         f"개발성 위험 **{cand.get('dev_risk', '?')}** · 순전하 {cand.get('dev_charge', '?')} · "
-                        f"liability {cand.get('dev_liab', 0)}개 · 용해도 **{cand.get('sol_level', '?')}**"
-                        f"({cand.get('sol_score', '?')})"
+                        f"liability {cand.get('dev_liab', 0)}개 · 용해도(보조·순위 축 아님) "
+                        f"**{cand.get('sol_level', '?')}**({cand.get('sol_score', '?')})"
                         + (f" ({', '.join(_devs[:2])}…)" if _devs else ""))
                     st.caption(
-                        f"선택성 **{cand.get('selectivity', '?')}** · off-target 위험 "
-                        f"**{cand.get('sel_level', '?')}** · {cand.get('sel_mech', '?')}")
+                        f"비특이 흡수 위험 **{cand.get('sel_level', '?')}** "
+                        f"(축값 1−off {cand.get('selectivity', '?')}) · {cand.get('sel_mech', '?')} "
+                        "— 🔴 수용체 선택성이 아닙니다(전하 기반)")
                     st.caption(f"링커 `{cand['linker'] or '—'}` · 셔틀 `{cand['shuttle'] or '—'}`")
     else:
         # 🔴 옛 문구는 원인을 하나로 단정했다("독성 임계값을 통과한 후보가 없습니다").
@@ -486,7 +491,7 @@ def _render_agent_summary(events, cargo):
             _cpp = sum(1 for r in _rows if is_comparison_only(r))
             st.warning(
                 f"채점은 {len(_rows)}건 했지만 **최종 후보 자격을 갖춘 것이 없습니다** "
-                f"(독성 게이트 탈락 {_tox}건 · 비교군 CPP {_cpp}건 · 나머지는 문헌 근거 등급 미달). "
+                f"(**조성 필터** 탈락 {_tox}건 · 비교군 CPP {_cpp}건 · 나머지는 문헌 근거 등급 미달). "
                 "최종 후보는 **근거 등급 A·B·C** 이고 비교군이 아닌 것만 될 수 있습니다.")
     if final:
         with st.container(border=True):

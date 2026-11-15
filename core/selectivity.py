@@ -1,13 +1,22 @@
-"""선택성 / off-target 위험 — 비특이 조직 흡수 가능성.
+"""전하 기반 비특이 흡수 위험(off-target) — 🔴 **선택성 모듈이 아니다.**
 
-양전하·친유성으로 세포막을 직접 뚫는 방식(CPP)은 **여러 조직에 비특이적으로 흡수**되어
-off-target 효과·독성을 낸다. 반면 **수용체 매개 수송(RMT, 예: Angiopep-2 → LRP1)** 은
-특정 수용체가 있는 조직(BBB)만 노려 **선택적**이다.
+이 파일의 옛 제목은 "선택성 / off-target 위험"이었고, 문헌 논리(CPP 는 비특이, RMT 는
+수용체가 있는 조직만 노려 선택적)를 그대로 모듈 이름으로 삼았다. 그 이름이 **측정하지
+않은 것을 주장한다**는 것이 세 번의 실측으로 드러났다:
 
-이 모듈은 셔틀의 (1) 양전하 밀도, (2) 친유성(GRAVY), (3) 수송 메커니즘(RMT vs CPP)을
-종합해 **off-target 위험 / 선택성**을 근사한다. 핵심 논리:
-  - 양전하↑ 또는 친유성↑ → 비특이 흡수 위험↑ (둘 중 하나만 높아도 위험 = 확률적 OR)
-  - RMT 수용체 표적성↑ → off-target 위험↓ (특정 수용체만 노리므로)
+  · §50-5 — 친유성항은 `GRAVY > 0` 에서만 켜지는데 라이브러리 **11/12 가 GRAVY ≤ 0** 이다.
+    즉 이 축은 사실상 **양전하 밀도 하나**이고, 전하만으로 계산한 값과 정확히 같다.
+  · §50-3 — 위험을 실제로 정하는 **표적 수용체의 조직 분포를 이 축은 본 적이 없다.**
+    외부 발현 대조에서 축이 **낙관한 셔틀 4종 · 반대 방향 0종**이었다.
+  · §26 — 대응 널 심사에서 **악화 검출만 신뢰할 수 있고 개선 신호는 신뢰할 수 없다.**
+    그래서 탐색에서는 단측 상한이 아니라 **밴드 제약**(`OFF_BAND`)으로만 쓴다.
+
+계산: 셔틀의 (1) 양전하 밀도, (2) 친유성(GRAVY) 을 확률적 OR 로 합치고,
+(3) RMT 참조 서열과의 유사도로 그 값을 **할인**한다(`off = raw * (1 − 0.6 * rmt_sim)`).
+할인은 수용체 선택성의 측정이 아니라 **문헌 셔틀을 덜 벌주기 위한 보정**이다.
+
+반환 필드 `selectivity`(= 1 − off)는 하위 호환 때문에 이름이 남아 있을 뿐이다 —
+**사용자·LLM 에게 "선택성"이라는 말로 보고하지 않는다.**
 
 ⚠️ 진짜 off-target은 생체분포(biodistribution) 실험으로 확정한다. 서열 기반 위험 프록시다.
 """
@@ -38,12 +47,20 @@ def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
 
 
 def assess_selectivity(shuttle: str) -> SelectivityResult:
-    """셔틀의 off-target(비특이 흡수) 위험과 선택성을 평가한다."""
+    """셔틀의 **전하 기반 비특이 흡수 위험**(off-target)을 평가한다.
+
+    🔴 이름 주의 — 이것은 **수용체 선택성이 아니다.** ⑴ 친유성항은 `GRAVY > 0` 에서만
+    켜지는데 라이브러리 **11/12 가 GRAVY ≤ 0** 이라, off 가 **전하항만으로 계산한 값과
+    정확히 같다**(§50-5). ⑵ 위험을 실제로 정하는 **표적 수용체의 조직 분포를 이 축은 본
+    적이 없다** — 외부 발현 대조에서 축이 **낙관한 셔틀 4종 · 반대 방향 0종**이었다(§50-3).
+    ⑶ 대응 널 심사 판정은 **악화 검출만 신뢰할 수 있고 개선 신호는 신뢰할 수 없다**(§26).
+    그래서 반환 필드 `selectivity`(= 1 − off)를 **"선택성"이라는 말로 보고하지 않는다.**
+    """
     seq = "".join(c for c in (shuttle or "").upper() if c in _STD)
     # 정당하게 계산 불가한 입력(의존성 문제가 아님): 4aa 미만 셔틀은 전하밀도·GRAVY·
     # 레퍼런스 정렬이 모두 무의미하다 → 예외가 아니라 `error` 를 채운 정의된 결과.
     if len(seq) < 4:
-        return SelectivityResult(error="셔틀이 너무 짧아 선택성 계산 불가")
+        return SelectivityResult(error="셔틀이 너무 짧아 off-target 축 계산 불가")
 
     from .developability import _net_charge_ph74, require_protein_analysis
     net = _net_charge_ph74(seq)
@@ -53,7 +70,7 @@ def assess_selectivity(shuttle: str) -> SelectivityResult:
     # ⚠️ 여기가 실측된 조용한 퇴화 지점이다: Biopython 이 없으면 gravy 가 0.0 으로
     #    떨어져 친유성 항이 사라지고 T7 의 off-target 위험이 0.140 → 0.340 으로
     #    **경고 없이** 움직였다. 의존성 부재는 배포 오류 → 즉시 중단.
-    ProteinAnalysis = require_protein_analysis("off-target/선택성(GRAVY)")
+    ProteinAnalysis = require_protein_analysis("off-target 축의 친유성항(GRAVY)")
     # 감싸지 않는 이유: seq 는 이미 표준 20종으로 걸러진 len>=4 서열이라 gravy() 는
     # 실패할 수 없다. 그래도 실패하면 진짜 버그이므로 예외를 그대로 올린다.
     gravy = round(float(ProteinAnalysis(seq).gravy()), 2)
@@ -81,8 +98,14 @@ def assess_selectivity(shuttle: str) -> SelectivityResult:
     cpp_scores = {n: per.get(n, 0.0) for n in REFERENCE_SHUTTLES if n not in rmt_refs}
     best_cpp = max(cpp_scores, key=cpp_scores.get, default="")
     if best_is_rmt:
-        mechanism = f"RMT형({bind.best_ref} 유사·수용체 선택적)"
-        drivers.append("RMT 수용체 표적 → 선택성↑")
+        # 🔴 옛 라벨은 "RMT형(… 유사·수용체 **선택적**)" / "RMT 수용체 표적 → **선택성↑**"
+        #    이었다. 두 문구 다 **측정하지 않은 것을 주장한다** — 이 축은 표적 수용체의
+        #    조직 분포를 본 적이 없고(§50-3), 하는 일은 RMT 참조 서열과의 **유사도로
+        #    전하항을 할인**하는 것뿐이다(`off = raw * (1 − 0.6 * rmt_sim)`).
+        #    이 문자열은 `sel_mech` 로 **심사 LLM 에 그대로 들어간다**(§67).
+        mechanism = f"RMT형({bind.best_ref} 서열 유사)"
+        drivers.append("RMT 참조 서열과 유사 → 전하 기반 위험항을 할인했다 "
+                       "(🔴 수용체 선택성을 측정한 것이 아니다)")
     elif best_cpp and cpp_scores[best_cpp] >= 0.4:
         mechanism = f"CPP형({best_cpp} 유사·비특이 막투과)"
     else:
@@ -93,5 +116,7 @@ def assess_selectivity(shuttle: str) -> SelectivityResult:
         off_target_risk=off, selectivity=sel, charge_density=dens, gravy=gravy,
         mechanism=mechanism, rmt_similarity=round(rmt_sim, 2), risk_level=level,
         drivers=drivers)
-    r.verdict = f"off-target 위험 {level}(선택성 {sel}) — {mechanism}"
+    # 🔴 옛 문구는 "(**선택성** {sel})" 이었다. 잰 것은 전하(+친유성)이고 수용체
+    #    선택성이 아니다(§50). 지금은 LLM 입력에 쓰이지 않지만 되살아날 때를 대비한다.
+    r.verdict = f"비특이 흡수 위험 {level}(축값 1−off = {sel}) — {mechanism}"
     return r

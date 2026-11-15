@@ -1,6 +1,10 @@
-"""선택성 축 vs deepB3P 단독 — RMT vs CPP 판별력 재현 벤치 (docs/experiments.md §1).
+"""off 축(전하 기반) vs deepB3P 단독 — **RMT vs CPP 판별력** 재현 벤치 (docs/experiments.md §1).
 
-우리 메커니즘(선택성 축, 규칙 기반)이 deepB3P 단독보다 RMT 리간드와 CPP를 잘 분리하는지를
+🔴 이 벤치의 AUC 1.000 을 "**선택성** AUC"로 부르지 말 것 — 재는 것은 RMT 라벨과 CPP
+라벨을 가르는 **판별력**이고 수용체 선택성이 아니다. off 축은 이 라이브러리 11/12 에서
+사실상 **전하 하나**이고 표적 수용체의 조직 분포를 본 적이 없다(§50 · §67-1).
+
+우리 메커니즘(off 축, 규칙 기반)이 deepB3P 단독보다 RMT 리간드와 CPP를 잘 분리하는지를
 AUC(RMT>CPP)로 비교한다. 보상 해킹(deepB3P가 양이온 CPP를 과대평가) 실증.
 
 평가셋:
@@ -9,7 +13,7 @@ AUC(RMT>CPP)로 비교한다. 보상 해킹(deepB3P가 양이온 CPP를 과대�
 
 실행: 프로젝트 루트에서 Biopython이 설치된 파이썬으로 (deepB3P는 vendor/.venv-deepb3p subprocess).
   $ python scripts/bench_selectivity.py
-결과(시드 고정·결정론): 선택성 AUC 1.0 · deepB3P AUC ~0.40 (둘 다 <0.5 = CPP를 더 높게 = 보상해킹).
+결과(시드 고정·결정론): off 축 AUC 1.0 · deepB3P AUC ~0.40 (둘 다 <0.5 = CPP를 더 높게 = 보상해킹).
 """
 from __future__ import annotations
 
@@ -53,13 +57,13 @@ def main() -> None:
     bbb = [r.bbb_permeability for r in DeepB3PLocalPredictor().predict_many(seqs)]
 
     nR = len(rmt)
-    print(f"{'셔틀':<16}{'군':>5}{'선택성':>9}{'deepB3P':>10}")
+    print(f"{'셔틀':<16}{'군':>5}{'off축':>9}{'deepB3P':>10}")
     for i, n in enumerate(names):
         print(f"{n:<16}{'RMT' if i < nR else 'CPP':>5}{sel[i]:>9.3f}{bbb[i]:>10.3f}")
 
     print("\n=== 요약 ===")
     print(f"{'축':<12}{'RMT평균':>9}{'CPP평균':>9}{'AUC(RMT>CPP)':>14}")
-    print(f"{'선택성':<12}{sum(sel[:nR])/nR:>9.3f}{sum(sel[nR:])/(len(sel)-nR):>9.3f}"
+    print(f"{'off 축':<12}{sum(sel[:nR])/nR:>9.3f}{sum(sel[nR:])/(len(sel)-nR):>9.3f}"
           f"{auc(sel[:nR], sel[nR:]):>14.3f}")
     print(f"{'deepB3P':<12}{sum(bbb[:nR])/nR:>9.3f}{sum(bbb[nR:])/(len(bbb)-nR):>9.3f}"
           f"{auc(bbb[:nR], bbb[nR:]):>14.3f}")

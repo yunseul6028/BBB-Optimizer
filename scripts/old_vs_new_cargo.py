@@ -221,7 +221,7 @@ def compare(p_old: str, p_new: str) -> None:
     axes = [
         ("옛 결정 규칙  eff = bbb − 0.25·off", lambda r: r["bbb"] - OLD_OFF_PENALTY * r["sel_off"]),
         ("옛 1차 신호   bbb(융합 deepB3P)", lambda r: r["bbb"]),
-        ("선택성 축     selectivity", lambda r: r["selectivity"]),
+        ("off 축(전하기반)  selectivity", lambda r: r["selectivity"]),
         ("off 축        −sel_off", lambda r: -r["sel_off"]),
     ]
     if not cpp_o:
