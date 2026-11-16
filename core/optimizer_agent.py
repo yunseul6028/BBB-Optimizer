@@ -402,7 +402,11 @@ class OptimizationAgent:
             #    그대로 읽혀서 `front.get('n_comp_filter', '?')` 가 **심사 프롬프트에 `?` 를
             #    찍었다.** 예외도 경고도 없이 조용히 퇴화하는 경로다(같은 계열: Biopython
             #    없을 때 축이 대체값으로 떨어지던 것). v3 → v4.
-            "axes": "evidence-group+risk-pareto-v4", "thr": self.settings.toxicity_threshold,
+            # 🔴 2026-11-16 (§68) **v4 → v5** — `dev_liab` 에서 응집 임계 가산을 뺐다
+            #    (`core/developability.py`, 응집을 순위에 두 번 세고 있었다). 심사에서는
+            #    모든 구성체가 +1 이던 **순수 상수**라 전선·순위는 안 바뀌지만, 캐시에
+            #    담긴 `n_liabilities` **값 자체**가 바뀐다. 값이 바뀌면 올린다.
+            "axes": "evidence-group+risk-pareto-v5", "thr": self.settings.toxicity_threshold,
         }, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
         cache = BASE_DIR / ".cache" / "reachable" / f"{sig}.json"
         if cache.exists() and not refresh:

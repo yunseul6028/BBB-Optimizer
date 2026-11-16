@@ -780,6 +780,42 @@ CONSERVED_POSITIONS: dict[str, tuple[int, ...]] = {
     #    ≥10× 와 ≥8× 는 **아프로티닌 vs 트랜스페린**, 7× 는 **Angiopep-2 vs 아프로티닌**.
     #    Angiopep-7 의 손실은 배수가 아니라 **"실질 흡수 ~85% 감소"**로만 적혀 있다.
     "Angiopep-2": (10, 15),
+
+    # Penetratin `RQIKIWFQNRRMKWKK` — **W6 하나**. (2026-11-16 추가 · §57-4)
+    # ✅ **1차 대조 완료**: Dom G, Shaw-Jackson C, Matis C, Bouffioux O, Picard JJ,
+    #    Prochiantz A, Mingeot-Leclercq MP, Brasseur R, Rezsohazy R.
+    #    *Nucleic Acids Res.* 2003;31(2):556-561 (PMC140524, OA). 원문 문장:
+    #    *"phase transfer by charge neutralization was also observed with a variant
+    #    peptide of same charge and hydrophobicity in which the tryptophan at position 6
+    #    was replaced by a phenylalanine. However, Penetratin, but not its mutant
+    #    version, is internalized by live cells."*
+    #
+    # 🔴 **2차 귀속 함정을 피한 자리다.** 리뷰들은 "단일 W6F 가 기능을 잃는다"를
+    #    Derossi 1994 (*J Biol Chem* 269:10444) 에 귀속시키는데, 그 논문 초록은
+    #    **W6·W14 이중 치환**을 말한다. 단일 변이의 1차 데이터는 **Dom 등 자신의
+    #    실험**이다. (같은 모양의 함정: 링커 `(GGGGS)n` 의 Huston1988 귀속.)
+    #
+    # 왜 Angiopep-2 핀과 같은 급인가 — 세 조건을 다 만족하고 하나가 더 붙는다:
+    #   ① **위치 명시** (position 6) ② **전하 통제** (same charge)
+    #   ③ **단일 변이 시험** (W6→F 단독)  ④ 🆕 **소수성까지 통제** (same hydrophobicity)
+    #
+    # 🔴 **W14 는 핀이 아니다.** Christiaens B 등 *Eur J Biochem.* 2002;269:1-9 에서
+    #    W6 이 W14 보다 지질과 더 단단히 결합하고, W14 치환체는 내재화를 잃지 않는다.
+    #
+    # ⚠️⚠️ **지키는 기능의 종류가 Angiopep-2 와 다르다 — 과대 해석 금지.**
+    #    Angiopep-2 핀은 *BBB 실질 수송*(parenchymal uptake)을 지키고,
+    #    이 핀은 *세포 내재화*(cellular internalization)를 지킨다. **BBB 투과가 아니다.**
+    #    라이브러리에서 Penetratin 의 근거 자체가 CPP 내재화이므로 **대상 기능은 맞지만**,
+    #    "보존 위치가 1종 → 2종으로 늘었다"를 **BBB 쪽 개선으로 쓰면 안 된다.**
+    #
+    # 영향 범위(§57-4 선제 평가, 적용 후 실측으로 확인):
+    #   · **순위 영향 0** — Penetratin 은 `is_comparison_only`(mechanism 이 `CPP` 로
+    #     시작)로 후보 자격에서 제외된다(M2: 132 → 89). 전선 23 · front_top 5 가
+    #     움직일 경로가 없다.
+    #   · 효과는 **설계 시점의 상속 게이트뿐** — Penetratin 유사 변이체가 `inherit()`
+    #     로 등급을 물려받을 때 6번 자리를 본다. §55 가 깬 구멍("게이트는 편집 수를
+    #     세지 기능을 보지 않는다")을 **1/12 → 2/12** 로 메운다. 🔴 2/12 도 한계다.
+    "Penetratin": (6,),
 }
 
 

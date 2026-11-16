@@ -62,7 +62,26 @@ from core.selectivity import assess_selectivity
 from core.stability import assess_stability
 from core.toxicity import ToxinPred3LocalPredictor
 
+# ⚰️ **2026-11-16 (§68) — 이 스크립트가 재던 ⑴ 은 프로덕션에 반영됐다.**
+#    `core/developability.py` 에서 `agg_hotspot >= 0.70` liability 가산을 **제거**했다.
+#    그래서 `dev_f.liabilities` 에 `HOT_FLAG` 라벨이 **더 이상 없고**, 아래 `n_hot` 은
+#    항상 0 이 된다 → **v1 은 이제 base 와 동일**이다. "효과 0"이 새 결과로 읽히면 안 되므로
+#    아래에서 **소리 나게** 알린다(§68-3). 이 파일은 당시 측정의 **재현용**으로 남긴다 —
+#    옛 동작을 보려면 `git show <§68 직전 커밋>:core/developability.py` 로 되돌려 돌린다.
 HOT_FLAG = "응집 핫스팟"
+
+def _s68_notice() -> None:
+    """§68 반영 이후 이 A/B 가 **구별을 못 한다**는 사실을 실행할 때마다 알린다."""
+    from core.developability import assess_developability as _A
+    if not any(HOT_FLAG in x for x in _A("GSNKGAIIGLM" + "AEAAAKEAAAKEAAAKA"
+                                         + "TFFYGGSRGKRNNFKTEEY").liabilities):
+        print("⚰️ **§68 알림** — `dev_liab` 의 응집 핫스팟 가산은 이미 제거됐다(프로덕션).")
+        print("   따라서 이 실행에서 **v1 계열은 base 와 같고, 차이 0 은 새 결과가 아니다.**")
+        print("   당시 A/B 를 재현하려면 §68 직전 커밋의 `core/developability.py` 로 돌린다.\n")
+
+
+_s68_notice()
+
 VARIANTS = ["base", "v1", "v3", "v13"]
 
 

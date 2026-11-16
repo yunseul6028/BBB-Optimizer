@@ -218,6 +218,57 @@ def _score(agent: OptimizationAgent, cargo: str, combos: list[dict]) -> list[dic
     return rows
 
 
+def _renorm(agent: OptimizationAgent, cargo: str, batches: list[tuple[str, list[dict]]]) -> list[str]:
+    """B 팔 기록의 **축 값을 현행 코드로 다시 계산**한다. 기록은 서열만 믿는다.
+
+    🔴 왜 필요한가 (2026-11-16 · §68). 이 파일의 B 팔 묶음들은 축 값을 **코드 상수로**
+       들고 있었다(`"dev_liab": 1, "instability": 37.3, …`). 그런데 A 팔은 **방금**
+       `_evaluate` 로 채점된다. 그래서 **축 정의가 바뀌는 순간 두 팔의 단위가 갈라진다** —
+       그리고 실제로 갈라졌다: §68 에서 `dev_liab` 에서 응집 임계 가산을 뺐더니 A 팔은
+       전부 1 씩 내려가고 B 팔 상수는 그대로 남아, **A 팔에 liability 1개의 공짜 우위**가
+       생겼다. 지배 개수를 그대로 읽으면 그 공짜 우위가 결론으로 올라간다.
+
+       이 파일은 이미 같은 함정을 **한 번 적어 놓고도** 당했다 — 7-c 의 "🔴 1판은 `liab`
+       단위가 다르다"(§38-1)가 바로 그 경고다. 경고를 **글로** 남기면 다음 변경에서 또
+       당한다. 그래서 **숫자를 재계산**으로 바꾼다: 기록이 보존하는 것은 `(링커, 셔틀,
+       평가 횟수, 세션)` 이고 **축은 언제나 현행 코드가 만든다.**
+
+    ⚠️ 서열이 없는 기록(§21-2)은 재계산 불가 → 그대로 두고 `_renorm_skip` 로 표시한다.
+       그 항목은 축으로 비교하지 않는다(이미 "서열 미기록 — 판정 불가"로 출력된다).
+    ⚠️ 화물이 다른 묶음을 넘기면 안 된다 — 호출부가 `--cargo` 로 이미 걸러 준다.
+    """
+    todo, notes = [], []
+    for _, entries in batches:
+        for a in entries:
+            if a.get("shuttle"):
+                todo.append(a)
+    if not todo:
+        return notes
+    combos = [{"label": f"_renorm:{i}", "linker": a.get("linker") or "",
+               "shuttle": a["shuttle"],
+               "sequence": cargo + (a.get("linker") or "") + a["shuttle"]}
+              for i, a in enumerate(todo)]
+    print(f"    [재계산] B 팔 기록 {len(todo)}건의 축을 **현행 코드**로 다시 채점한다 (§68)")
+    scored = _score(agent, cargo, combos)
+    by_label = {r["label"]: r for r in scored}
+    for i, a in enumerate(todo):
+        r = by_label.get(f"_renorm:{i}")
+        if r is None:
+            a["_renorm_skip"] = True
+            notes.append(f"{a['session']}: 채점 실패 — 축 비교 제외")
+            continue
+        for k in ("dev_liab", "instability", "sel_off", "dev_agg_hot"):
+            rec, now = a.get(k), r.get(k)
+            if rec is not None and now is not None and abs(float(rec) - float(now)) > 0.005:
+                notes.append(f"{a['session']}·{k}: 기록 {rec} → 현행 **{now}**")
+            a[f"_rec_{k}"] = rec
+            a[k] = now
+    for a in todo:
+        if a.get("_renorm_skip"):
+            continue
+    return notes
+
+
 def _axrow(r: dict) -> str:
     ax = risk_axes(r)
     return (f"{r.get('dev_liab')} | {float(r.get('instability') or 0):.1f}"
@@ -414,6 +465,33 @@ def main() -> None:
     for w in led_designed:
         print(f"      · {(w.get('linker') or '직접융합'):<12}+{w['shuttle']:<30} "
               f"[{w.get('tier')}←{w.get('tier_parent')}·{w.get('tier_sim')}] {_axrow(w)}")
+    # 🔴 **축 재계산(§68)** — 여기서 한 번에 한다. 이 뒤의 7-a~7-e 가 모두 이 값을 쓴다.
+    #    1판·2판 기록은 화물 A 로 측정됐으므로 다른 화물에서는 재계산하지 않고 **제외**한다.
+    _rn_batches: list[tuple[str, list[dict]]] = []
+    if cargo == CARGO_A:
+        _rn_batches += [("1판", AGENT_COLD), ("2판", AGENT_COLD_1112)]
+        _rn_batches += [("3판A", AGENT_COLD_1115_A), ("4판", AGENT_COLD_1116_A)]
+    elif cargo == CARGO_B:
+        _rn_batches += [("3판B", AGENT_COLD_1115_B)]
+    _rn_batches += [("부모 전선", [dict(AGENT_PARENT_FRONT, session="부모 전선",
+                                        shuttle="TFFYGGSRGKRNNFKTEEY",
+                                        linker="AEAAAKEAAAKEAAAKA")])]
+    _rn_notes = _renorm(agent, cargo, _rn_batches)
+    # 부모 전선은 사본으로 재계산했으므로 원본에 되돌려 넣는다.
+    _pf = _rn_batches[-1][1][0]
+    for _k in ("dev_liab", "instability", "sel_off", "dev_agg_hot"):
+        AGENT_PARENT_FRONT[_k] = _pf[_k]
+    if _rn_notes:
+        print("    🔴 **기록 ≠ 현행 코드** — 축 정의가 바뀐 흔적이다(기록은 서열만 믿는다):")
+        for _ln in _rn_notes:
+            print(f"        · {_ln}")
+        print("        ⇒ 아래 모든 맞대결은 **현행 코드 값**으로 한다. 기록 값은 "
+              "`_rec_*` 로 남겨 두되 **지배 판정에 쓰지 않는다.**")
+    else:
+        print("    ✅ B 팔 기록의 축이 현행 코드와 **전부 일치** — 단위가 섞이지 않았다.")
+    if cargo != CARGO_A:
+        print("    ⚠️ 1판·2판 기록은 화물 A 로 측정됐다 → 이 화물에서는 **축 비교 제외**.")
+
     print("\n    §22-2 콜드 3세션(1판) + §49-6 재측정(2판) 최종 선택:")
     for a in list(AGENT_COLD) + list(AGENT_COLD_1112):
         sh = a["shuttle"] or "(미기록)"
@@ -552,11 +630,15 @@ def main() -> None:
     print("-" * 78)
     print("    ⚠️ B 팔 기록의 등급 글자는 A(현행 B)지만 `dominates` 는 **그룹**을 쓰고 "
           "둘 다 0 이라 비교가 성립한다.")
-    # 🔴 그런데 등급 글자보다 더 나쁜 불일치가 하나 있다.
-    print("    🔴 **1판은 `liab` 단위가 다르다.** §38-1 에서 순위 축 `n_liabilities` 에서 "
-          "전하 주도 항목이 빠졌고(Angiopep-2 는 3 → 2), 1판 기록의 `liab 3` 은 **옛 정의**다. "
-          "A 팔은 **현행 정의**로 방금 채점됐으므로 1판 맞대결은 **단위가 섞인 비교**다 — "
-          "숫자로 인용하지 말 것. 2판 기록은 현행 코드로 측정돼 단위가 같다(`docs/수치원장.md` Ⅲ-2).")
+    # 🔴 등급 글자보다 더 나쁜 불일치가 하나 있었다 — **지금은 해소됐다**(§68).
+    print("    ✅ **`liab` 단위 불일치는 해소됐다**(§68). 옛 버전은 B 팔의 축을 **코드 상수**로 "
+          "들고 A 팔만 재채점해서, 축 정의가 바뀔 때마다 두 팔의 단위가 갈라졌다 "
+          "(§38-1 전하항 분리 · §68 응집 가산 제거 — 두 번 다 그랬다). 이제 B 팔은 "
+          "**서열만 기록하고 축은 매 실행 재계산**한다(`_renorm`, 위 [6] 의 재계산 표). "
+          "그래서 1판 맞대결도 **단위가 맞는 비교**다.")
+    print("    🔴 그 대가로 **1판의 숫자가 바뀐다.** 옛 보고의 `A→B 12:0`(§30-2)은 "
+          "**양 팔이 모두 옛 정의였을 때**의 값이다 — 폐기하지 말고 '옛 정의의 값'으로 병기하되, "
+          "**현행 코드의 1판 수치와 섞지 말 것.**")
     b_named = [a for a in list(AGENT_COLD) + list(AGENT_COLD_1112) if a["shuttle"]]
     for a in b_named:
         beats = [r for r in ok if dominates(r, a)]
@@ -680,11 +762,13 @@ def main() -> None:
     print("4. B 팔은 **기록**이고 A 팔은 **이번 실행**이다. 그 사이 §24(GRADE 간접성)로 "
           "등급 글자가 바뀌었다(A→B). 순위 그룹은 불변이라 ①은 안전하지만, "
           "**글자끼리 비교하지 말 것.**")
-    print("4b. 🔴 **1판 맞대결은 단위가 섞였다** — §38-1 의 liability 정의 변경(전하 항목 분리) "
-          "이후라서 1판의 `liab 3`(옛 정의)과 A 팔의 현행 `liab` 를 같은 축에 놓을 수 없다. "
-          "그래서 §30-2 의 **A→B 12:0 은 현행 코드에서 재현되지 않는다**(이 실행은 2:0). "
-          "원래의 12:0 은 **양 팔이 모두 옛 정의였을 때** 성립한 수다 — 폐기하지 말고 "
-          "**'옛 정의에서의 값'으로 병기**한다. 인용 가능한 맞대결은 **2판뿐**이다.")
+    print("4b. ✅ **단위 불일치는 §68 에서 구조적으로 닫혔다** — B 팔 기록은 이제 "
+          "`(링커, 셔틀, 평가 횟수, 세션)` 만 보존하고 **축은 매 실행 현행 코드로 재계산**한다. "
+          "🔴 그래서 §30-2 의 **A→B 12:0 은 현행 코드에서 재현되지 않는다** — 그 수는 "
+          "**양 팔이 모두 옛 정의였을 때** 성립했다. 폐기하지 말고 '옛 정의의 값'으로 병기하되 "
+          "**현행 수치와 섞지 말 것.** 📌 교훈: §38-1 때 이 자리에 '조심하라'는 **경고문**을 "
+          "적었는데, 그 경고문이 §68 의 정의 변경을 막지 못했다 — **기록에 측정값을 적지 말고 "
+          "입력을 적는다.**")
     print("5. **운동장이 다르다**(7-b): off 양측 밴드 제약은 B 팔의 off 악화를 보고 "
           "**나중에** 추가됐다. B 팔 설계체 일부는 현행 제약에서 **생성 불가**다. "
           "두 팔은 엄밀히 말해 **같은 탐색 문제를 풀지 않았다.**")
