@@ -153,7 +153,9 @@ AGENT_COLD_1115_B = [   # 화물 B `WAGGDASGE` (DSIP)
 #    §54-2 가 이미 "B1·C3 은 front_top 지배가 1/5 뿐이고 C3 은 off 를 빼면 0/1" 이라고
 #    적었으니, GA 대조에서도 TFEY 계열보다 약할 것으로 예상된다 — 그 예상을 심사한다.
 #    ⚠️ 이 셋은 부모가 Angiopep-2 가 아니므로 **off 밴드 기준 시드가 다르다**(7-e 가
-#    설계별 부모로 계산한다). 7-d 의 `off_seed`(Angiopep-2 고정)를 쓰면 틀린다.
+#    설계별 부모로 계산한다). ✅ **2026-11-16 (§68-7) 해소** — 밴드 판정을 `_band`/
+#    `_bandline` **한 곳으로 합쳤고**, 부모는 기록이 아니라 `inherit()` 로 **유도**한다.
+#    7-b·7-d 의 `off_seed` 하드코딩은 제거됐다.
 AGENT_COLD_1116_A = [   # 화물 A `GSNKGAIIGLM`
     {"session": "4판-1", "linker": "EAAAK", "shuttle": "TFGYGGSRGKRNHFKTEEY",
      "parent": "Angiopep-2",
@@ -267,6 +269,52 @@ def _renorm(agent: OptimizationAgent, cargo: str, batches: list[tuple[str, list[
         if a.get("_renorm_skip"):
             continue
     return notes
+
+
+def _band(a: dict) -> tuple[str, float, float, bool, str]:
+    """설계체 하나의 off 밴드 판정을 **설계 자신의 부모**를 기준으로 낸다.
+
+    반환: `(부모 이름, 부모 off, |Δ부모|, 밴드 통과 여부, 경고문)`
+
+    🔴 왜 이 함수인가 (2026-11-16 · §68-7). 밴드 판정이 **세 군데에 따로** 구현돼 있었고
+       그중 7-b·7-d 는 시드를 **Angiopep-2 로 하드코딩**했다(`off_seed = off_target(ang)`).
+       7-e 만 설계별 부모로 쟀다. 지금은 3판 기록의 부모가 **마침 전부 Angiopep-2** 라
+       틀린 값이 안 나오지만, **부모가 다른 기록이 하나라도 들어오면 조용히 틀린다** —
+       `OFF_BAND` 는 "부모 대비" 양측 밴드인데 남의 부모를 기준으로 재게 되기 때문이다.
+       (Angiopep-2 off 0.09 vs ApoE off 0.25 — 기준이 0.16 어긋난다.)
+       §68 에서 배운 것과 같은 모양이라 **구현을 하나로 합친다.**
+
+    🔴 부모도 **기록이 선언하게 두지 않는다.** `inherit()` 가 서열에서 부모를 유도하고,
+       기록의 `parent` 와 어긋나면 그 불일치를 **출력해서 알린다**(§68 의 `_renorm` 과
+       같은 원칙 — 기록은 입력을, 판정은 현행 코드를).
+    """
+    shuttle = a.get("shuttle") or ""
+    if not shuttle:
+        return ("(미기록)", float("nan"), float("nan"), False, "서열 미기록 — 판정 불가")
+    _, derived, _ = inherit(shuttle)
+    declared = a.get("parent")
+    warn = ""
+    if declared and derived and declared != derived:
+        warn = f"🔴 기록 부모 `{declared}` ≠ 유도 부모 `{derived}` — **유도값으로 잰다**"
+    parent = derived or declared or "Angiopep-2"
+    pseq = (SHUTTLES.get(parent) or {}).get("seq") or ""
+    if not pseq:
+        return (parent, float("nan"), float("nan"), False, "부모 서열 없음 — 판정 불가")
+    poff = off_target(pseq)
+    d = abs(float(a.get("sel_off") or 0.0) - poff)
+    return (parent, poff, d, d <= OFF_BAND + 1e-9, warn)
+
+
+def _bandline(a: dict) -> str:
+    """`_band` 를 한 줄 문자열로. 세 절(7-b·7-d·7-e)이 **같은 문장**을 쓴다."""
+    parent, poff, d, ok_band, warn = _band(a)
+    if d != d:      # NaN
+        return f"({warn}, off {float(a.get('sel_off') or 0):.2f})"
+    tail = ("**밴드 통과**" if ok_band
+            else f"🔴 **밴드 위반**(> {OFF_BAND}) = 현행 GA 는 이 서열을 **애초에 만들 수 없다**")
+    out = (f"부모 **{parent}** · 부모 off {poff:.2f} · "
+           f"off {float(a.get('sel_off') or 0):.2f} · |Δ부모| {d:.2f} → {tail}")
+    return out + (f"   {warn}" if warn else "")
 
 
 def _axrow(r: dict) -> str:
@@ -595,9 +643,12 @@ def main() -> None:
     ang = SHUTTLES["Angiopep-2"]["seq"]
     ang_ok = [r for r in ok if r["shuttle"] != ang
               and str(r["label"]).startswith("Angiopep-2#")]
+    # 🔴 이 절은 **Angiopep-2 자손만** 모아 보는 절이므로 시드가 Angiopep-2 인 것이 맞다.
+    #    그래도 아래 B 팔 판정은 `_bandline`(설계별 부모)으로 낸다 — §68-7.
     off_seed = off_target(ang)
     print(f"    시드 셔틀 Angiopep-2 `{ang}` · 시드 off **{off_seed:.2f}** · "
-          f"현행 밴드 제약 |off − 시드| ≤ **{OFF_BAND}**")
+          f"현행 밴드 제약 |off − 부모| ≤ **{OFF_BAND}** "
+          f"(🔴 **부모는 설계마다 유도한다** — 고정 시드를 쓰지 않는다, §68-7)")
     print(f"    A 팔 Angiopep-2 설계체(후보 자격 통과) {len(ang_ok)}개")
     for key, lab, fmt in axes_spec:
         if not ang_ok:
@@ -610,14 +661,7 @@ def main() -> None:
           "바로 이 콜드 세션들의 off 악화를 보고 **나중에** 도입됐다. "
           "B 팔의 설계체를 현행 제약에 넣어 보면:")
     for a in list(AGENT_COLD) + list(AGENT_COLD_1112):
-        if not a["shuttle"]:
-            print(f"      · {a['session']:<7} (서열 미기록 — 판정 불가, off {a['sel_off']:.2f})")
-            continue
-        d = abs(a["sel_off"] - off_seed)
-        print(f"      · {a['session']:<7} off {a['sel_off']:.2f} · |Δ| {d:.2f} → "
-              + ("**밴드 통과**" if d <= OFF_BAND + 1e-9
-                 else f"🔴 **밴드 위반**(> {OFF_BAND}) = 현행 GA 는 이 서열을 "
-                      "**애초에 만들 수 없다**"))
+        print(f"      · {a['session']:<7} {_bandline(a)}")
     print("    ⇒ A 팔은 **더 좁은 제약** 아래 탐색했고 B 팔은 그 제약 없이 탐색했다. "
           "A 팔에 유리한 비교가 아니라 **서로 다른 문제를 푼 것**이다 — "
           "이 항목을 빼고 지배 개수만 인용하면 과장이 된다.")
@@ -692,10 +736,9 @@ def main() -> None:
             beats_rb = [r for r in beats if dominates(_no_off(r), _no_off(a))]
             loses = [r for r in ok if dominates(a, r)]
             loses_rb = [r for r in loses if dominates(_no_off(a), _no_off(r))]
-            d = abs(a["sel_off"] - off_seed)
             print(f"\n    {a['session']} ({'직접융합' if a['linker'] == '' else a['linker']}"
-                  f"+{a['shuttle']}) {_axrow(a)}"
-                  f"  [off |Δ시드| {d:.2f} → {'밴드 통과' if d <= OFF_BAND + 1e-9 else '🔴 밴드 위반'}]")
+                  f"+{a['shuttle']}) {_axrow(a)}")
+            print(f"      · {_bandline(a)}")
             print(f"      · 이 설계체를 **지배하는 A 팔 설계체**: **{len(beats)}개** "
                   f"(견고 **{len(beats_rb)}개**)")
             print(f"      · 반대로 이 설계체가 **지배하는 A 팔 설계체**: **{len(loses)}개** "
@@ -720,20 +763,14 @@ def main() -> None:
     else:
         print("    🔴 §59-3 의 '독립 설계 3종' 은 전부 `TFEY…` 계열이었다. 아래 셋은")
         print("       부모가 다르거나 링커가 다른 설계인데 **GA 대조를 받은 적이 없다.**")
-        from core.config import SHUTTLES as _SH
         for a in batch4:
             beats = [r for r in ok if dominates(r, a)]
             beats_rb = [r for r in beats if dominates(_no_off(r), _no_off(a))]
             loses = [r for r in ok if dominates(a, r)]
             loses_rb = [r for r in loses if dominates(_no_off(a), _no_off(r))]
-            pseq = (_SH.get(a["parent"]) or {}).get("seq") or ""
-            poff = off_target(pseq) if pseq else float("nan")
-            d = abs(a["sel_off"] - poff)
             print(f"\n    {a['session']} ({'직접융합' if a['linker'] == '' else a['linker']}"
                   f"+{a['shuttle']}) {_axrow(a)}")
-            print(f"      · 부모 **{a['parent']}** · 부모 off {poff:.2f} · |Δ부모| {d:.2f}"
-                  f" → {'밴드 통과' if d <= OFF_BAND + 1e-9 else '🔴 밴드 위반'}"
-                  f"   ⚠️ 7-d 와 달리 **설계별 부모**로 재는 값이다")
+            print(f"      · {_bandline(a)}")
             print(f"      · 이 설계체를 **지배하는 A 팔 설계체**: **{len(beats)}개** "
                   f"(견고 **{len(beats_rb)}개**)")
             print(f"      · 반대로 이 설계체가 **지배하는 A 팔 설계체**: **{len(loses)}개** "
