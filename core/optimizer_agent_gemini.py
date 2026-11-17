@@ -807,6 +807,14 @@ class GeminiOptimizationAgent(OptimizationAgent):
         else:
             tier = "REVISE"
 
+        # 🆕 (§77) LLM **자신의** 판정을 게이트가 덮어쓰기 전에 보존한다.
+        # 왜: 아래 게이트는 전부 단방향(→REVISE)이고 `return` 이 덮어쓴 값만 돌려줘서,
+        # **심사 LLM 의 기여를 사후에도 분리할 수 없었다**(M5 의 7/7 은 겨냥한 게이트와
+        # 1:1 대응이라 게이트의 성능이지 LLM 의 성능이 아니다). 이 두 줄이면 다음
+        # 라이브 실행부터 `llm_tier` vs `tier` 의 불일치가 그대로 기록된다 —
+        # **추가 API 비용 0**. 판정에는 쓰지 않는다(보고·로그 전용).
+        llm_tier = tier
+
         # ── 결정론적 게이트 (LLM 판정을 덮어쓴다) ─────────────────────────
         # 하드 게이트는 둘뿐: ① 독성 ② **문헌 근거 등급 보유**(상속 포함).
         # 옛 ②(순서 특이성 측정 가능성)·전선 이탈(유효점수 하한)은 2026-11-10 폐지했다 —
@@ -893,7 +901,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 f"그 후보로 되돌아가거나, 그보다 나은 설계를 찾아 제출하라.")
             tier = "REVISE"
 
-        return tier != "REVISE", text, tier
+        return tier != "REVISE", text, tier, llm_tier
 
     def _recommend_on_failure(self, client, model, types, cargo, choice, critique_text):
         """최종 미승인(전 후보 반려)일 때, 실패 진단 + 시스템 내 구체적 대안을 권고한다.
@@ -1034,7 +1042,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
 
             # ── 1. 설계자 실행 + 자기종료(finish) → 심사(Critic) → REVISE 시 재설계 ──
             choice = final_report = critique_text = None
-            approve, tier = True, "APPROVE"
+            approve, tier, llm_tier = True, "APPROVE", None
             critiques, MAX_CRITIQUES, turn, grace = 0, 1, 0, 0
             while turn < self.max_rounds + grace:
                 turn += 1
@@ -1106,10 +1114,11 @@ class GeminiOptimizationAgent(OptimizationAgent):
                     choice = ch
                 if choice is not None:
                     # best(후보군 러닝 베스트)를 함께 넘겨 **퇴행 제출**을 막는다(래칫 게이트).
-                    approve, critique_text, tier = self._critic_review(
+                    approve, critique_text, tier, llm_tier = self._critic_review(
                         client, model, types, cargo, choice, best_seen=best)
                 else:
-                    approve, critique_text, tier = True, "후보 채점 실패로 심사를 생략합니다.", "APPROVE"
+                    approve, critique_text, tier, llm_tier = (
+                        True, "후보 채점 실패로 심사를 생략합니다.", "APPROVE", None)
                 yield AgentEvent("progress", data={"round": turn,
                                                    "best_bbb": (choice or best or {}).get("bbb", 0)})
                 if (not approve) and critiques < MAX_CRITIQUES:
@@ -1185,7 +1194,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
             # 교체가 일어났으면 **교체된 후보로 다시 심사**한다 — 이전 판정은 버린 후보의 것이다.
             # (교체가 없고 이미 판정이 있으면 재호출하지 않는다 — 불필요한 LLM 비용.)
             if final_pick is not None and (critique_text is None or swapped_out):
-                approve, critique_text, tier = self._critic_review(
+                approve, critique_text, tier, llm_tier = self._critic_review(
                     client, model, types, cargo, final_pick, best_seen=best)
 
             # 최종 미승인(막다른 경우) → 실패 진단 + 대안 권고를 최종 보고서에 덧붙인다(실패 때만 1회).
@@ -1226,6 +1235,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
             if pick is not None:
                 pick["critic_approved"] = approve
                 pick["critic_tier"] = tier
+                pick["critic_llm_tier"] = llm_tier   # 🆕 게이트가 덮기 전 LLM 자신의 판정
                 pick["agent_pick"] = True
                 yield AgentEvent("choice", data=pick)
             yield AgentEvent("final", final_report or "")
@@ -1242,9 +1252,10 @@ class GeminiOptimizationAgent(OptimizationAgent):
                     critique_text or ("**조성 필터**(ToxinPred3)를 통과하고 도달 가능 전선에서 "
                                       "지배당하지 않습니다. 최종 선택을 승인합니다."
                                       if approve else "근거가 불충분합니다. 개선이 필요합니다."),
-                    data={"approve": approve, "tier": tier})
+                    data={"approve": approve, "tier": tier, "llm_tier": llm_tier})
                 final_pick["critic_approved"] = approve
                 final_pick["critic_tier"] = tier
+                final_pick["critic_llm_tier"] = llm_tier   # 🆕 (§77)
                 # ── 구조 증거(ESMFold) — **에이전트 판단 밖**, 최종 후보 1건 보고용 ──
                 # analyze_structure 를 도구에서 뺀 뒤에도 구조 근거 자체는 버리지 않는다.
                 # 다만 (a) 의사결정에 넣지 않고 (b) 1회만 접고 (c) 실패하면 조용히 건너뛴다.
