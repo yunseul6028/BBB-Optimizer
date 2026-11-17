@@ -177,9 +177,18 @@ def main() -> None:
                   f"p≤0.05 인 셔틀 {sig}/{tot}  |  vs평균 {wm}/{tot}"
                   f"(이항 p={binom_p(wm, tot):.3f}) · vs최대 {wx}/{tot}")
 
-    # ── (C) 시스템이 실제로 쓰는 유효점수로도 본다 ────────────────────────
-    # eff = BBB − λ·off_target. 문헌 쌍에서 off_target 축이 방향을 되살리는지 확인.
-    print("\n── (C) 문헌 쌍 · 시스템 유효점수(eff = BBB − 0.25·off_target) 기준 ──")
+    # ── (C) **폐지된** 유효점수로도 본다 — 옛 실험 재현용 ──────────────────
+    # 🔴 2026-11-17 정정 — 옛 주석은 *"시스템이 **실제로 쓰는** 유효점수"* 라고 적고 있었다.
+    #    **거짓이다.** `eff = BBB − λ·off_target` 은 폐지됐다:
+    #      · BBB 는 순위에서 **완전히 제거**됐고(M6 0/9 · M8 링커 순위 반증, §17·§20)
+    #      · `core.config.OFF_TARGET_PENALTY` 에도 *"⚠️ 폐지됨 — 옛 실험 재현용.
+    #        새 코드에서 쓰지 말 것"* 이라고 적혀 있다.
+    #    현행 순위는 **사전식(근거 그룹) + 위험 축 4개 Pareto** 이고 BBB 도 λ 도 안 쓴다.
+    #    이 절은 **옛 수치의 재현**으로만 남긴다 — 유지하는 이유는 (A)·(B) 와 같은 쌍을
+    #    세 번째 척도로 보면 "척도를 바꾸면 방향이 바뀌는가"를 보여 주기 때문이다.
+    print("\n── (C) 문헌 쌍 · 🔴 **폐지된** 유효점수(eff = BBB − 0.25·off_target) 기준 ──")
+    print("     ⚠️ 이 척도는 **현재 시스템이 쓰지 않는다**(BBB 는 순위에서 제거됨 · λ 폐지).")
+    print("     옛 실험 재현용이며, **이 줄의 수치를 현행 판정으로 인용하지 말 것.**")
     from core.selectivity import assess_selectivity
     hi = score([p[1] for p in LIT_PAIRS], True)
     lo = score([p[2] for p in LIT_PAIRS], True)
