@@ -99,6 +99,45 @@ PUBLISHED = {
 }
 PUBLISHED_LEX = {0.05: (1, 0.161, 38.9), None: (1, 0.077, 45.4), 0.02: (1, 0.237, 63.0)}
 
+#: 🔴 **그 공개 수치가 측정된 liability 정의 세대**(2026-11-17 확정).
+#: §29 는 `20b1669`(§31~§38) **이전**이라 `n_liabilities` 가 전하 주도 항목과 응집 핫스팟
+#: 가산을 **둘 다 포함**하던 때다. 그 뒤 정의가 **두 번** 바뀌었다(§38-1 → §68).
+PUBLISHED_EPOCH = "①"
+
+#: 🔴 **이 상수들은 측정값이다 — 그래서 낡는다.** 2026-11-17 에 그게 실제로 터졌다:
+#: 현행 코드로 돌리면 세 밴드가 전부 🔴 불일치로 찍혔고, 아래 `if not ok: return []` 가
+#: **멀쩡한 측정을 차단**했다. 원인을 git 으로 되짚어 확정했다 —
+#:   · `core/developability.py` 를 §68 **직전**(`73124ce^`)으로 되돌림
+#:       → 사전식 1위의 **off·불안정성 성분이 세 밴드 전부 소수점까지 복원**되고 liab 만 0 vs 1
+#:   · `20b1669^`(§38-1 **직전**, = ①정의)으로 되돌림
+#:       → **전선 55/35/30 · R11 14.5/20.0/0.0 · 사전식 1위 3/3 완전 재현** 🟢
+#: ⇒ **하네스는 멀쩡했다. 낡은 것은 기준 상수다.**
+#: 📌 §68-4 와 **같은 병**이고 증상만 반대다 — 거기서는 박아 둔 측정값이 **조용히 틀린 수**를
+#:    만들었고, 여기서는 **거짓 경보로 옳은 측정을 막았다.** 처방도 같다:
+#:    **세대를 기록에 묻지 말고 현행 코드에 묻는다**(`detect_liab_epoch`).
+
+
+def detect_liab_epoch() -> tuple[str, str]:
+    """현행 코드의 `n_liabilities` **정의 세대**를 코드에 직접 물어 판별한다.
+
+    기록된 상수를 믿지 않는다 — Angiopep-2 를 실제로 채점해서 `n_liabilities` 가
+    무엇을 세고 있는지 역산한다(핫스팟 0.72 ≥ 0.70 · `KR@10` 보유라 세 세대가 전부 갈린다).
+
+    반환: (세대 기호, 사람이 읽는 설명)
+    """
+    a = assess_developability(SHUTTLES["Angiopep-2"]["seq"])
+    n_hot = sum(1 for x in a.liabilities if "응집 핫스팟" in x)
+    n_chg = sum(1 for x in a.liabilities if "프로테아제 절단부위" in x or "과도한 양전하" in x)
+    n_oth = len(a.liabilities) - n_hot - n_chg
+    if a.n_liabilities == len(a.liabilities):
+        return ("①", "전하 주도 + 응집 핫스팟을 **둘 다 셈**(§38-1 이전)")
+    if n_hot >= 1 and a.n_liabilities == n_oth + n_hot:
+        return ("②", "전하 주도 제외 · 응집 핫스팟은 **셈**(§38-1 ~ §67)")
+    if n_hot == 0 and a.n_liabilities == n_oth:
+        return ("③", "전하 주도 제외 · 응집 핫스팟 가산 **제거**(§68 이후)")
+    return ("?", f"판별 실패 — n_liabilities={a.n_liabilities} · "
+                 f"항목 {len(a.liabilities)}개(핫스팟 {n_hot} · 전하 {n_chg} · 기타 {n_oth})")
+
 _AXES = ("dev_liab", "instability", "sel_off", "dev_agg_hot")
 
 
@@ -334,6 +373,15 @@ def slice_sweep(rounds: int, pop: int) -> list[dict]:
           f" × rmt_floor {SLICE_FLOOR} × 셔틀 {list(SLICE_SHUTTLES)}"
           f" · 시드 {list(SCRUB_SEEDS)} · rounds={rounds}, pop={pop} (§29 와 동일)")
 
+    epoch, epoch_desc = detect_liab_epoch()
+    same_epoch = (epoch == PUBLISHED_EPOCH)
+    print(f"\n[세대] 현행 `n_liabilities` 정의 = **{epoch}정의** — {epoch_desc}")
+    print(f"       공개 수치가 측정된 세대 = **{PUBLISHED_EPOCH}정의**"
+          f"  →  {'🟢 같은 단위, 엄격 대조한다' if same_epoch else '🟡 **단위가 다르다 — 대조 불가**'}")
+    if not same_epoch:
+        print("       🔴 아래 불일치는 **하네스 고장이 아니다**. 기준 상수가 낡은 것이다"
+              " (근거: 2026-11-17 에 `20b1669^` 로 되돌려 3/3 완전 재현 확인 — 위 주석).")
+
     print("\n[검증] §29 머리말 + §26-5 공개 수치와 대조 (Angiopep-2 · 동결 on · floor 0.85)")
     print(_w("밴드", 8) + _w("전선(실측)", 12, True) + _w("전선(공개)", 12, True)
           + _w("R11(실측)", 11, True) + _w("R11(공개)", 11, True)
@@ -352,10 +400,18 @@ def slice_sweep(rounds: int, pop: int) -> list[dict]:
               + _w(_pct(r["r11_rate"]), 11, True) + _w(_pct(exp["r11"]), 11, True)
               + _w(str(r["lex_best"]), 22, True) + _w(str(PUBLISHED_LEX[band]), 22, True)
               + _w("🟢 일치" if hit else "🔴 불일치", 8, True))
-    print(f"  → 하네스 검증: {'🟢 **재현됨**' if ok else '🔴 **재현 실패 — cargo B 해석 무효**'}")
-    if not ok:
-        print("  재현되지 않았다. 여기서 멈춘다(프로토콜: 하네스가 틀렸으면 cargo B 는 읽지 않는다).")
-        return []
+    if same_epoch:
+        print(f"  → 하네스 검증: {'🟢 **재현됨**' if ok else '🔴 **재현 실패 — cargo B 해석 무효**'}")
+        if not ok:
+            print("  재현되지 않았다. 여기서 멈춘다"
+                  "(프로토콜: 하네스가 틀렸으면 cargo B 는 읽지 않는다).")
+            return []
+    else:
+        print(f"  → 하네스 검증: 🟡 **판정 보류 — {PUBLISHED_EPOCH}정의 기준 vs {epoch}정의 코드**."
+              " 단위가 달라 이 대조는 **구조적으로 불가능**하다(하네스 고장이 아니다).")
+        print("     🔴 그래서 위 '불일치' 세 줄을 **하네스 고장의 증거로 인용하지 말 것.**")
+        print("     🟢 아래 cargo A vs B 슬라이스는 **같은 실행 안에서 같은 코드로** 두 화물을"
+              " 재므로 세대와 무관하게 유효하다 — 그래서 진행한다.")
 
     print("\n🔴 **구조적 발견 — 이 스윕은 화물을 보지 않는다.**")
     print("   `run_cell` → `dopt.pareto_scrub(셔틀서열, ...)` 이고, 그 안의"
