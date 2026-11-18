@@ -777,7 +777,9 @@ class GeminiOptimizationAgent(OptimizationAgent):
     def _critic_review(self, client, model, types, cargo, choice, best_seen=None):
         """최종 후보를 별도 컨텍스트로 적대적 검증.
 
-        반환 `(approve: bool, critique_text: str, tier: str)`.
+        반환 `(approve, critique_text, tier, llm_tier, gate)`.
+        `llm_tier` = 게이트가 덮기 전 LLM 자신의 판정(§77) · `gate` = 발화한 게이트 id(§81).
+        둘 다 **보고·로그 전용**이고 판정에는 쓰지 않는다.
         tier ∈ {APPROVE, APPROVE_WITH_LIMITS, REVISE} — **계층 판정**이다.
         하드 게이트(**조성 필터**(ToxinPred3) · 문헌 근거 등급 보유)만 탈락 사유이고, 나머지 축은
         '도달 가능 집합(Pareto 전선) 대비 지배당하는가'로만 본다. 절대적 이상과 비교하면 승인 가능 영역이 비기 때문이다
@@ -831,6 +833,12 @@ class GeminiOptimizationAgent(OptimizationAgent):
         # 라이브 실행부터 `llm_tier` vs `tier` 의 불일치가 그대로 기록된다 —
         # **추가 API 비용 0**. 판정에는 쓰지 않는다(보고·로그 전용).
         llm_tier = tier
+        # 🆕 (§81) **어느 게이트가 쐈는지**를 남긴다. 아래는 if/elif 사슬이라 발화는 **하나**다.
+        # 왜: 재설계 기회(MAX_CRITIQUES)를 늘리면 되는 문제인지 가르는 유일한 관측이
+        # **재시도가 같은 게이트에 다시 걸렸나 / 다른 게이트였나** 인데, 지금까지 그걸
+        # 저장한 적이 없다(.cache/ledger 의 fails 는 비어 있다). 추가 API 비용 0 ·
+        # 판정에는 쓰지 않는다(보고·로그 전용).
+        gate: str | None = None
 
         # ── 결정론적 게이트 (LLM 판정을 덮어쓴다) ─────────────────────────
         # 하드 게이트는 둘뿐: ① 독성 ② **문헌 근거 등급 보유**(상속 포함).
@@ -843,7 +851,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
             text = (text or "") + (
                 f"\n\n[시스템 게이트] 독성 {choice.get('tox', 0.0):.3f} > 임계값 "
                 f"{self.settings.toxicity_threshold:.2f} → 안전성 하드 게이트 위반으로 자동 미승인(REVISE).")
-            tier = "REVISE"
+            tier, gate = "REVISE", "tox"
         elif (ig := self._inherit_gate(choice))[0]:
             # ── 근거 등급 보유 게이트 — '인용 없는 서열' 금지 ──
             # 이 게이트가 옛 BBB 하한·순서 특이성·접합부 길이 통제의 역할을 **한꺼번에** 맡는다.
@@ -851,7 +859,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
             # 요구하지 않으면 불활성 쓰레기가 전 축에서 이긴다 — 실측 poly-Glu(off 0.00·
             # 선택성 1.00·응집 0.12·liability 0)가 Angiopep-2(0.09·0.91·0.44·2)를 전부 이긴다.
             text = (text or "") + ig[1]
-            tier = "REVISE"
+            tier, gate = "REVISE", "inherit"
         elif is_unsupported(choice):
             # 등급 D = **BBB 통과 단독 근거 없음**(Tet1). 상속은 됐지만 물려받은 근거가 없다.
             # 실측 근거: M2·M4 에서 우리 효능 축의 후보군 1위가 `직접융합+Tet1`(BBB 0.568)이었다
@@ -863,7 +871,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 f"{choice.get('tier')}(= BBB 통과 단독 근거 없음)**이다 → 자동 미승인(REVISE). "
                 f"BBB 점수가 높게 나오는 것은 선택 근거가 아니다(M1 조성 편향·M6·M8). "
                 f"달성 가능한 대안: {alts}.")
-            tier = "REVISE"
+            tier, gate = "REVISE", "tier_D"
         elif (str(choice.get("mechanism") or "").upper().startswith("CPP")
               and (front.get("n_gate_rmt") or 0) > 0):
             # CPP는 비특이 흡수 **비교군**이다. 게이트를 통과한 RMT 후보가 실제로 존재하면
@@ -874,7 +882,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 f"\n\n[시스템 게이트] 최종 후보가 **CPP(비특이 흡수 비교군)**인데, 하드 게이트를 통과한 "
                 f"**RMT 후보가 {front.get('n_gate_rmt')}개 실재**한다 → 비교군을 최종안으로 확정할 수 "
                 f"없으므로 자동 미승인(REVISE). 달성 가능한 RMT 대안: {alts}.")
-            tier = "REVISE"
+            tier, gate = "REVISE", "cpp_but_rmt"
         elif (front.get("best_group") is not None
               and _grank(choice.get("tier")) > _grank((front.get("front_top") or [{}])[0].get("tier"))):
             # ── 근거 하향 게이트 — 옛 '전선 이탈'의 승계자 ──
@@ -889,7 +897,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 f"**`{evidence_group(choice.get('tier'))}`**(등급 {choice.get('tier')})인데, "
                 f"이 문제에서 달성 가능한 최상위 그룹은 **`{front.get('best_group')}`**이다 → "
                 f"**근거 하향**이므로 자동 미승인(REVISE). 달성 가능한 대안: {alts}.")
-            tier = "REVISE"
+            tier, gate = "REVISE", "evidence_down"
         elif (dom := next((r for r in (front.get("front_top") or [])
                            if dominates(r, choice)), None)) is not None:
             # ── 지배 게이트 — 모든 축에서 더 나은 '달성 가능' 후보가 실재 ──
@@ -901,7 +909,7 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 f"off {dom['sel_off']}·응집 {dom['dev_agg_hot']})에게 **모든 축에서 지배당한다** → "
                 f"트레이드오프가 아니라 열등한 선택이므로 자동 미승인(REVISE). 그 후보를 쓰거나, "
                 f"그것이 지배하지 못하는 설계를 제출하라.")
-            tier = "REVISE"
+            tier, gate = "REVISE", "dominated_front"
         elif best_seen is not None and dominates(best_seen, choice):
             # ── 래칫(ratchet) 게이트 — '이미 본 더 좋은 후보를 버리고 제출' 금지 ──
             # 애블레이션 실측(docs/experiments.md §11): 16세션 중 **7세션이 퇴행**했고
@@ -916,9 +924,9 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 f"({self._summary(best_seen)})에게 **모든 축에서 지배당한다** → 더 좋은 걸 "
                 f"**이미 손에 쥐고도** 더 나쁜 것을 확정하려 했으므로 자동 미승인(REVISE). "
                 f"그 후보로 되돌아가거나, 그보다 나은 설계를 찾아 제출하라.")
-            tier = "REVISE"
+            tier, gate = "REVISE", "ratchet"
 
-        return tier != "REVISE", text, tier, llm_tier
+        return tier != "REVISE", text, tier, llm_tier, gate
 
     def _recommend_on_failure(self, client, model, types, cargo, choice, critique_text):
         """최종 미승인(전 후보 반려)일 때, 실패 진단 + 시스템 내 구체적 대안을 권고한다.
@@ -1059,7 +1067,11 @@ class GeminiOptimizationAgent(OptimizationAgent):
 
             # ── 1. 설계자 실행 + 자기종료(finish) → 심사(Critic) → REVISE 시 재설계 ──
             choice = final_report = critique_text = None
-            approve, tier, llm_tier = True, "APPROVE", None
+            approve, tier, llm_tier, gate = True, "APPROVE", None, None
+            # 🆕 (§81) 이 세션에서 발화한 게이트를 **순서대로** 쌓는다. 재설계 전/후가
+            # 같은 칸에 걸렸는지를 이 목록 하나로 본다(예: ['ratchet','ratchet'] = 예산을
+            # 늘려도 안 풀린다는 신호 / ['cpp_but_rmt','tier_D'] = 수렴 중일 수 있다).
+            gate_log: list[str] = []
             critiques, MAX_CRITIQUES, turn, grace = 0, 1, 0, 0
             while turn < self.max_rounds + grace:
                 turn += 1
@@ -1131,11 +1143,12 @@ class GeminiOptimizationAgent(OptimizationAgent):
                     choice = ch
                 if choice is not None:
                     # best(후보군 러닝 베스트)를 함께 넘겨 **퇴행 제출**을 막는다(래칫 게이트).
-                    approve, critique_text, tier, llm_tier = self._critic_review(
+                    approve, critique_text, tier, llm_tier, gate = self._critic_review(
                         client, model, types, cargo, choice, best_seen=best)
+                    gate_log.append(gate or "APPROVE")
                 else:
-                    approve, critique_text, tier, llm_tier = (
-                        True, "후보 채점 실패로 심사를 생략합니다.", "APPROVE", None)
+                    approve, critique_text, tier, llm_tier, gate = (
+                        True, "후보 채점 실패로 심사를 생략합니다.", "APPROVE", None, None)
                 yield AgentEvent("progress", data={"round": turn,
                                                    "best_bbb": (choice or best or {}).get("bbb", 0)})
                 if (not approve) and critiques < MAX_CRITIQUES:
@@ -1211,8 +1224,9 @@ class GeminiOptimizationAgent(OptimizationAgent):
             # 교체가 일어났으면 **교체된 후보로 다시 심사**한다 — 이전 판정은 버린 후보의 것이다.
             # (교체가 없고 이미 판정이 있으면 재호출하지 않는다 — 불필요한 LLM 비용.)
             if final_pick is not None and (critique_text is None or swapped_out):
-                approve, critique_text, tier, llm_tier = self._critic_review(
+                approve, critique_text, tier, llm_tier, gate = self._critic_review(
                     client, model, types, cargo, final_pick, best_seen=best)
+                gate_log.append(gate or "APPROVE")
 
             # 최종 미승인(막다른 경우) → 실패 진단 + 대안 권고를 최종 보고서에 덧붙인다(실패 때만 1회).
             if final_pick is not None and not approve:
@@ -1253,6 +1267,8 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 pick["critic_approved"] = approve
                 pick["critic_tier"] = tier
                 pick["critic_llm_tier"] = llm_tier   # 🆕 게이트가 덮기 전 LLM 자신의 판정
+                pick["critic_gate"] = gate           # 🆕 (§81) 마지막으로 발화한 게이트
+                pick["critic_gate_log"] = list(gate_log)   # 🆕 (§81) 재시도 포함 전체 순서
                 pick["agent_pick"] = True
                 yield AgentEvent("choice", data=pick)
             yield AgentEvent("final", final_report or "")
@@ -1269,10 +1285,38 @@ class GeminiOptimizationAgent(OptimizationAgent):
                     critique_text or ("**조성 필터**(ToxinPred3)를 통과하고 도달 가능 전선에서 "
                                       "지배당하지 않습니다. 최종 선택을 승인합니다."
                                       if approve else "근거가 불충분합니다. 개선이 필요합니다."),
-                    data={"approve": approve, "tier": tier, "llm_tier": llm_tier})
+                    data={"approve": approve, "tier": tier, "llm_tier": llm_tier,
+                          "gate": gate, "gate_log": list(gate_log)})
                 final_pick["critic_approved"] = approve
                 final_pick["critic_tier"] = tier
                 final_pick["critic_llm_tier"] = llm_tier   # 🆕 (§77)
+                final_pick["critic_gate"] = gate                  # 🆕 (§81)
+                final_pick["critic_gate_log"] = list(gate_log)    # 🆕 (§81)
+                # 🆕 (§81) **영구 싱크** — 원장을 껐으므로(§80) 이 기록이 화면 이벤트로만
+                # 흐르면 다음 라이브 실행을 해도 답이 오지 않는다. 세션당 한 줄만 덧붙인다.
+                # 🔴 append-only · `.cache/ledger/` 와 **다른 파일** · 실패해도 세션은 그대로
+                # 돈다(보조 장치). 읽을 때는 `scripts/critic_gate_report.py`.
+                try:
+                    import json as _json, time as _time
+                    from pathlib import Path as _Path
+                    _lp = _Path(__file__).resolve().parent.parent / ".cache" / "critic_gates.jsonl"
+                    _lp.parent.mkdir(parents=True, exist_ok=True)
+                    with _lp.open("a", encoding="utf-8") as _f:
+                        _f.write(_json.dumps({
+                            "ts": _time.strftime("%Y-%m-%dT%H:%M:%S"),
+                            "cargo": cargo,
+                            "model": getattr(self.settings, "gemini_model", "?"),
+                            "max_critiques": MAX_CRITIQUES,
+                            "gate_log": list(gate_log),      # 재시도 포함 **발화 순서**
+                            "gate_final": gate,
+                            "tier": tier, "llm_tier": llm_tier,
+                            "approved": bool(approve),
+                            "swapped_out": bool(swapped_out),  # 복구가 발동했나
+                            "pick": f"{final_pick.get('linker') or '직접융합'}+"
+                                    f"{final_pick.get('shuttle', '?')}",
+                        }, ensure_ascii=False) + "\n")
+                except Exception:
+                    pass   # 보조 장치다 — 기록 실패가 세션을 깨뜨리지 않는다
                 # ⚰️ 구조 증거(ESMFold) 단계는 **2026-11-18 (§79) 제거**했다.
                 # §11 애블레이션에서 이 도구를 **에이전트 도구에서** 뺀 뒤에도 "참고 근거"로
                 # 최종 후보 1건에 접어 붙이고 있었다. 그런데 그 보고치는
