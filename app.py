@@ -511,9 +511,10 @@ if agent_run:
         st.error(_err)
         st.stop()
     if settings.use_gemini_agent:
-        # 🔴 `use_ledger` 를 안 넘기면 **기본값이 True** 라, 데모가 보고된 모든 수치
-        #    (`benchmark_agent.py`·애블레이션은 False 고정)와 **다른 구성**으로 돌았다.
-        #    화면에 보이는 것이 벤치마크와 같은 조건이어야 하므로 여기서 명시적으로 끈다.
+        # 🔴 화면에 보이는 것이 벤치마크와 같은 조건이어야 하므로 원장을 끈다.
+        #    🆕 §80 에서 **팩토리 기본값도 False 로 뒤집었다** — 이 인자는 이제 기본값과
+        #    같지만 **명시적으로 남겨 둔다**(이 줄이 사라지면 왜 끄는지도 같이 사라진다).
+        #    옛 상태: 기본값이 True 라 안 넘기면 데모가 보고 수치와 **다른 구성**으로 돌았다.
         event_source = get_gemini_agent(settings, max_rounds=agent_rounds,
                                         use_ledger=False).run(cargo)
         brain = f"Gemini ({settings.gemini_model})"

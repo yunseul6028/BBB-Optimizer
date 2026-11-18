@@ -176,12 +176,27 @@ def _gemini_system_prompt(cargo: str, tox_threshold: float, max_rounds: int) -> 
 class GeminiOptimizationAgent(OptimizationAgent):
     """Claude 백엔드 재사용 + Gemini function-calling 루프."""
 
-    def __init__(self, settings, max_rounds: int = 10, use_ledger: bool = True,
+    def __init__(self, settings, max_rounds: int = 10, use_ledger: bool = False,
                  ledger_write: bool = True):
         super().__init__(settings, max_rounds)
         # 설계 이력 원장(core/ledger.py) 사용 여부.
-        # ⚠️ **벤치마크·애블레이션은 반드시 False**로 고정한다. 원장을 켠 세션은 이전
-        # 세션의 탐색을 물려받으므로 콜드 스타트 세션과 **비교 불가**다('18평가로 134.8%'
+        # 🆕 **2026-11-18 (§80): 기본값을 True → False 로 뒤집었다.**
+        #   ⑴ 실제로는 **이미 아무 경로에서도 켜지지 않았다** — `app.py` 가 명시적으로
+        #      False 를 넘기고 벤치마크·애블레이션도 전부 False 다. 즉 기본값 True 는
+        #      **다음 호출자를 위한 함정**으로만 남아 있었다.
+        #   ⑵ 유일한 측정이 **음성**이다 — 🚫 "원장이 효율을 올린다"는 n=1 이고 위험 축이
+        #      콜드보다 나쁘다(II 34.4 vs 19.5~20.1). 수치원장 Ⅳ 에 금지로 등재돼 있다.
+        #   ⑶ 원장은 **화물로 키가 걸린다**(`ledger._path` = sha1(cargo)[:12]) → 화물이
+        #      바뀌면 빈 원장이다. 후보 화물이 많은 운영에서는 거의 항상 비어 있다.
+        #   ⑷ 그런데 비어 있지 않을 때는 **설계자 프롬프트에 "바닥"을 못 박는다**
+        #      (`ledger.brief`: "이걸 다시 찾아 제출하는 것은 가치가 0이다"). 즉 ESMFold(§79)
+        #      처럼 "있을 때와 없을 때가 구별되지 않는" 것이 **아니라**, 효과가 있을 수 있는데
+        #      **측정되지 않은** 장치다. 🔴 수렴 의심(Ⅳ: "Angiopep-2 계열을 선호한다" ·
+        #      "3번 자리 E 로 수렴한다")의 **후보 기전**이기도 하다 — 그 관계는 안 쟀다.
+        # 🔴 되살리는 조건: 켬/끔 A/B 를 `ledger_write=False`(두 팔이 같은 바닥을 보게 동결)로
+        #    먼저 재고, 효율 주장 대신 **위험 축**에서 콜드를 넘는지를 볼 것. §80 을 읽을 것.
+        # ⚠️ **벤치마크·애블레이션은 반드시 False**다(이제 기본값과 같다). 원장을 켠 세션은
+        # 이전 세션의 탐색을 물려받으므로 콜드 스타트 세션과 **비교 불가**다('18평가로 134.8%'
         # 같은 효율 수치의 의미가 달라진다). 섞으면 §12 분모 불일치와 같은 거짓 비교가 된다.
         self.use_ledger = use_ledger
         # 읽기는 하되 **쓰지 않는** 모드. 켬/끔 A/B 실험 전용이다 —
@@ -1285,11 +1300,17 @@ class GeminiOptimizationAgent(OptimizationAgent):
 #   · 상한 성격 — 보통 5~6라운드에 finish로 먼저 끝나 10에는 잘 안 닿음 → 비용 폭주 없는 백스톱.
 # (주의: M4 벤치는 "타이트 예산에서도 효율적"임을 보이려 의도적으로 6을 쓴다 — 운영 기본값 10과 역할이 다름.)
 def get_gemini_agent(settings: Settings, max_rounds: int = 10,
-                     use_ledger: bool = True,
+                     use_ledger: bool = False,
                      ledger_write: bool = True) -> GeminiOptimizationAgent | None:
-    """use_ledger: 설계 이력 원장 사용. **벤치마크·애블레이션은 False** (비교 불가해짐).
+    """use_ledger: 설계 이력 원장 사용. 🆕 **기본값 False**(§80 — 옛 기본값은 True 였다).
+
+    끈 이유 네 가지는 `GeminiOptimizationAgent.__init__` 주석에 있다. 요약: 실제로는
+    이미 아무 경로에서도 켜지지 않았고(함정 기본값), 유일한 측정이 음성이며, 화물로 키가
+    걸려 대개 비어 있고, 비어 있지 않을 때는 설계자 프롬프트에 '바닥'을 못 박는다.
+    **벤치마크·애블레이션도 False** 다(비교 불가해짐) — 이제 기본값과 같다.
 
     ledger_write: False 면 읽기만 한다 — 켬/끔 A/B 에서 두 팔이 **같은 바닥**을 보게 동결.
+    🔴 `use_ledger=False` 면 읽기·쓰기 **둘 다** 일어나지 않는다(run() 의 조건이 AND).
     """
     return (GeminiOptimizationAgent(settings, max_rounds, use_ledger, ledger_write)
             if settings.use_gemini_agent else None)
