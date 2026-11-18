@@ -14,7 +14,6 @@ UI는 얇은 표시·스트리밍 계층이며 계산은 core/*.py.
 
 from pathlib import Path
 
-import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -254,8 +253,6 @@ def _demo_agent_events(cargo):
     yield _Ev("reasoning", text=(
         "화물이 짧아 셔틀의 표면 노출이 결합에 결정적입니다. 유연 링커(GS 계열)를 우선 검토합니다."))
     yield _Ev("evaluation", text="1차 후보 평가", data={"rows": rows})
-    for i, b in enumerate([0.72, 0.85, 0.90, 0.94]):
-        yield _Ev("progress", data={"best_bbb": b, "round": i + 1})
     win = dict(r_win)
     win["agent_pick"] = True
     yield _Ev("choice", data=win)
@@ -274,7 +271,7 @@ def _demo_agent_events(cargo):
 
 
 def _emit_agent_event(ev):
-    """최적화 에이전트 이벤트 한 개 렌더 (plan/reflection/final/optimum/progress는 요약에서도 처리)."""
+    """최적화 에이전트 이벤트 한 개 렌더 (plan/reflection/final/optimum은 요약에서도 처리)."""
     if ev.kind == "plan":
         with st.container(border=True):
             st.markdown("**계획 — 에이전트 전략**")
@@ -362,8 +359,7 @@ def _extract_baseline(events):
     return min(cpps, key=rank_key) if cpps else None
 
 def _render_agent_summary(events, cargo):
-    """최적화 궤적 + 상위 3 후보 카드(+온디맨드 분석) + 보고서."""
-    progress = [e.data for e in events if e.kind == "progress"]
+    """상위 3 후보 카드(+온디맨드 분석) + 보고서. (옛 "최적화 궤적" 차트는 §82 에서 제거)"""
     podium = _extract_podium(events)
     plan = next((e.text for e in events if e.kind == "plan"), None)
     final = next((e.text for e in events if e.kind == "final"), None)
@@ -373,22 +369,15 @@ def _render_agent_summary(events, cargo):
         with st.container(border=True):
             st.markdown("### 에이전트 전략")
             st.markdown(plan)
-    if len(progress) >= 2:
-        st.markdown("##### 최적화 궤적")
-        _traj = pd.DataFrame({
-            "라운드": list(range(1, len(progress) + 1)),
-            "BBB 투과 점수": [round(p["best_bbb"] * 100) for p in progress],
-        })
-        _chart = (
-            alt.Chart(_traj)
-            .mark_line(point=True, color="#30405c")
-            .encode(
-                x=alt.X("라운드:O", title="라운드"),
-                y=alt.Y("BBB 투과 점수:Q", title="BBB 투과 점수",
-                        scale=alt.Scale(domain=[0, 100])),  # 0~100 고정, 음수 제거
-            )
-        )
-        st.altair_chart(_chart, use_container_width=True)
+    # ⚰️ "최적화 궤적" 차트는 ⚰️ **2026-11-18 (§82) 제거**.
+    # y축이 **BBB 투과 점수**이고 제목이 "**최적화** 궤적"이라, 화면이 "BBB 를 올리는 것이
+    # 최적화다"라고 말하고 있었다. 🔴 그런데 BBB 는 **순위 축이 아니다**(M6·M8 — 순위에서
+    # 완전히 제거, 2026-11-10). 바로 아래 '상위 후보' 캡션이 *"BBB 가 높아도 순위에 영향이
+    # 없습니다"* 라고 적는데 **그 위에 BBB 선 그래프가 있었다** — 같은 화면이 서로 반대로
+    # 말했다. 게다가 라운드가 진행되며 선이 **내려가는** 세션이 정상인데(순위 축을 고치면
+    # BBB 는 떨어질 수 있다) 그림은 '퇴행'으로 읽힌다.
+    # 🔴 `progress` 이벤트 자체는 **지우지 않는다** — `scripts/ablation_tools.py:177` 이
+    #    라운드 수를 세는 데 쓴다. 끊은 것은 **화면 경로뿐**이다.
     if podium:
         st.markdown("##### 상위 후보")
         _bl = _extract_baseline(events)
