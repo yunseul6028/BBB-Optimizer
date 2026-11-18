@@ -1,11 +1,10 @@
 """자율 설계 에이전트 — 공용 도구 백엔드 베이스.
 
-에이전트의 **실제 생물학 계산 도구**(evaluate/structure)를 담는 베이스 클래스.
+에이전트의 **실제 생물학 계산 도구**(evaluate/generate)를 담는 베이스 클래스.
 브레인(LLM) 루프는 `optimizer_agent_gemini.py`의 `GeminiOptimizationAgent`가 이 클래스를
 상속해 구현한다. (Claude 브레인 버전은 `with-claude` 브랜치에 보존 — main은 Gemini 전용.)
 
   - evaluate  : deepB3P(BBB) + ToxinPred3(독성) + 안정성 + 수용체유사 + 개발성(용해도·응집 포함) + 선택성 배치 채점
-  - structure : ESMFold 폴딩 → 셔틀 구조 노출도 (느림 ~10초, 최종 후보에만)
 
 셔틀은 **de-novo 생성하지 않는다**(검증 리간드만). 라이브러리 밖 탐색은 잔기 편집(design_candidate)으로
 수행하며, 개발성 다목적 최적화는 optimize_developability가 담당한다.
@@ -212,7 +211,7 @@ def rank_key(r: dict) -> tuple:
 
 @dataclass
 class AgentEvent:
-    kind: str  # reasoning|text|plan|evaluation|structure|generation|progress|choice|critique|final|optimum|error
+    kind: str  # reasoning|text|plan|evaluation|generation|progress|choice|critique|final|optimum|error
     text: str = ""
     data: dict = field(default_factory=dict)
 
@@ -345,19 +344,12 @@ class OptimizationAgent:
                   "같은 취급이다** — 후보는 근거 등급 A·B·C 의 RMT 중에서 고를 것."
                 + reject_note), rows
 
-    def _structure(self, cargo, tool_input):
-        from .structure import analyze_construct
-        lk = "".join(ch for ch in (tool_input.get("prefix", tool_input.get("linker", "")) or "").upper() if ch.isalpha())
-        sh = "".join(ch for ch in (tool_input.get("suffix", tool_input.get("shuttle", "")) or "").upper() if ch.isalpha())
-        sr = analyze_construct(cargo, lk, sh)
-        if sr.error:
-            return f"inspect failed: {sr.error}", {"error": sr.error}
-        text = (f"exposure={sr.shuttle_exposure} (>=0.35 = exposed), "
-                f"confidence(suffix/all)={sr.shuttle_plddt}/{sr.mean_plddt}. "
-                f"verdict: {'exposed' if sr.exposed else 'buried/low-confidence'}")
-        return text, {"linker": lk, "shuttle": sh, "exposure": sr.shuttle_exposure,
-                      "shuttle_plddt": sr.shuttle_plddt, "mean_plddt": sr.mean_plddt,
-                      "verdict": sr.verdict, "exposed": sr.exposed}
+    # ⚰️ `_structure`(ESMFold 구조 노출도 백엔드)는 **2026-11-18 (§79) 제거**했다.
+    # §11 애블레이션에서 에이전트 도구에서 빠진 뒤로 "최종 후보 1건 참고 보고"로만 남아
+    # 있었는데, 순위 축 4개·M1~M10 어디에도 쓰이지 않아 **있을 때와 없을 때가 구별되지
+    # 않았다**(실패 시 조용히 건너뛰었으므로). 공개 API 장애 위험만 남아 있었다.
+    # 🔴 `core/structure.py` 자체는 **지우지 않는다** — `scripts/ablation_axes.py` 가
+    #    §11(= 이 제거의 근거)을 재현하는 데 쓴다. 되살릴 때는 §11 을 먼저 다시 읽을 것.
 
 
     # ---- 도달 가능 집합 (심사자에게 줄 기준점) ---------------------------

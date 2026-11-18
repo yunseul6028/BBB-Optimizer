@@ -1,6 +1,6 @@
 """자율 설계 에이전트 — Gemini 브레인 (experiment/gemini 브랜치).
 
-Claude 버전(`optimizer_agent.py`)과 **동일한 도구 백엔드**(_evaluate/_structure/_generate)를
+Claude 버전(`optimizer_agent.py`)과 **동일한 도구 백엔드**(_evaluate/_generate)를
 재사용하되, 브레인을 Google Gemini(function calling)로 바꾼 실험 어댑터.
 
 핵심 실험 질문: **Anthropic 안전 분류기가 오탐 거부한 "BBB 통과 구조 최적화"를 Gemini는
@@ -232,13 +232,15 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 }, required=["label", "linker", "shuttle", "hypothesis", "prediction"]),
             ),
         ]
-        # analyze_structure(ESMFold 구조 노출도)는 **에이전트 도구에서 제거**했다.
+        # ⚰️ analyze_structure(ESMFold 구조 노출도)는 **에이전트 도구에서 제거**했다
+        # (그리고 2026-11-18 §79 에서 최종 보고 경로까지 제거해 **완전히 빠졌다**).
         # 근거(애블레이션 n=3, docs/experiments.md §11): 이 도구를 뺀 조건이 **자기 고유 축인
         # 셔틀 노출도에서조차 퇴행하지 않았다**(0.689 vs 대조군 0.693). 유효점수는 오히려 높았다
         # (0.577 vs 0.469). 즉 이 도구는 에이전트의 판단을 개선하지 않으면서 호출당 ~10초와
         # 공개 API 장애 위험만 추가하고 있었다. 점수 공식을 바꿔 쓸모를 만드는 대신 도구를 뺀다.
-        # 구조 근거 자체는 버리지 않고 **최종 후보 1건에만 best-effort로 접어 보고**한다
-        # (아래 run()의 구조 증거 단계) — 에이전트의 의사결정에는 들어가지 않는다.
+        # 🆕 §79: 옛 주석은 "구조 근거 자체는 버리지 않고 최종 후보 1건에 접어 보고한다"
+        # 였다. 그 보고 경로도 제거했다 — 순위 축·벤치마크 어디에도 쓰이지 않아
+        # **있을 때와 없을 때가 구별되지 않았다**.
         decls.append(types.FunctionDeclaration(
             name="optimize_developability",
             description=("한 셔틀 서열을 **순위 위험 4축**(liability·응집·불안정성·**off-target**)에서 "
@@ -1256,19 +1258,15 @@ class GeminiOptimizationAgent(OptimizationAgent):
                 final_pick["critic_approved"] = approve
                 final_pick["critic_tier"] = tier
                 final_pick["critic_llm_tier"] = llm_tier   # 🆕 (§77)
-                # ── 구조 증거(ESMFold) — **에이전트 판단 밖**, 최종 후보 1건 보고용 ──
-                # analyze_structure 를 도구에서 뺀 뒤에도 구조 근거 자체는 버리지 않는다.
-                # 다만 (a) 의사결정에 넣지 않고 (b) 1회만 접고 (c) 실패하면 조용히 건너뛴다.
-                # 공개 API 장애가 결과를 막지 못하게 하려는 것이다.
-                try:
-                    stext, sdata = self._structure(
-                        cargo, {"linker": final_pick.get("linker", ""),
-                                "shuttle": final_pick.get("shuttle", "")})
-                    if not (sdata or {}).get("error"):
-                        final_pick["structure"] = sdata
-                        yield AgentEvent("structure", text=stext, data=sdata)
-                except Exception:  # noqa: BLE001 — 구조는 참고 근거일 뿐, 실패해도 결과를 막지 않는다
-                    pass
+                # ⚰️ 구조 증거(ESMFold) 단계는 **2026-11-18 (§79) 제거**했다.
+                # §11 애블레이션에서 이 도구를 **에이전트 도구에서** 뺀 뒤에도 "참고 근거"로
+                # 최종 후보 1건에 접어 붙이고 있었다. 그런데 그 보고치는
+                #   · 순위 축 4개에 **들어가지 않고**(전선·front_top·판정과 무관)
+                #   · M1~M10 어디에도 **쓰이지 않으며**
+                #   · 실패하면 조용히 건너뛰므로 **있을 때와 없을 때가 구별되지 않았다**.
+                # 즉 공개 API(api.esmatlas.com) 장애 위험과 ~10초를 **아무 판정도 바꾸지 않고**
+                # 지불하고 있었다. 모듈(`core/structure.py`)은 **지우지 않는다** —
+                # `scripts/ablation_axes.py` 가 §11(제거의 근거) 재현에 쓴다.
                 yield AgentEvent("optimum", data=final_pick)
         except Exception as exc:  # noqa: BLE001
             # 🔴 역추적을 **stderr 로 반드시 남긴다**. 화면에는 한 줄 요약만 가는데,

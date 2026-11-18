@@ -23,7 +23,7 @@
 |---|---|---|
 | `evaluate_candidates` | deepB3P · ToxinPred3 · ProtParam · BLOSUM62 · 개발성 엔진 | 후보 배치의 5지표 |
 | `design_candidate` | 위 엔진 재사용 | 라이브러리 밖 **잔기 수준 편집** 서열 채점 |
-| `analyze_structure` | ESMFold(공개 API) · Biopython | 셔틀 표면 노출도 · pLDDT |
+| ~~`analyze_structure`~~ | ~~ESMFold(공개 API) · Biopython~~ | ⚰️ **2026-11-18 (§79) 제거** — §11 애블레이션에서 기여 없음, 순위·판정 미사용 |
 | `finish` | — | 수렴 시 최종 후보 제출(자기 종료) |
 
 ⚠️ **생성(FBGAN)·진화 도구는 없다.** 초기 설계에는 있었으나 폐지됐다 — 생성 루프가 deepB3P 의 양이온 편향을 착취해 '무지성 양전하' 서열을 뽑았고, 그 편향을 상쇄하려 넣은 전하 가드레일까지 함께 폐지됐다(BBB 축을 순위에서 제거한 결정의 일부). `기획서.md` §2.6 과 `docs/experiments.md` 참조.
@@ -35,7 +35,7 @@
 | **독성** | ToxinPred3(AAC+DPC 조성 → Extra-Tree ML)의 위험도(0~1), **전체 서열** 기준. **> 0.38 탈락** | ToxinPred3 기본 임계값 |
 | **안정성** | Biopython ProtParam **불안정성 지수(Guruprasad)**, **< 40 = 안정** 예측. 보조: 지방족 지수·GRAVY | 융합체 자체의 분해·응집 경향 |
 | **수용체 유사도** | 검증 셔틀(Angiopep-2=LRP1 RMT, TAT/Penetratin/SynB1=CPP)과 **BLOSUM62 정렬 유사도**(자기점수로 정규화, 0~1) | 수송 **메커니즘** 근거(친화도 아님) |
-| **구조 노출도** | ESMFold 폴딩 → Biopython Shrake-Rupley **SASA로 셔틀 영역 RSA**, pLDDT 신뢰도 동반 | 셔틀이 표면 노출(≥0.35)이면 수용체 접근 가능 |
+| ~~**구조 노출도**~~ | ⚰️ **2026-11-18 (§79) 제거** — ESMFold 폴딩 + SASA 였다. §11 에서 에이전트 도구에서, §79 에서 참고 보고 경로까지 제거 | 순위 축 4개·M1~M10 어디에도 쓰이지 않았다 |
 | **개발성(developability)** | 서열 규칙 기반 — **liability 모티프**(탈아마이드화 N[GST]·이성질화 D[GSTH]·N-당화 sequon·자유 Cys·산화 Met/Trp·프로테아제 절단부위 dibasic) + **응집 경향**(소수성/방향족 휴리스틱) + **pH 7.4 순전하·전하밀도**(양이온 과다=비특이 결합·독성·빠른 청소) → 위험 낮음/보통/높음 | "만들기 어렵다/불안정하다"를 실험 전 선별. TAP(항체 프로파일러)의 펩타이드판 |
 | **선택성 / off-target** | 셔틀의 **양전하 밀도 + 친유성(GRAVY) + 수송 메커니즘**(RMT vs CPP) 종합. 양전하·친유성↑(CPP형)=비특이 흡수 위험↑, **RMT 수용체 표적(Angiopep형)=선택적**이라 위험↓. off = (전하 OR 친유성)×(1−0.6·RMT유사) | CPP의 off-target 약점을 정량화. 검증: Angiopep-2 선택성 0.91, TAT 0.0 |
 
@@ -58,5 +58,5 @@
 
 ## 9. 기술 스택
 Python · Streamlit · Gemini/Claude(function calling) · Biopython · deepB3P(PyTorch) ·
-ToxinPred3(scikit-learn) · ESMFold API. **저분자 도구(RDKit 등) 미사용** — 펩타이드/단백질
+ToxinPred3(scikit-learn). **저분자 도구(RDKit 등) 미사용** — 펩타이드/단백질
 모달리티에 맞춰 서열·구조 기반 도구로 구성.

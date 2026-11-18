@@ -73,7 +73,7 @@ def _cargo_error(cargo):
 
 st.caption(
     f"엔진 — deepB3P {_dot(settings.use_deepb3p_local)} · "
-    f"ToxinPred3 {_dot(settings.use_toxinpred3_local)} · ESMFold 참고(최종 후보 1건) · "
+    f"ToxinPred3 {_dot(settings.use_toxinpred3_local)} · "
     f"Gemini {_dot(settings.use_gemini_agent)}"
     f"{'' if settings.use_gemini_agent else ' · 키 필요'}"
 )
@@ -87,8 +87,6 @@ with st.expander("동작 방식 · 지표 안내"):
         "- ⚠️ 하드 게이트는 **조성 필터 하나**뿐이고, 그것이 재는 것은 ToxinPred3 ML Score 입니다 — "
         "외부 라벨에서 특이도가 완전하지 않았으므로(임상·내인성 펩타이드 오탈락 관측) "
         "**'게이트 통과 = 무독성'으로 읽지 마세요**.\n"
-        "- ESMFold 구조 노출도는 **에이전트 도구가 아닙니다**(애블레이션에서 기여 없음) — "
-        "최종 후보 1건에만 참고 근거로 붙습니다.\n"
         "- `융합체 = 화물 + 링커 + 셔틀`"
     )
 
@@ -252,14 +250,12 @@ def _demo_agent_events(cargo):
 
     yield _Ev("plan", text=(
         "**전략** — 라이브러리의 셔틀·링커 조합을 전수 평가해 BBB 투과·독성·안정성·"
-        "수용체 결합을 함께 만족하는 융합체를 찾습니다. 최종 후보는 구조(ESMFold)로 참고 검증합니다."))
+        "수용체 결합을 함께 만족하는 융합체를 찾습니다."))
     yield _Ev("reasoning", text=(
         "화물이 짧아 셔틀의 표면 노출이 결합에 결정적입니다. 유연 링커(GS 계열)를 우선 검토합니다."))
     yield _Ev("evaluation", text="1차 후보 평가", data={"rows": rows})
     for i, b in enumerate([0.72, 0.85, 0.90, 0.94]):
         yield _Ev("progress", data={"best_bbb": b, "round": i + 1})
-    yield _Ev("structure", text="최종 후보에서 셔틀이 표면에 충분히 노출됩니다.",
-              data={"exposed": True})
     win = dict(r_win)
     win["agent_pick"] = True
     yield _Ev("choice", data=win)
@@ -322,10 +318,6 @@ def _emit_agent_event(ev):
                 }, _PASS_CELL),
                 width='stretch', hide_index=True,
             )
-    elif ev.kind == "structure":
-        d = ev.data
-        icon = "노출" if d.get("exposed") else "가림 우려"
-        st.markdown(f"**도구 — 구조 검증 (ESMFold)** · {icon} — {ev.text}")
     elif ev.kind == "error":
         st.error(ev.text)
 

@@ -176,9 +176,9 @@ BBB·독성·불안정성·수용체 유사도·개발성이 **항상 함께** �
 
 ![포디움 상세](docs/screenshots/06-podium.png)
 
-> ⚠️ **ESMFold 구조 화면은 뺐다.** 구조 노출도는 애블레이션에서 기여가 없어 **에이전트 도구에서
-> 제거**했고(최종 후보 1건에 best-effort 참고로만 붙는다), 이 세션에서는 공개 API 가 응답하지 않아
-> 그 참고 블록 자체가 생성되지 않았다. 옛 README 의 ④ 구조 검증 캡처는 **도구였던 시절의 화면**이다.
+> ⚰️ **2026-11-18 (§79) 제거**: **ESMFold 는 시스템에서 완전히 빠졌다.** 애블레이션(§11)에서 자기 고유 축인
+> 셔틀 노출도에서조차 기여가 없어(0.689 vs 0.693) 먼저 **에이전트 도구에서** 뺐고, 그 뒤 남아 있던
+> *"최종 후보 1건 참고 보고"* 경로까지 제거했다 — 순위 축 4개·M1~M10 어디에도 쓰이지 않아 **있을 때와 없을 때가 구별되지 않았다**. 옛 README 의 ④ 구조 검증 캡처는 **도구였던 시절의 화면**이다.
 
 ### 수정 전(옛 코드) 화면 — 같은 화물, 옛 결정 규칙
 
@@ -223,10 +223,9 @@ flowchart TB
   UI --> ORCH["② 오케스트레이션<br/>Designer–Critic 자율 에이전트"]
   ORCH --> TOOLS["③ 도구·엔진 (엔진 7종)"]
   TOOLS --> E1["deepB3P · BBB (보고치)"] & E2["ToxinPred3 · 독성 (게이트)"] & E3["ProtParam · 불안정성"] & E4["BLOSUM62 · 수용체·기전"]
-  TOOLS --> E5["개발성 (liability·응집 핫스팟)"] & E6["ESMFold+SASA · 구조 (참고)"] & E7["off-target(전하 기반)"]
+  TOOLS --> E5["개발성 (liability·응집 핫스팟)"] & E7["off-target(전하 기반)"]
   E1 --> DV["④ 격리 .venv-deepb3p (CPU)"]
   E2 --> TV["④ 격리 .venv-toxinpred3"]
-  E6 --> API["ESMFold 공개 API"]
   ORCH -->|finish| CR{"심사 Critic<br/>독립 컨텍스트"}
   CR -->|APPROVE| OUT["최종 융합체 · 상위 N 랭킹"]
   CR -->|REVISE| ORCH
@@ -423,7 +422,6 @@ python3 scripts/null_selectivity.py   # off 축의 대응 널 4종 (로컬, LLM 
 |---|---|---|
 | BBB 투과 (보고치) | [deepB3P](https://github.com/GreatChenLab/deepB3P) | 펩타이드 서열 딥러닝 5-fold (로컬 CPU) |
 | 독성 (하드 게이트) | [ToxinPred3](https://github.com/raghavagps/toxinpred3) | AAC+DPC → Extra-Trees (로컬, GPL-3.0) |
-| 구조 (참고 근거) | [ESMFold](https://esmatlas.com/) | 공개 API 폴딩 + Shrake-Rupley SASA |
 | 수용체·선택성·개발성 | Biopython + 규칙 엔진 | BLOSUM62 정렬 · 서열 규칙 · AGGRESCAN a3v (로컬) |
 | 브레인(추론) | **Google Gemini**(기본) | 자율 최적화 에이전트 (Claude는 `with-claude` 브랜치) |
 
@@ -436,13 +434,13 @@ python3 scripts/null_selectivity.py   # off 축의 대응 널 4종 (로컬, LLM 
 | `optimize_developability` | 셔틀 개발성 **3축** Pareto 최적화(liability·응집 핫스팟·불안정성). 제약은 셋 — `rmt_sim ≥ floor` · **문헌 보존 위치 동결** · **off 양측 밴드 ±0.05**(§26: 악화 금지, 개선도 보상 안 함). 전선을 **실제로 채점**해 running-best·래칫에 올린다 |
 | `finish` | 자기 종료 — 최종 후보 제출 |
 
-구조(ESMFold)는 **도구에서 제거**하고 최종 후보 1건의 참고 근거로만 남겼다 — 자기 축(셔틀 노출도)에서조차
+구조(ESMFold)는 **완전히 제거**했다(§11 → §79) — 자기 축(셔틀 노출도)에서조차
 기여가 없다는 애블레이션 결과(→ [docs/experiments.md](docs/experiments.md) §11)를 따랐다.
 같은 애블레이션에서 **`evaluate_candidates`가 임의 서열까지 채점해 설계 통로로 쓰이고 있었다**는 것도
 드러나, 평가(라이브러리 선택)와 설계(라이브러리 밖)를 **게이트로 분리**했다. 또 16세션 중 7세션이
 **이미 본 더 좋은 후보를 버리고 제출**(최대 −0.395)해, 심사자에 **래칫 게이트**를 추가했다.
 
-**자원 경량**: deepB3P·독성은 **CPU 완결**, 구조는 ESMFold **공개 API** → 프런티어 GPU 불필요.
+**자원 경량**: deepB3P·독성은 **CPU 완결** → 프런티어 GPU 불필요.
 
 ---
 
@@ -556,7 +554,7 @@ core/
   developability.py         개발성 liability·응집(AGGRESCAN a3v)·용해도·전하 + 접합부 모티프 검출
   developability_opt.py     개발성 liability 스크러빙 + 다목적(Pareto) 최적화 (**부모 유사도 하한** — 🔴 기능 보존 아님, §55)
   stability.py              ProtParam 불안정성
-  structure.py              ESMFold 구조 + 셔틀 노출도 (빠른 실패·캐싱)
+  structure.py              ⚰️ ESMFold 구조 + 셔틀 노출도 — **에이전트·화면 경로에서 제거**(§79).
   order_specificity.py      스크램블 대응 널 (M6 검증 전용 — 순위 게이트에서는 폐지)
 scripts/
   deepb3p/_run_predict.py   deepB3P venv에서 도는 BBB 러너 (설치 시 vendor/deepB3P/ 로 복사)
@@ -565,7 +563,7 @@ scripts/
   null_selectivity.py       off 축 대응 널 (라벨 분해·무작위 편집·셔플·해킹)
   scramble_delta.py         순서 특이성(스크램블 델타) 측정
   ablation_tools.py         도구 애블레이션 (ablation_axes.py · ablation_report.py)
-  prewarm_esmfold.py        발표용 ESMFold 구조 캐시 프리워밍
+  prewarm_esmfold.py        ⚰️ 옛 발표용 ESMFold 캐시 프리워밍 — 화면에서 빠져 **더는 쓰지 않는다**(§79)
 EVALUATION.md               평가 세트·지표 설계 원리·실측
 docs/experiments.md         전 실험 기록 (§1~§30 — 수치의 단일 출처)
 docs/protocol.md            대응 널(matched null) 프로토콜 — 검증 방법론의 규범 명세
