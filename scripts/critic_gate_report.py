@@ -40,11 +40,30 @@ def main() -> int:
     print(f"\n세션 {n}건  ({LOG})\n" + "=" * 74)
 
     # ── ⒜ 핵심 질문 — 재시도가 같은 칸에 다시 걸렸나 ──
-    retried = [r for r in rows if len([g for g in r["gate_log"] if g != "APPROVE"]) >= 2]
-    print(f"\n⒜ 🔴 핵심 — 재설계가 실제로 일어난 세션: {len(retried)}/{n}")
-    if not retried:
-        print("   재시도 자체가 없어 **아직 답할 수 없다**. (분모 0 — 어떤 결론도 내지 말 것)")
+    # 🔴 `gate_log` 길이만으로는 "재설계를 했는가"가 갈리지 않는다. `swapped_out` 이면
+    #    복구 교체 **뒤** 재심사가 1건 더 붙기 때문이다. 루프 안 심사 횟수 = 길이 − (교체면 1).
+    #    (옛 필터는 '게이트 발화 2회 이상'이라, **한 번 걸리고 재설계 후 통과**한 세션 —
+    #     가장 알고 싶은 사례 — 을 통째로 놓쳤다. 2026-11-18 수정.)
+    def loop_calls(r):
+        return len(r["gate_log"]) - (1 if r.get("swapped_out") else 0)
+
+    fired = [r for r in rows if any(g != "APPROVE" for g in r["gate_log"])]
+    retried = [r for r in rows if (r.get("critiques_used") or 0) >= 1 or loop_calls(r) >= 2]
+    print(f"\n⒜ 🔴 핵심 — 게이트가 쏜 세션: {len(fired)}/{n} · 그중 **재제출까지 간** 세션: "
+          f"{sum(1 for r in retried if loop_calls(r) >= 2)}/{len(fired) or 1}")
+    unused = [r for r in fired if loop_calls(r) < 2]
+    if unused:
+        print(f"   🔴 **재설계 기회를 주고도 다시 제출하지 않은 세션: {len(unused)}**")
+        print("      (루프 안 심사가 1회뿐 = REVISE 뒤 `finish` 를 다시 부르지 않고 예산을 태웠다)")
+        print("      → 이 경우 **예산을 늘려도 소용없다**. 쓰지 않는 기회를 더 주는 셈이다.")
+        for r in unused:
+            print(f"        · {r['ts']}  {r['gate_log']}  swap={r.get('swapped_out')}  {r['pick']}")
+    resub = [r for r in retried if loop_calls(r) >= 2]
+    if not resub:
+        print("\n   재제출이 한 번도 없어 **'같은 게이트냐 다른 게이트냐'는 아직 답할 수 없다**.")
+        print("   (분모 0 — 어떤 결론도 내지 말 것)")
     else:
+        retried = resub
         same = [r for r in retried if len(set(g for g in r["gate_log"] if g != "APPROVE")) == 1]
         print(f"   같은 게이트 반복 : {len(same)}/{len(retried)}  → 예산 문제가 **아니라는** 쪽")
         print(f"   다른 게이트로 이동: {len(retried)-len(same)}/{len(retried)}  → 예산이 도울 수 있다는 쪽")

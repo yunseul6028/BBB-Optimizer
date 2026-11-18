@@ -1307,6 +1307,11 @@ class GeminiOptimizationAgent(OptimizationAgent):
                             "cargo": cargo,
                             "model": getattr(self.settings, "gemini_model", "?"),
                             "max_critiques": MAX_CRITIQUES,
+                            # 🆕 (§81-2) 추론 없이 읽기 위해. gate_log 길이만으로는
+                            # "재설계를 했는가"가 안 갈린다 — swapped_out 이면 교체 후
+                            # 재심사가 1건 더 붙기 때문이다.
+                            "critiques_used": critiques,
+                            "rounds": turn,
                             "gate_log": list(gate_log),      # 재시도 포함 **발화 순서**
                             "gate_final": gate,
                             "tier": tier, "llm_tier": llm_tier,
