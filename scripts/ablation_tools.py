@@ -72,6 +72,9 @@ def oracle_baseline(agent, cargo: str, cache: Path) -> dict:
         "oracle_eff_label": (best_eff or {}).get("label"),
         "oracle_raw_bbb": (best_raw or {}).get("bbb", 0.0),
         "oracle_raw_label": (best_raw or {}).get("label"),
+        # 🆕 §11 재실행(2026-11-18): 현행 순위는 사전식+Pareto 라 스칼라가 없다.
+        #    유효점수(🚫 폐지)는 보조로만 남기고 **판정은 지배 관계**로 한다.
+        "rows": valid,
     }
     cache.write_text(json.dumps(out, ensure_ascii=False, indent=2))
     return out
@@ -192,6 +195,9 @@ def run_session(cargo: str, disabled: list[str], max_rounds: int, rep: int) -> d
                     "instability": d.get("instability"), "mechanism": d.get("mechanism"),
                     "dev_risk": d.get("dev_risk"), "sel_level": d.get("sel_level"),
                     "n_dev_liab": len(d.get("dev_liabilities") or []),
+                    # 🆕 현행 4축 판정에 필요한 원 필드
+                    "tier": d.get("tier"), "dev_liab": d.get("dev_liab"),
+                    "dev_agg_hot": d.get("dev_agg_hot"),
                 }
             elif ev.kind == "error":
                 rec["error"] = ev.text
@@ -340,26 +346,55 @@ def _summary(done, orc, spent):
     if not done:
         return
     print("\n" + "=" * 78)
-    print(f"{'config':10s} {'n':>2s} {'eff(평균)':>10s} {'%oracle':>8s} {'승인':>5s} "
-          f"{'라운드':>6s} {'평가':>5s} {'$':>8s}")
-    print("-" * 78)
-    by: dict[str, list] = {}
-    for r in done:
-        by.setdefault(r["config"], []).append(r)
-    for name, rs in by.items():
-        effs = [(r["final"] or {}).get("eff_bbb") for r in rs]
-        effs = [e for e in effs if e is not None]
-        avg = sum(effs) / len(effs) if effs else 0.0
-        ok = sum(1 for r in rs if r["approved"])
-        print(f"{name:10s} {len(rs):2d} {avg:10.4f} "
-              f"{(100 * avg / orc['oracle_eff'] if orc['oracle_eff'] else 0):7.1f}% "
-              f"{ok:d}/{len(rs):d} "
-              f"{sum(r['rounds_used'] for r in rs) / len(rs):6.1f} "
-              f"{sum(r['n_oracle_evals'] for r in rs) / len(rs):5.1f} "
-              f"{sum(r['cost_usd'] for r in rs):8.4f}")
-    print("-" * 78)
-    print(f"총 비용 ${spent:.4f}  (oracle 유효점수 {orc['oracle_eff']:.4f})")
+    from core.optimizer_agent import dominates, risk_axes, in_library
+    from core.evidence import group_rank
+    orows = orc.get("rows") or []
 
+    def verdict(fin):
+        """최종 후보를 **오라클 156 전수**에 맞대어 현행 잣대로 판정한다."""
+        if not fin: return None
+        dom = [r for r in orows if dominates(r, fin)]
+        return {"n_dom": len(dom), "front": len(dom) == 0,
+                "grp": group_rank(fin.get("tier")), "axes": risk_axes(fin)}
+
+    print(f"{'config':10s} {'완주':>5s} {'전선':>6s} {'지배자(중위)':>12s} "
+          f"{'최상위그룹':>10s} {'🔴lib밖':>8s} {'누수':>4s} {'승인':>6s} {'라운드':>6s} {'🚫eff':>7s}")
+    print("-" * 90)
+    for cfg in CONFIGS:
+        key = "+".join(sorted(CONFIGS[cfg])) or "full"   # 저장된 config 는 **차단 도구 목록**이다
+        rs = [r for r in done if r["config"] == key]
+        if not rs: continue
+        # 🔴 평균의 분모는 **완주 세션**이다. 오류로 죽은 반복(429 등)을 분모에 넣으면
+        #    rounds_used 가 0 으로 섞여 라운드·비용이 전부 낮게 나온다(§83-7 ⑴).
+        ok = [r for r in rs if r.get("final")]
+        if not ok: continue
+        vs = [verdict(r["final"]) for r in ok]
+        nd = sorted(v["n_dom"] for v in vs); mid = nd[len(nd)//2]
+        effs = [e for e in ((r["final"] or {}).get("eff_bbb") for r in ok) if e is not None]
+        # 🔴 `in_library` 열은 필수다 — 이 열이 없으면 "설정 간 차이 없음"만 보고
+        #    `finish` 누수(§83-5)를 놓친다. `finish` 는 `library_only=False` 로 채점하므로
+        #    `design_candidate` 를 꺼도 라이브러리 밖 서열을 제출할 수 있다.
+        outlib = sum(1 for r in ok
+                     if not in_library(r["final"].get("linker", ""), r["final"].get("shuttle", "")))
+        leak = sum(r.get("gate_rejections", 0) for r in ok)
+        print(f"{cfg:10s} {len(ok):2d}/{len(rs):<2d} {sum(v['front'] for v in vs):3d}/{len(vs):<2d} "
+              f"{mid:12d} {sum(v['grp']==0 for v in vs):7d}/{len(vs):<2d} "
+              f"{outlib:5d}/{len(ok):<2d} {leak:4d} "
+              f"{sum(1 for r in ok if r['approved']):3d}/{len(ok):<2d} "
+              f"{sum(r['rounds_used'] for r in ok)/len(ok):6.1f} "
+              f"{(sum(effs)/len(effs) if effs else 0):7.3f}")
+    print()
+    print("읽는 법 — '완주' = 최종 후보를 낸 세션 / 요청한 반복. **평균은 완주만의 분모**다.")
+    print("          '전선' = 오라클 전수 중 그 후보를 지배하는 조합이 0개인 세션 수.")
+    print("          '지배자' = 지배하는 조합 수의 중위값(작을수록 좋음).")
+    print("          🔴 'lib밖' = 제출이 `in_library()` 를 벗어난 세션 수. 0 이 아니면")
+    print("             그 설정은 **설계 차단 조건이 아니다** — `finish` 가 제약 없는")
+    print("             설계 통로다(§83-5). '누수' = `evaluate_candidates` 로 설계를")
+    print("             시도해 거절된 횟수(§11 에서 막은 옛 경로).")
+    print("          🔴 '최상위그룹' 은 **상속 하한 0.83 을 통과한** 수다 —")
+    print("             '문헌 근거가 확인된' 이 아니다(§55 단일 치환 검출률 0.0%).")
+    print("          🚫eff = 폐지된 유효점수. **인용 금지**, 옛 표와의 연결용으로만 둔다.")
+    print(f"총 비용 ${spent:.4f}  (오라클 전수 {orc['n_valid']}/{orc['n_combos']} 조성필터 통과)")
 
 if __name__ == "__main__":
     main()
